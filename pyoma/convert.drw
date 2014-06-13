@@ -1,0 +1,45 @@
+ddir := getenv('DARWIN_BROWSERDATA_PATH');
+
+GetGenomeData := proc()
+    ReadProgram(ddir.'/Summaries.drw'):
+    GS := GenomeSummaries:
+    gs := [];
+    for g in genomes do 
+        gs := append(gs, [GS[g,TAXONID], g, GS[g,TotEntries], 
+            GS[g,SCINAME], GS[g,DBRELEASE]]);
+    od:
+    
+    lin := []:
+    for g in genomes do 
+        linStr := GS[g,Lineage];
+        linNum := traperror(TaxonomyEntry(parse(GS[g,TAXONID]))['LineageIDs']);
+        if linNum=lasterror then
+            linNum := traperror(TaxonomyEntry(g)['LineageIDs']);
+            if linNum=lasterror then 
+                warning('cannot find out about '.g);
+            else
+                warning(g.' has changed from '.GS[g,TAXONID].' to '.linNum[-1]);
+            fi:
+        fi:
+        parent := 0; i := 1;
+        for i to length(linStr) do 
+            lin := append(lin, [linNum[i], parent, linStr[i]]);
+            parent := linNum[i];
+        od:
+        if length(lin)>10000 or g=genomes[-1] then 
+            lin := [op({op(lin)})] 
+        fi:
+    od:
+    
+    tab := table():
+    tab['GS'] := gs:
+    tab['Tax'] := lin:
+    StoreResults(json(tab));
+end:
+
+StoreResults := proc(res)
+    OpenWriting(outfn);
+    prints(res);
+    OpenWriting(previous);
+end:
+

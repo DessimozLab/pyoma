@@ -45,8 +45,9 @@ class GenomeTable(tables.IsDescription):
     NCBITaxonId = tables.UInt32Col(pos=0)
     UniProtSpeciesCode = tables.StringCol(5,pos=1)
     TotEntries = tables.UInt32Col(pos=2)
-    SciName = tables.StringCol(255,pos=3)
-    Release = tables.StringCol(255,pos=4)
+    TotAA = tables.UInt32Col(pos=3)
+    SciName = tables.StringCol(255,pos=4)
+    Release = tables.StringCol(255,pos=5)
 
 class TaxonomyTable(tables.IsDescription):
     NCBITaxonId = tables.UInt32Col(pos=0)
@@ -112,14 +113,16 @@ class DarwinExporter(object):
         self.h5.root._f_setattr('oma_version', version)
 
     def add_species_data(self):
-        data = callDarwinExport('GetGenomeData')
-        gstab = self.h5.create_table('/Genome', GenomeTable, expectedrows=len(data['gs']))
-        self._write_to_table(gstab, data['gs'])
+        data = callDarwinExport('GetGenomeData();')
+        gstab = self.h5.create_table('/', 'Genome', GenomeTable, 
+            expectedrows=len(data['GS']))
+        self._write_to_table(gstab, data['GS'])
         gstab.cols.NCBITaxonId.create_csindex(filters=self._compr)
         gstab.cols.UniProtSpeciesCode.create_csindex(filters=self._compr)
 
-        taxtab = self.h5.create_table('/Taxonomy', TaxonomyTable, expectedrows=len(data['lin']))
-        self._write_to_table(taxtab, data['lin'])
+        taxtab = self.h5.create_table('/', 'Taxonomy', TaxonomyTable, 
+            expectedrows=len(data['Tax']))
+        self._write_to_table(taxtab, data['Tax'])
         taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
 
     def _write_to_table(self, tab, data):

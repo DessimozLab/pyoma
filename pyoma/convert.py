@@ -6,6 +6,7 @@ import errno
 import json
 import time
 from . import common
+from . import locus_parser
 
 
 # definitions of the pytables formats
@@ -15,21 +16,29 @@ class HOGsTable(tables.IsDescription):
     Level = tables.StringCol(255)
 
 class ProteinTable(tables.IsDescription):
-    NCBITaxonId = tables.UInt32Col(pos=0)
     EntryNr = tables.UInt32Col(pos=1)
     SeqBufferOffset = tables.UInt32Col(pos=2)
     SeqBufferLength = tables.UInt32Col(pos=3)
     OmaGroup = tables.UInt32Col(pos=4,dflt=0)
-    OmaHOG = tables.StringCol(255,pos=5)
+    OmaHOG = tables.StringCol(255,pos=5,dflt='')
     Chromosome = tables.StringCol(255,pos=6)
-    Locus = tables.StringCol(255,pos=7)
+    LocusStart = tables.UInt32Col(pos=7)
+    LocusEnd = tables.UInt32Col(pos=8)
+    LocusStrand = tables.Int8Col(pos=9,dflt=1)
+    AltSpliceVariant = tables.Int32Col(pos=10,dflt=0)
+
+class LocusTable(tables.IsDescription):
+    EntryNr = tables.UInt32Col(pos=1)
+    Start = tables.UInt32Col(pos=2)
+    End = tables.UInt32Col(pos=3)
+    Strand = tables.Int8Col(pos=4)
 
 class VPairsTable(tables.IsDescription):
     EntryNr1 = tables.UInt32Col(pos=0)
     EntryNr2 = tables.UInt32Col(pos=1)
     RelType = tables.EnumCol(
-        tables.Enum(['1:1','1:m','n:1','n:m']),
-        '1:1', base='uint8', pos=2)
+        tables.Enum(['1:1','1:m','n:1','n:m','n/a']),
+        'n/a', base='uint8', pos=2)
 
 class XRefTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=0)
@@ -46,8 +55,9 @@ class GenomeTable(tables.IsDescription):
     UniProtSpeciesCode = tables.StringCol(5,pos=1)
     TotEntries = tables.UInt32Col(pos=2)
     TotAA = tables.UInt32Col(pos=3)
-    SciName = tables.StringCol(255,pos=4)
-    Release = tables.StringCol(255,pos=5)
+    EntryOff = tables.UInt32Col(pos=4)
+    SciName = tables.StringCol(255,pos=5)
+    Release = tables.StringCol(255,pos=6)
 
 class TaxonomyTable(tables.IsDescription):
     NCBITaxonId = tables.UInt32Col(pos=0)
@@ -97,6 +107,11 @@ def silentremove(filename):
             raise # re-raise exception if a different error occured
 
 
+
+class DataImportError(Exception):
+    pass
+
+
 class DarwinExporter(object):
     def __init__(self, path, logger=None):
         self.logger = logger if logger is not None else common.package_logger
@@ -104,7 +119,7 @@ class DarwinExporter(object):
             os.environ['DARWIN_BROWSERDATA_PATH'],
             path))
         self._compr = tables.Filters(complevel=6,complib='zlib', fletcher32=True)
-        self.h5 = tables.open_file(fn, mode='w', filters=self._compr)
+        self.h5 = tables.open_file(fn, mode='a', filters=self._compr)
         self.logger.info("start writing to %s, options %s"%(fn, str(self._compr)))
         self.h5.root._f_setattr('convertion_start', time.strftime("%c"))
 
@@ -119,11 +134,109 @@ class DarwinExporter(object):
         self._write_to_table(gstab, data['GS'])
         gstab.cols.NCBITaxonId.create_csindex(filters=self._compr)
         gstab.cols.UniProtSpeciesCode.create_csindex(filters=self._compr)
+        gstab.cols.EntryOff.create_csindex(filters=self._compr)
 
         taxtab = self.h5.create_table('/', 'Taxonomy', TaxonomyTable, 
             expectedrows=len(data['Tax']))
         self._write_to_table(taxtab, data['Tax'])
         taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
+
+    def add_orthologs(self):
+        try:
+            vpGrp = self.h5.get_node('/VPairs')
+        except tables.NoSuchNodeError:
+            vpGrp = self.h5.create_group('/','VPairs',title='Pairwise Orthologs')
+
+        for genome in self.h5.get_node('/Genome').cols.UniProtSpeciesCode:
+            if not '/%s'%(genome) in self.h5:
+                cache_file = os.path.join(
+                    os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
+                    'pyoma','vps','%s.json'%(genome))
+                if os.path.exists(cache_file):
+                    with open(cache_file, 'r') as fd:
+                        data = json.load(fd)
+                else:
+                    data = callDarwinExport('GetVPsForGenome(%s)'%(genome))
+
+                vpTab = self.h5.create_table(vpGrp, genome, VPairsTable,
+                    expectedrows=len(data))
+                enum = vpTab.get_enum('RelType')
+                for row in data:
+                    row[2] = enum[row[2]]
+
+                self._write_to_table(vpTab, data)
+
+
+    def add_proteins(self):
+        gsNode = self.h5.get_node('/Genome')
+        nrProt = sum(gsNode.cols.TotEntries)
+        nrAA = sum(gsNode.cols.TotAA)
+        try:
+            protGrp = self.h5.get_node('/Protein')
+        except tables.NoSuchNodeError:
+            protGrp = self.h5.create_group('/','Protein')
+        protTab = self.h5.create_table(protGrp, 'Entries', ProteinTable,
+            expectedrows=nrProt)
+        seqArr = self.h5.create_earray(protGrp,'SequenceBuffer', 
+            tables.StringAtom(1),(0,),'concatenated protein sequences',
+            expectedrows=nrAA+nrProt)
+
+        seqOff = 0
+        for gs in gsNode.iterrows():
+            genome = gs['UniProtSpeciesCode']
+            cache_file = os.path.join(
+                os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
+                'pyoma','prots','%s.json'%(genome))
+            if os.path.exists(cache_file):
+                with open(cache_file,'r') as fd:
+                    data = json.load(fd)
+            else:
+                data = callDarwinExport('GetProteinsForGenome(%s)'%(genome))
+
+            if len(data['seqs']) != gs['TotEntries']:
+                raise DataImportError('number of entries (%d) does '
+                    'not match number of seqs (%d) for %s'%
+                    (len(data['seqs']), gs['TotEntries'], genome))
+
+            locTab = self.h5.create_table('/Protein/Locus', 
+                genome, LocusTable, createparents=True, 
+                expectedrows=gs['TotEntries']*4)
+
+            for nr in range(gs['TotEntries']):
+                eNr = data['off']+nr+1
+                protTab.row['EntryNr'] = eNr 
+                protTab.row['OmaGroup'] = data['ogs'][nr]
+                # add ' ' after each sequence (Ascii is smaller than 
+                # any AA, allows to build PAT array with split between 
+                # sequences.
+                seqLen = len(data['seqs'][nr])+1
+                protTab.row['SeqBufferOffset'] = seqOff
+                protTab.row['SeqBufferLength'] = seqLen
+                seqArr.append(numpy.ndarray((seqLen,), 
+                    buffer=data['seqs'][nr]+" ", 
+                    dtype=tables.StringAtom(1)))
+                seqOff += seqLen
+                protTab.row['Chromosome'] = data['chrs'][nr]
+                protTab.row['AltSpliceVariant'] = data['alts'][nr]
+
+                locus_str = data['locs'][nr]
+                try:
+                    locus_tab = locus_parser.parse(eNr, locus_str)
+                    locTab.append(locus_tab)
+
+                    protTab.row['LocusStart'] = locus_tab.Start.min()
+                    protTab.row['LocusEnd'] = locus_tab.End.max()
+                    protTab.row['LocusStrand'] = locus_tab[0].Strand
+                except ValueError as e:
+                    self.logger.warning(e)
+                protTab.row.append()
+            protTab.flush()
+            seqArr.flush()
+            for n in (protTab, seqArr, locTab):
+                self.logger.info('worte %s: compression ratio %3f%%'%
+                    (n._v_pathname, 100*n.size_on_disk/n.size_in_memory))
+        protTab.cols.EntryNr.create_csindex(filters=self._compr)
+
 
     def _write_to_table(self, tab, data):
         tab.append(data)
@@ -154,5 +267,7 @@ def main(name="OmaServer.h5"):
     x=DarwinExporter(name, logger=log)
     x.add_version()
     x.add_species_data()
+    x.add_orthologs()
+    x.add_proteins()
     x.close()
 

@@ -1,12 +1,16 @@
 ddir := getenv('DARWIN_BROWSERDATA_PATH');
+ReadProgram(ddir.'/Summaries.drw'):
+GS := GenomeSummaries:
+NS := length(genomes):
+Goff := CreateArray(1..NS+1):
+for i to NS do Goff[i+1] := Goff[i]+GS[genomes[i],TotEntries] od:
 
 GetGenomeData := proc()
-    ReadProgram(ddir.'/Summaries.drw'):
-    GS := GenomeSummaries:
     gs := [];
-    for g in genomes do 
+    for gNr to NS do 
+        g := genomes[gNr];
         gs := append(gs, [parse(GS[g,TAXONID]), g, GS[g,TotEntries], 
-            GS[g,TotAA], GS[g,SCINAME], GS[g,DBRELEASE]]);
+            GS[g,TotAA], Goff[gNr], GS[g,SCINAME], GS[g,DBRELEASE]]);
     od:
     
     lin := []:
@@ -31,7 +35,7 @@ GetGenomeData := proc()
                 if t=lasterror then 
                     if i=length(idx) then linNum[i] := parse(GS[g,TAXONID]);
                     else warning('cannot find '.linStr[i]); fi:
-                else linNum[i]=t fi;
+                else linNum[i] :=t fi;
                 print(linNum,'');
             od:
         fi:
@@ -51,6 +55,63 @@ GetGenomeData := proc()
     tab['Tax'] := lin:
     StoreResults(json(tab));
 end:
+
+GetVPsForGenome := proc(g)
+    global DB;
+    ReadDb(ddir.'/ServerVPs.db');
+    gNr := SearchArray(g,genomes);
+    vptab := []:
+    for i from Goff[gNr]+1 to Goff[gNr+1] do
+        for vp in parse(SearchTag('VP',Entry(i))) do
+            vptab := append(vptab, [i, vp, 'n/a'])
+        od:
+    od:
+    StoreResults(json(vptab)):
+end:
+
+GetProteinsForGenome := proc(g)
+    global DB, Splicings;
+    if not type(Splicings, table) then ReadProgram(ddir.'/Splicings.drw'); fi:
+    SeqDb := ReadDb(ddir.'/ServerSeqs.db');
+    tab:= table():
+    gNr := SearchArray(g, genomes);
+    tab['seqs'] := [seq(Sequence(Entry(Goff[gNr]+i)),i=1..GS[g,TotEntries])]:
+    tab['off'] := Goff[gNr]:
+    IndDb := ReadDb(ddir.'/ServerIndexed.db');
+    tab['ogs'] := [seq(parse(SearchTag('OG',Entry(Goff[gNr]+i))), i=1..GS[g,TotEntries])]:
+    tab['chrs'] := [seq(SearchTag('CHR',Entry(Goff[gNr]+i)), i=1..GS[g,TotEntries])];
+    tab['locs'] := [seq(SearchTag('LOC',Entry(Goff[gNr]+i)), i=1..GS[g,TotEntries])];
+    sp := Splicings[g]:
+    alt := CreateArray(1..GS[g,TotEntries]):
+    if sp<>0 then 
+        VPsDB := ReadDb(ddir.'/ServerVPs.db');
+        hasO := [seq(evalb(SearchTag('VP',Entry(Goff[gNr]+i))<>'[]'),
+                     i=1..GS[g,TotEntries])]:
+        for i to GS[g,TotEntries] do 
+            if alt[i]=0 and length(sp[i])>0 then 
+                vari := [op({op(sp[i]),i})];
+                varHasO := [seq(hasO[i],i=vari)];
+                main := SearchAllArray(true, varHasO);
+                if length(main)=0 then
+                    main := vari[1]+Goff[gNr];
+                else
+                    if length(main)>1 then 
+                        warning('more than one main variant for '.g.string(vari));
+                    fi:
+                    main := vari[main[1]]+Goff[gNr];
+                fi;
+                for k to length(vari) do 
+                    alt[vari[k]] := main;
+                od:
+            fi:
+        od: 
+    fi:
+
+    tab['alts'] := alt;
+    StoreResults(json(tab)):
+end:
+
+
 
 StoreResults := proc(res)
     OpenWriting(outfn);

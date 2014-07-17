@@ -118,9 +118,11 @@ class DarwinExporter(object):
         fn = os.path.normpath(os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'],
             path))
+        mode = 'append' if os.path.exist(fn) else 'write'
         self._compr = tables.Filters(complevel=6,complib='zlib', fletcher32=True)
-        self.h5 = tables.open_file(fn, mode='a', filters=self._compr)
-        self.logger.info("start writing to %s, options %s"%(fn, str(self._compr)))
+        self.h5 = tables.open_file(fn, mode=mode[0], filters=self._compr)
+        self.logger.info("opened %s in %s mode, options %s"%(
+            fn, mode, str(self._compr)))
         self.h5.root._f_setattr('convertion_start', time.strftime("%c"))
 
     def add_version(self):

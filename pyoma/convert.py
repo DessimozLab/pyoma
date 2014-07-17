@@ -5,6 +5,8 @@ import subprocess
 import errno
 import json
 import time
+import familyanalyzer
+import re
 from . import common
 from . import locus_parser
 
@@ -12,8 +14,9 @@ from . import locus_parser
 # definitions of the pytables formats
 
 class HOGsTable(tables.IsDescription):
-    ID = tables.StringCol(255)
-    Level = tables.StringCol(255)
+    Fam = tables.Int32Col(pos=1)
+    ID = tables.StringCol(255,pos=2)
+    Level = tables.StringCol(255,pos=3)
 
 class ProteinTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
@@ -126,6 +129,7 @@ class DarwinExporter(object):
         self.h5.root._f_setattr('convertion_start', time.strftime("%c"))
 
     def add_version(self):
+        # FIXME: proper implementation of version
         version = 'Mar 2014'
         self.h5.root._f_setattr('oma_version', version)
 
@@ -245,10 +249,75 @@ class DarwinExporter(object):
         self.logger.info('wrote %s : compression ratio %.3f%%'%
                 (tab._v_pathname, 100*tab.size_on_disk/tab.size_in_memory))
 
+    def add_hogs(self):
+        hog_path = os.path.normpath(os.path.join(
+            os.environ['DARWIN_BROWSERDATA_PATH'],
+            '..','downloads','hogs'))
+        hogTab = self.h5.create_table('/', 'HogLevel', HOGsTable, 
+            'nesting structure for each HOG', expectedrows=1e8)
+        entryTab = self.h5.get_node('/Protein/Entries')
+        tree_filename = os.path.join(
+                os.environ['DARWIN_BROWSERDATA_PATH'],
+                'speciestree.nwk')
+        hog_converter = HogConverter(self.h5.get_node('/Protein/Entries'))
+        hog_converter.attach_newick_taxonomy(tree_filename)
+        for root, dirs, filenames in os.walk(hog_path):
+            for fn in filenames:
+                levels, members = hog_converter.convert_file(os.join(root,fn))
+                hogTab.append(levels)
+        hog_converter.write_hogs()
+        hogTab.flush()
+        
+
+
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("c"))
         self.h5.close()
         self.logger.info('closed %s'%(self.h5.filename))
+
+
+class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
+    def _annotateGroupR(self, node, og, idx=0):
+        if familyanalyzer.OrthoXMLQuery.is_geneRef_node(node):
+            node.set('og', og)
+        else:
+            super()._annotateGroupR(node, og, idx)
+
+
+class HogConverter(object):
+    def __init__(self, entry_tab):
+        self.fam_re = re.compile(r'HOG:(?P<fam_nr>\d+)')
+        self.hogs = numpy.chararray(shape=(len(entry_tab)+1,), itemsize=255)
+        self.hogs[:] = ''
+        self.entry_tab = entry_tab
+
+    def attach_newick_taxonomy(self, tree):
+        self.taxonomy = familyanalyzer.NewickTaxonomy(tree)
+    
+    def convert_file(self, fn):
+        p = familyanalyzer.OrthoXMLParser(fn)
+        if self.taxonomy:
+            p.augmentTaxonomy(self.taxonomy)
+        GroupAnnotatorInclGeneRefs(p).annotateDoc()
+
+        levs = []
+        for fam in p.getToplevelGroups():
+            m = self.fam_re.match(fam.get('og'))
+            fam_nr = int(m.group('fam_nr'))
+            levs.extend([(fam_nr, n.getparent().get('og'),n.get('value'),) 
+                for n in p._findSubNodes('property')
+                    if n.get('name')=="TaxRange"])
+
+        geneNodes = p.root.findall('.//{{{ns0}}}geneRef'.
+              format(**familyanalyzer.OrthoXMLParser.ns))
+        for x in geneNodes:
+            self.hogs[int(x.get('id'))] = x.get('og')
+
+        return levs
+
+    def write_hogs(self):
+        self.entry_tab.modify_column(0,len(self.entry_tab),1, self.hogs[1:], 'OmaHOG') 
+        self.entry_tab.flush()
 
 
 

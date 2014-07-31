@@ -253,24 +253,26 @@ class DarwinExporter(object):
     def add_hogs(self):
         hog_path = os.path.normpath(os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'],
-            '..','downloads','hogs'))
-        hogTab = self.h5.create_table('/', 'HogLevel', HOGsTable, 
-            'nesting structure for each HOG', expectedrows=1e8)
+            '..','downloads','HOGs'))
         entryTab = self.h5.get_node('/Protein/Entries')
         tree_filename = os.path.join(
                 os.environ['DARWIN_BROWSERDATA_PATH'],
                 'speciestree.nwk')
-        hog_converter = HogConverter(self.h5.get_node('/Protein/Entries'))
+        hog_converter = HogConverter(entryTab)
         hog_converter.attach_newick_taxonomy(tree_filename)
+        hogTab = self.h5.create_table('/', 'HogLevel', HOGsTable, 
+            'nesting structure for each HOG', expectedrows=1e8)
         for root, dirs, filenames in os.walk(hog_path):
             for fn in filenames:
-                levels, members = hog_converter.convert_file(os.join(root,fn))
+                levels = hog_converter.convert_file(os.path.join(root,fn))
                 hogTab.append(levels)
         hog_converter.write_hogs()
         hogTab.flush()
+        self.logger.info('createing indexes for HOGs')
+        hogTab.cols.Fam.create_index()
+        hogTab.cols.ID.create_index()
+        entryTab.cols.OmaHOG.create_csindex()
         
-
-
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("c"))
         self.h5.close()
@@ -298,7 +300,7 @@ class HogConverter(object):
     def convert_file(self, fn):
         p = familyanalyzer.OrthoXMLParser(fn)
         if self.taxonomy:
-            p.augmentTaxonomy(self.taxonomy)
+            p.augmentTaxonomyInfo(self.taxonomy)
         GroupAnnotatorInclGeneRefs(p).annotateDoc()
 
         levs = []
@@ -341,5 +343,6 @@ def main(name="OmaServer.h5"):
     x.add_species_data()
     x.add_orthologs()
     x.add_proteins()
+    x.add_hogs()
     x.close()
 

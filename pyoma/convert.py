@@ -121,7 +121,7 @@ class DarwinExporter(object):
         fn = os.path.normpath(os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'],
             path))
-        mode = 'append' if os.path.exist(fn) else 'write'
+        mode = 'append' if os.path.exists(fn) else 'write'
         self._compr = tables.Filters(complevel=6,complib='zlib', fletcher32=True)
         self.h5 = tables.open_file(fn, mode=mode[0], filters=self._compr)
         self.logger.info("opened %s in %s mode, options %s"%(
@@ -218,9 +218,10 @@ class DarwinExporter(object):
                 seqLen = len(data['seqs'][nr])+1
                 protTab.row['SeqBufferOffset'] = seqOff
                 protTab.row['SeqBufferLength'] = seqLen
-                seqArr.append(numpy.ndarray((seqLen,), 
-                    buffer=data['seqs'][nr]+" ", 
-                    dtype=tables.StringAtom(1)))
+                seqNumpyObj = numpy.ndarray((seqLen,), 
+                    buffer=(data['seqs'][nr]+" ").encode('utf-8'),
+                    dtype=tables.StringAtom(1))
+                seqArr.append(seqNumpyObj)
                 seqOff += seqLen
                 protTab.row['Chromosome'] = data['chrs'][nr]
                 protTab.row['AltSpliceVariant'] = data['alts'][nr]

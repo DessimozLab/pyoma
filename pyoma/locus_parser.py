@@ -1,3 +1,4 @@
+from future.builtins import str
 import numpy
 import re
 import tables

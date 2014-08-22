@@ -1,5 +1,11 @@
+from __future__ import division
+from future.builtins import str
+from future.builtins import chr
+from future.builtins import range
+from future.builtins import object
 import tables
 import numpy
+import numpy.lib.recfunctions
 import os
 import subprocess
 import errno
@@ -7,6 +13,7 @@ import json
 import time
 import familyanalyzer
 import re
+import multiprocessing as mp
 from . import common
 from . import locus_parser
 
@@ -40,7 +47,7 @@ class VPairsTable(tables.IsDescription):
     EntryNr1 = tables.UInt32Col(pos=0)
     EntryNr2 = tables.UInt32Col(pos=1)
     RelType = tables.EnumCol(
-        tables.Enum(['1:1','1:m','n:1','n:m','n/a']),
+        tables.Enum(['1:1','1:n','m:1','m:n','n/a']),
         'n/a', base='uint8', pos=2)
 
 class XRefTable(tables.IsDescription):
@@ -86,12 +93,13 @@ def callDarwinExport(func):
         with open(os.devnull,'w') as DEVNULL:
             p = subprocess.Popen(['darwin','-q','-E','-B'], stdin=subprocess.PIPE,
                 stderr=subprocess.PIPE, stdout=DEVNULL)
-            p.communicate(input="outfn := '%s': ReadProgram('%s'): %s; done;"
-                %(tmpfile,drwCodeFn,func));
+            drwCmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
+                tmpfile, drwCodeFn, func).encode('utf-8')
+            p.communicate(input=drwCmd)
             if p.returncode>0:
                 raise DarwinException( p.stderr.read() )
 
-        trans_tab = "".join(str(unichr(x)) for x in xrange(128))+" "*128
+        trans_tab = "".join(str(chr(x)) for x in range(128))+" "*128
         with open(tmpfile,'r') as jsonData:
             rawdata = jsonData.read()
             data = json.loads(rawdata.translate(trans_tab));
@@ -109,6 +117,35 @@ def silentremove(filename):
         if e.errno != errno.ENOENT: # errno.ENOENT = no such file or directory
             raise # re-raise exception if a different error occured
 
+
+def load_tsv_to_numpy(args):
+    fn, off1, off2 = args
+    return numpy.genfromtxt(fn, dtype=['i8','i8','S3'], 
+            delimiter='\t',
+            usecols=(0,1,3),
+            converters={0: lambda nr: int(nr)+off1,
+                        1: lambda nr: int(nr)+off2})
+
+def read_vps_from_tsv(gs, ref_genome):
+    ref_genome_idx = gs.get_where_list('(UniProtSpeciesCode=={})'.
+            format(ref_genome))[0]
+    jobsArgs = [] 
+    for g in range(len(gs)):
+        if g==ref_genome_idx:
+            continue
+        g1, g2 = sorted((g, ref_genome_idx,))
+        off1, off2 = gs.read_coordinates(numpy.array((g1,g2)), 'EntryOff')
+        fn = os.path.join(os.environ['DARWIN_OMADATA_PATH'],'Phase4',
+                gs.cols.UniProtSpeciesCode[g1].decode(), 
+                gs.cols.UniProtSpeciesCode[g2].decode()+".ext.orth.txt.gz")
+        jobsArgs.append((fn, off1, off2))
+
+    allPairs = []
+    pool = mp.Pool()
+    allPairs = pool.map(load_tsv_to_numpy, jobsArgs)
+
+    return numpy.lib.recfunctions.stack_arrays(allPairs, usemask=False) 
+    
 
 
 class DataImportError(Exception):
@@ -134,7 +171,14 @@ class DarwinExporter(object):
         self.h5.root._f_setattr('oma_version', version)
 
     def add_species_data(self):
-        data = callDarwinExport('GetGenomeData();')
+        cache_file = os.path.join(
+            os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
+            'pyoma','gs.json')
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as fd:
+                data = json.load(fd)
+        else:
+            data = callDarwinExport('GetGenomeData();')
         gstab = self.h5.create_table('/', 'Genome', GenomeTable, 
             expectedrows=len(data['GS']))
         self._write_to_table(gstab, data['GS'])
@@ -153,16 +197,23 @@ class DarwinExporter(object):
         except tables.NoSuchNodeError:
             vpGrp = self.h5.create_group('/','VPairs',title='Pairwise Orthologs')
 
-        for genome in self.h5.get_node('/Genome').cols.UniProtSpeciesCode:
-            if not '/%s'%(genome) in self.h5:
+        for gs in self.h5.root.Genome.iterrows():
+            genome = gs['UniProtSpeciesCode'].decode()
+            if not '/'+genome in self.h5:
                 cache_file = os.path.join(
                     os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
-                    'pyoma','vps','%s.json'%(genome))
+                    'pyoma','vps','{}.json'.format(genome))
                 if os.path.exists(cache_file):
                     with open(cache_file, 'r') as fd:
                         data = json.load(fd)
+                elif not os.getenv('DARWIN_OMADATA_PATH') is None:
+                    # try to read from Phase4 in parallel.
+                    data = read_vps_from_tsv(self.h5.root.Genome, 
+                                             genome.encode('utf-8'))
                 else:
-                    data = callDarwinExport('GetVPsForGenome(%s)'%(genome))
+                    # fallback to read from VPsDB
+                    data = callDarwinExport('GetVPsForGenome({})'.
+                            format(genome))
 
                 vpTab = self.h5.create_table(vpGrp, genome, VPairsTable,
                     expectedrows=len(data))
@@ -189,10 +240,10 @@ class DarwinExporter(object):
 
         seqOff = 0
         for gs in gsNode.iterrows():
-            genome = gs['UniProtSpeciesCode']
+            genome = gs['UniProtSpeciesCode'].decode()
             cache_file = os.path.join(
                 os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
-                'pyoma','prots','%s.json'%(genome))
+                'pyoma','prots','{}.json'.format(genome))
             if os.path.exists(cache_file):
                 with open(cache_file,'r') as fd:
                     data = json.load(fd)

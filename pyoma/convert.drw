@@ -62,46 +62,10 @@ GetGenomeData := proc()
     _parents := []: _next_new_taxid := -1:
     linData := sort([seq([GS[g,Lineage], g], g=genomes)]):
     SpeciesTreeR(linData, 1, 0);
-
-    for g in genomes do 
-        linStr := GS[g,Lineage]; 
-        linNum := traperror(TaxonomyEntry(parse(GS[g,TAXONID]))['LineageIDs']);
-        if linNum=lasterror then
-            linNum := traperror(TaxonomyEntry(g)['LineageIDs']);
-            if linNum=lasterror then 
-                warning('cannot find out about '.g);
-            else
-                warning(g.' has changed from '.GS[g,TAXONID].' to '.linNum[-1]);
-            fi:
-        fi:
-        if length(linStr)<>length(linNum) then
-            linStrTax := TaxonomyEntry(linNum[-1])['Lineage'];
-            idx := [seq(SearchArray(z, linStrTax), z=linStr)];
-            linNum := [seq(If(z>0, linNum[z], -1), z=idx)];
-            for i in SearchAllArray(0,idx) do
-                print(linStr, linStrTax, idx, linNum); 
-                t := traperror(TaxonomyEntry(linStr[i])['id']);
-                if t=lasterror then 
-                    if i=length(idx) then linNum[i] := parse(GS[g,TAXONID]);
-                    else warning('cannot find '.linStr[i]); fi:
-                else linNum[i] :=t fi;
-                print(linNum,'');
-            od:
-        fi:
-        
-        parent := 0; i := 1;
-        for i to length(linStr) do 
-            lin := append(lin, [linNum[i], parent, linStr[i]]);
-            parent := linNum[i];
-        od:
-        if length(lin)>10000 or g=genomes[-1] then 
-            lin := [op({op(lin)})] 
-        fi:
-    od:
     
     tab := table():
     tab['GS'] := gs:
-    tab['Tax'] := lin:
+    tab['Tax'] := _parents:
     StoreResults(json(tab));
 end:
 

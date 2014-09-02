@@ -143,7 +143,8 @@ def load_tsv_to_numpy(args):
 
     ret_cols = ['EntryNr1','EntryNr2','RelType']
     if swap:
-        ret_cols = [ret_cols[z] for z in (1,0,2)]
+        reversed_cols = tuple(augData.dtype.names[z] for z in (1,0,2,3))
+        augData.dtype.names = reversed_cols
     return augData[ret_cols]
 
 def read_vps_from_tsv(gs, ref_genome):

@@ -117,14 +117,34 @@ def silentremove(filename):
         if e.errno != errno.ENOENT: # errno.ENOENT = no such file or directory
             raise # re-raise exception if a different error occured
 
-
 def load_tsv_to_numpy(args):
-    fn, off1, off2 = args
-    return numpy.genfromtxt(fn, dtype=['i8','i8','S3'], 
-            delimiter='\t',
-            usecols=(0,1,3),
-            converters={0: lambda nr: int(nr)+off1,
-                        1: lambda nr: int(nr)+off2})
+    fn, off1, off2, swap = args
+    relEnum = VPairsTable.columns['RelType'].enum._names
+    relEnum['n:1'] = relEnum['m:1']
+    relEnum['1:m'] = relEnum['1:n']
+    relEnum['n:m'] = relEnum['m:n']
+    read_dir = -1 if swap else 1
+    dtype = [('EntryNr1','i4'),('EntryNr2','i4'),('Score','i4'),('RelType','i1')]
+    for curNr, curFn in enumerate([fn, fn.replace('.ext.','.')]):
+        try:
+            augData = numpy.genfromtxt(curFn, dtype=dtype,
+                names=[_[0] for _ in dtype],
+                delimiter='\t',
+                usecols=(0,1,2,3),
+                converters={'EntryNr1': lambda nr: int(nr)+off1,
+                        'EntryNr2': lambda nr: int(nr)+off2,
+                        'RelType': lambda rel: relEnum[rel[::read_dir].decode()]})
+            break;
+        except OSError as e:
+            if curNr<1:
+                pass
+            else:
+                raise e
+
+    ret_cols = ['EntryNr1','EntryNr2','RelType']
+    if swap:
+        ret_cols = [ret_cols[z] for z in (1,0,2)]
+    return augData[ret_cols]
 
 def read_vps_from_tsv(gs, ref_genome):
     ref_genome_idx = gs.get_where_list('(UniProtSpeciesCode=={})'.
@@ -138,11 +158,11 @@ def read_vps_from_tsv(gs, ref_genome):
         fn = os.path.join(os.environ['DARWIN_OMADATA_PATH'],'Phase4',
                 gs.cols.UniProtSpeciesCode[g1].decode(), 
                 gs.cols.UniProtSpeciesCode[g2].decode()+".ext.orth.txt.gz")
-        jobsArgs.append((fn, off1, off2))
+        jobsArgs.append((fn, off1, off2, g1!=ref_genome_idx))
 
-    allPairs = []
     pool = mp.Pool()
     allPairs = pool.map(load_tsv_to_numpy, jobsArgs)
+    pool.close()
 
     return numpy.lib.recfunctions.stack_arrays(allPairs, usemask=False) 
     
@@ -167,7 +187,7 @@ class DarwinExporter(object):
 
     def add_version(self):
         # FIXME: proper implementation of version
-        version = 'Mar 2014'
+        version = 'Sep 2014'
         self.h5.root._f_setattr('oma_version', version)
 
     def add_species_data(self):
@@ -215,11 +235,13 @@ class DarwinExporter(object):
                     data = callDarwinExport('GetVPsForGenome({})'.
                             format(genome))
 
+                self.logger.debug(data[1])
                 vpTab = self.h5.create_table(vpGrp, genome, VPairsTable,
                     expectedrows=len(data))
-                enum = vpTab.get_enum('RelType')
-                for row in data:
-                    row[2] = enum[row[2]]
+                if isinstance(data, list):
+                    enum= vpTab.get_enum('RelType')
+                    for row in data:
+                        row[2] = enum[row[2].decode()]
 
                 self._write_to_table(vpTab, data)
 
@@ -315,8 +337,13 @@ class DarwinExporter(object):
             'nesting structure for each HOG', expectedrows=1e8)
         for root, dirs, filenames in os.walk(hog_path):
             for fn in filenames:
-                levels = hog_converter.convert_file(os.path.join(root,fn))
-                hogTab.append(levels)
+                try:
+                    levels = hog_converter.convert_file(os.path.join(root,fn))
+                    hogTab.append(levels)
+                except Exception as e:
+                    self.logger.error('an error occured while processing '+fn+':')
+                    self.logger.exception(e)
+                    
         hog_converter.write_hogs()
         hogTab.flush()
         self.logger.info('createing indexes for HOGs')

@@ -25,7 +25,6 @@ def parse(omaEntryNr, s):
         raise ValueError('cannot parse "'+transInput+'" for entry '+str(eNr))
 
 
-
 def join(*args):
     from .convert import LocusTable
     tab = numpy.rec.array(None, shape=(len(args),), 

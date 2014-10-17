@@ -14,6 +14,9 @@ import time
 import familyanalyzer
 import re
 import multiprocessing as mp
+import lxml.html
+import collections
+
 from . import common
 from . import locus_parser
 
@@ -51,14 +54,20 @@ class VPairsTable(tables.IsDescription):
         'n/a', base='uint8', pos=2)
 
 class XRefTable(tables.IsDescription):
-    EntryNr = tables.UInt32Col(pos=0)
+    EntryNr = tables.UInt32Col(pos=1)
     XRefSource = tables.EnumCol(
         tables.Enum(['UniProtKB/SwissProt', 'UniProtKB/TrEMBL','n/a','EMBL',
             'Ensembl Gene', 'Ensembl Transcript','Ensembl Protein',
             'RefSeq','EntrezGene','GI', 'WikiGene', 'IPI', 'Description',
-            'SourceID', 'SourceAC']),
-        'n/a', base='uint8', pos=1)
-    XRefId = tables.StringCol(30,pos=2)
+            'SourceID', 'SourceAC','PMP', 'NCBI', 'FlyBase']),
+        'n/a', base='uint8', pos=2)
+    XRefId = tables.StringCol(255,pos=3)
+
+class GeneOntologyTable(tables.IsDescription):
+    EntryNr = tables.UInt32Col(pos=1)
+    TermNr = tables.UInt32Col(pos=2)
+    Evidence = tables.StringCol(3,pos=3)
+    Reference = tables.StringCol(255,pos=4)
 
 class GenomeTable(tables.IsDescription):
     NCBITaxonId = tables.UInt32Col(pos=0)
@@ -167,7 +176,7 @@ class DarwinExporter(object):
 
     def add_version(self):
         # FIXME: proper implementation of version
-        version = 'Mar 2014'
+        version = 'Sep 2014'
         self.h5.root._f_setattr('oma_version', version)
 
     def add_species_data(self):
@@ -323,6 +332,30 @@ class DarwinExporter(object):
         hogTab.cols.Fam.create_index()
         hogTab.cols.ID.create_index()
         entryTab.cols.OmaHOG.create_csindex()
+
+    def add_xrefs(self):
+        self.logger.info('start parsing ServerIndexed to extract XRefs and GO annotations')
+        db_parser = IndexedServerParser()
+        xref_importer = XRefImporter(db_parser)
+        db_parser.parse_entrytags()
+
+        self.logger.info('write XRefs / GO to disc')
+        xref_tab = self.h5.create_table('/','XRef', XRefTable,
+                'Cross-references of proteins to external ids / descriptions',
+                expectedrows=len(xref_importer.xrefs))
+        self._write_to_table(xref_tab, xref_importer.xrefs)
+        go_tab = self.h5.create_table('/','GeneOntology', GeneOntologyTable,
+                'Gene Ontology annotations', expectedrows=len(xref_importer.go))
+        self._write_to_table(go_tab, xref_importer.go)
+        
+        self.logger.info('creating index for xrefs (EntryNr and XRefId)')
+        xref_tab.cols.EntryNr.create_csindex()
+        xref_tab.cols.XRefId.create_csindex()
+
+        self.logger.info('creating index for go (EntryNr and TermNr)')
+        go_tab.cols.EntryNr.create_csindex()
+        go_tab.cols.TermNr.create_index()
+
         
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("c"))
@@ -372,6 +405,135 @@ class HogConverter(object):
     def write_hogs(self):
         self.entry_tab.modify_column(0,len(self.entry_tab),1, self.hogs[1:], 'OmaHOG') 
         self.entry_tab.flush()
+
+
+class XRefImporter(object):
+    def __init__(self, db_parser):
+        self.xrefs = []
+        self.go = []
+        xrefEnum = XRefTable.columns.get('XRefSource').enum
+        for tag in ['GI','EntrezGene','WikiGene','IPI']:
+            db_parser.add_tag_handler(
+                    tag, 
+                    lambda key, enr, typ=xrefEnum[tag]: self.key_value_handler(key, enr, typ))
+        db_parser.add_tag_handler('Refseq_ID', 
+            lambda key, enr: self.key_value_handler(key, enr, xrefEnum['RefSeq']))
+        db_parser.add_tag_handler('SwissProt', 
+            lambda key, enr: self.key_value_handler(key, enr, xrefEnum['UniProtKB/SwissProt']))
+        db_parser.add_tag_handler('DE', 
+            lambda key, enr: self.key_value_handler(key, enr, xrefEnum['Description']))
+        db_parser.add_tag_handler('GO',self.go_handler)
+        db_parser.add_tag_handler('ID', self.assign_source_handler)
+        db_parser.add_tag_handler('AC', self.assign_source_handler)
+
+        db_parser.add_tag_handler('ID', 
+            lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['SourceID']))
+        db_parser.add_tag_handler('AC', 
+            lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['SourceAC']))
+        for tag in ['PMP','EMBL']:
+            db_parser.add_tag_handler(
+                    tag, 
+                    lambda key, enr, typ=xrefEnum[tag]: self.multi_key_handler(key, enr, typ))
+        for tag in ['SwissProt_AC','UniProt']: #UniProt/TrEMBL tag is cut to UniProt!
+            db_parser.add_tag_handler(tag,
+                lambda key, enr, typ=xrefEnum['UniProtKB/TrEMBL']: 
+                    self.remove_uniprot_code_handler(key, enr,typ))
+
+        self.db_parser = db_parser
+        self.xrefEnum = xrefEnum
+        self.ENS_RE=re.compile(r'ENS(?P<species>[A-Z]{0,3})(?P<typ>[GTP])(?P<num>\d{11})')
+        self.FB_RE=re.compile(r'FB(?P<typ>[gnptr]{2})(?P<num>\d{7})')
+        self.NCBI_RE=re.compile(r'[A-Z]{3}\d{5}\.\d$')
+        self.GO_RE=re.compile(r'GO:(?P<termNr>\d{7})')
+        self.quote_re=re.compile(r'([[,])([\w_:]+)([,\]])')
+
+    def key_value_handler(self, key, eNr, enum_nr):
+        self.xrefs.append((eNr, enum_nr, key,))
+
+
+    def multi_key_handler(self, multikey, eNr, enum_nr):
+        for key in multikey.split('; '):
+            pos = key.find('.Rep')
+            if pos>0: 
+                key=key[0:pos]
+            self.xrefs.append((eNr, enum_nr, key,))
+
+    def assign_source_handler(self, multikey, eNr):
+        for key in multikey.split('; '):
+            ens_match = self.ENS_RE.match(key)
+            if not ens_match is None:
+                typ = ens_match.group('typ')
+                if typ=='P':
+                    enum_nr = self.xrefEnum['Ensembl Protein']
+                elif typ=='G':
+                    enum_nr = self.xrefEnum['Ensembl Gene']
+                elif typ=='T':
+                    enum_nr = self.xrefEnum['Ensembl Transcript']
+                common.package_logger.debug(
+                   'ensembl: ({}, {}, {})'.format(key,typ, enum_nr))
+                self.xrefs.append((eNr,enum_nr,key))
+            
+            for enum, regex in {'FlyBase':self.FB_RE, 'NCBI':self.NCBI_RE}.items():
+                match = regex.match(key)
+                if not match is None:
+                    enum_nr = self.xrefEnum[enum]
+                    self.xrefs.append((eNr, enum_nr, key))
+
+
+    def go_handler(self, gos, enr):
+        for t in gos.split('; '):
+            term, rem = t.split('@')
+            term_match = self.GO_RE.match(term)
+            termNr = int(term_match.group('termNr'))
+            rem = rem.replace('{','[')
+            rem = rem.replace('}',']')
+            rem = self.quote_re.sub('\g<1>"\g<2>"\g<3>',rem)
+            for evi, refs in eval(rem):
+                for ref in refs:
+                    self.go.append((enr, termNr, evi, ref))
+
+
+    def remove_uniprot_code_handler(self, multikey, eNr, enum_nr):
+        common.package_logger.debug(
+                'remove_uniprot_code_handler called ({}, {},{})'.format(multikey,eNr, enum_nr))
+        for key in multikey.split('; '):
+            pos = key.find('_')
+            if pos>0:
+                self.xrefs.append((eNr, enum_nr, key[0:pos]))
+            else:
+                self.xrefs.append((eNr, enum_nr, key))
+
+
+class IndexedServerParser(object):
+    def __init__(self, fn=None):
+        if fn is None:
+            fn = os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'ServerIndexed.db')
+        self.elems = lxml.html.parse(fn).getroot()
+        self.tag_handlers = collections.defaultdict(list)
+
+    def add_tag_handler(self, tag, handler):
+        self.tag_handlers[tag].append(handler)
+        common.package_logger.debug('# handlers for {}: {}'.format(tag, len(self.tag_handlers[tag])))
+        
+
+    def parse_entrytags(self):
+        """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym, 
+        ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ, 
+        SwissProt, SwissProt_AC, UniProt/TrEMBL, WikiGene, flybase_transcript_id
+        """
+        for eNr_minus_1, entry in enumerate(self.elems.findall('.//e')):
+            eNr = eNr_minus_1+1
+            common.package_logger.debug('handling entry {} looking {}'.format(eNr, entry.text))
+            for tag, handlers in self.tag_handlers.items():
+                common.package_logger.debug('tag {} ({} handlers)'.format(tag, len(handlers)))
+                tag_text = [t.text for t in entry.findall('./'+tag.lower())]
+                for value in tag_text:
+                    common.package_logger.debug('value of tag: {}'.format(value))
+                    for handler in handlers:
+                       handler(value, eNr)
+                       common.package_logger.debug('called handler {} with ({},{})'.format(
+                           str(handler), str(value), eNr))
+
 
 
 

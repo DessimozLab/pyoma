@@ -536,7 +536,10 @@ class IndexedServerParser(object):
     def __init__(self, fn=None):
         if fn is None:
             fn = os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'ServerIndexed.db')
-        self.elems = lxml.html.parse(fn).getroot()
+        if isinstance(fn, str):
+            self.doc = open(fn, 'r')
+        else:
+            self.doc = fn
         self.tag_handlers = collections.defaultdict(list)
 
     def add_tag_handler(self, tag, handler):
@@ -549,8 +552,16 @@ class IndexedServerParser(object):
         ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ, 
         SwissProt, SwissProt_AC, UniProt/TrEMBL, WikiGene, flybase_transcript_id
         """
-        for eNr_minus_1, entry in enumerate(self.elems.findall('.//e')):
-            eNr = eNr_minus_1+1
+        eNr = 0
+        for line in self.doc:
+            line = line.strip()
+            if not line.startswith('<E>'):
+                common.package_logger.debug('skipping line:'+line)
+                continue
+
+            eNr += 1
+            common.package_logger.debug('entry {}: {}'.format(eNr,line))
+            entry = lxml.html.fragment_fromstring(line)
             common.package_logger.debug('handling entry {} looking {}'.format(eNr, entry.text))
             for tag, handlers in self.tag_handlers.items():
                 common.package_logger.debug('tag {} ({} handlers)'.format(tag, len(handlers)))

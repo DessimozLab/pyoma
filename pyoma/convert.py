@@ -510,6 +510,7 @@ class XRefImporter(object):
 
     def go_handler(self, gos, enr):
         for t in gos.split('; '):
+            t = t.strip()
             term, rem = t.split('@')
             term_match = self.GO_RE.match(term)
             termNr = int(term_match.group('termNr'))
@@ -568,6 +569,8 @@ class IndexedServerParser(object):
                 tag_text = [t.text for t in entry.findall('./'+tag.lower())]
                 for value in tag_text:
                     common.package_logger.debug('value of tag: {}'.format(value))
+                    if value is None:
+                        continue
                     for handler in handlers:
                        handler(value, eNr)
                        common.package_logger.debug('called handler {} with ({},{})'.format(
@@ -596,5 +599,6 @@ def main(name="OmaServer.h5"):
     x.add_orthologs()
     x.add_proteins()
     x.add_hogs()
+    x.add_xrefs()
     x.close()
 

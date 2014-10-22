@@ -475,8 +475,13 @@ class XRefImporter(object):
         self.GO_RE=re.compile(r'GO:(?P<termNr>\d{7})')
         self.quote_re=re.compile(r'([[,])([\w_:]+)([,\]])')
 
+    def _add_to_xrefs(self, eNr, enum_nr, key):
+        if not isinstance(eNr,int):
+            raise ValueError('eNr is of wrong type:'+str(eNr))
+        self.xrefs.append((eNr, enum_nr, key.encode('utf-8'),))
+
     def key_value_handler(self, key, eNr, enum_nr):
-        self.xrefs.append((eNr, enum_nr, key,))
+        self._add_to_xrefs(eNr, enum_nr, key)
 
 
     def multi_key_handler(self, multikey, eNr, enum_nr):
@@ -484,7 +489,7 @@ class XRefImporter(object):
             pos = key.find('.Rep')
             if pos>0: 
                 key=key[0:pos]
-            self.xrefs.append((eNr, enum_nr, key,))
+            self._add_to_xrefs(eNr, enum_nr, key)
 
     def assign_source_handler(self, multikey, eNr):
         for key in multikey.split('; '):
@@ -499,13 +504,13 @@ class XRefImporter(object):
                     enum_nr = self.xrefEnum['Ensembl Transcript']
                 common.package_logger.debug(
                    'ensembl: ({}, {}, {})'.format(key,typ, enum_nr))
-                self.xrefs.append((eNr,enum_nr,key))
+                self._add_to_xrefs(eNr, enum_nr, key)
             
             for enum, regex in {'FlyBase':self.FB_RE, 'NCBI':self.NCBI_RE}.items():
                 match = regex.match(key)
                 if not match is None:
                     enum_nr = self.xrefEnum[enum]
-                    self.xrefs.append((eNr, enum_nr, key))
+                    self._add_to_xrefs(eNr, enum_nr, key)
 
 
     def go_handler(self, gos, enr):
@@ -519,7 +524,7 @@ class XRefImporter(object):
             rem = self.quote_re.sub('\g<1>"\g<2>"\g<3>',rem)
             for evi, refs in eval(rem):
                 for ref in refs:
-                    self.go.append((enr, termNr, evi, ref))
+                    self.go.append((enr, termNr, evi, ref.encode('utf-8')))
 
 
     def remove_uniprot_code_handler(self, multikey, eNr, enum_nr):
@@ -528,9 +533,9 @@ class XRefImporter(object):
         for key in multikey.split('; '):
             pos = key.find('_')
             if pos>0:
-                self.xrefs.append((eNr, enum_nr, key[0:pos]))
+                self._add_to_xrefs(eNr, enum_nr, key[0:pos])
             else:
-                self.xrefs.append((eNr, enum_nr, key))
+                self._add_to_xrefs(eNr, enum_nr, key)
 
 
 class IndexedServerParser(object):

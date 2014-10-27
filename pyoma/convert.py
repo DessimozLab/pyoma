@@ -202,7 +202,7 @@ class DarwinExporter(object):
 
     def add_species_data(self):
         cache_file = os.path.join(
-            os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
+            os.getenv('DARWIN_NETWORK_SCRATCH_PATH',''),
             'pyoma','gs.json')
         if os.path.exists(cache_file):
             with open(cache_file, 'r') as fd:
@@ -231,7 +231,7 @@ class DarwinExporter(object):
             genome = gs['UniProtSpeciesCode'].decode()
             if not '/'+genome in self.h5:
                 cache_file = os.path.join(
-                    os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
+                    os.getenv('DARWIN_NETWORK_SCRATCH_PATH',''),
                     'pyoma','vps','{}.json'.format(genome))
                 if os.path.exists(cache_file):
                     with open(cache_file, 'r') as fd:
@@ -274,7 +274,7 @@ class DarwinExporter(object):
         for gs in gsNode.iterrows():
             genome = gs['UniProtSpeciesCode'].decode()
             cache_file = os.path.join(
-                os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
+                os.getenv('DARWIN_NETWORK_SCRATCH_PATH',''),
                 'pyoma','prots','{}.json'.format(genome))
             if os.path.exists(cache_file):
                 with open(cache_file,'r') as fd:
@@ -516,7 +516,12 @@ class XRefImporter(object):
     def go_handler(self, gos, enr):
         for t in gos.split('; '):
             t = t.strip()
-            term, rem = t.split('@')
+            try:
+                term, rem = t.split('@')
+            except ValueError as e:
+                common.package_logger.warn('cannot parse GO annotation: '+t)
+                continue
+
             term_match = self.GO_RE.match(term)
             termNr = int(term_match.group('termNr'))
             rem = rem.replace('{','[')
@@ -568,7 +573,6 @@ class IndexedServerParser(object):
             eNr += 1
             common.package_logger.debug('entry {}: {}'.format(eNr,line))
             entry = lxml.html.fragment_fromstring(line)
-            common.package_logger.debug('handling entry {} looking {}'.format(eNr, entry.text))
             for tag, handlers in self.tag_handlers.items():
                 common.package_logger.debug('tag {} ({} handlers)'.format(tag, len(handlers)))
                 tag_text = [t.text for t in entry.findall('./'+tag.lower())]

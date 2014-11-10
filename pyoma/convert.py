@@ -157,7 +157,7 @@ def load_tsv_to_numpy(args):
     return augData[ret_cols]
 
 def read_vps_from_tsv(gs, ref_genome):
-    ref_genome_idx = gs.get_where_list('(UniProtSpeciesCode=={})'.
+    ref_genome_idx = gs.get_where_list("(UniProtSpeciesCode=='{}')".
             format(ref_genome))[0]
     jobsArgs = [] 
     for g in range(len(gs)):

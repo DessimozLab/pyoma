@@ -9,5 +9,6 @@ setup(
     author_email='adrian.altenhoff@inf.ethz.ch',
     description='todoc',
     packages=find_packages(),
+    data_files=[('pyoma', ['pyoma/convert.drw'])],
     install_requires=['numpy', 'numexpr', 'cython', 'tables>=3.1'],
 )

@@ -236,7 +236,9 @@ class DarwinExporter(object):
                 if os.path.exists(cache_file):
                     with open(cache_file, 'r') as fd:
                         data = json.load(fd)
-                elif not os.getenv('DARWIN_OMADATA_PATH') is None:
+                elif (not os.getenv('DARWIN_OMADATA_PATH') is None and
+                        os.path.exists(os.path.join(
+                            os.environ['DARWIN_OMADATA_PATH'], 'Phase4'))):
                     # try to read from Phase4 in parallel.
                     data = read_vps_from_tsv(self.h5.root.Genome, 
                                              genome.encode('utf-8'))

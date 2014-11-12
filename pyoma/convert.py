@@ -357,11 +357,6 @@ class DarwinExporter(object):
                     self.logger.exception(e)
                     
         hog_converter.write_hogs()
-        hogTab.flush()
-        self.logger.info('createing indexes for HOGs')
-        hogTab.cols.Fam.create_index()
-        hogTab.cols.ID.create_index()
-        entryTab.cols.OmaHOG.create_csindex()
 
     def add_xrefs(self):
         self.logger.info('start parsing ServerIndexed to extract XRefs and GO annotations')
@@ -377,20 +372,28 @@ class DarwinExporter(object):
         go_tab = self.h5.create_table('/','GeneOntology', GeneOntologyTable,
                 'Gene Ontology annotations', expectedrows=len(xref_importer.go))
         self._write_to_table(go_tab, xref_importer.go)
-        
-        self.logger.info('creating index for xrefs (EntryNr and XRefId)')
-        xref_tab.cols.EntryNr.create_csindex()
-        xref_tab.cols.XRefId.create_csindex()
-
-        self.logger.info('creating index for go (EntryNr and TermNr)')
-        go_tab.cols.EntryNr.create_csindex()
-        go_tab.cols.TermNr.create_index()
-
-        
+               
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("c"))
         self.h5.close()
         self.logger.info('closed %s'%(self.h5.filename))
+
+    def create_indexes(self):
+        self.logger.info('createing indexes for HOGs')
+        hogTab = self.h5.get_node('/HogLevel')
+        hogTab.cols.Fam.create_index()
+        hogTab.cols.ID.create_index()
+        hogTab.cols.OmaHOG.create_csindex()
+
+        self.logger.info('creating index for xrefs (EntryNr and XRefId)')
+        xrefTab = self.h5.get_node('/XRef')
+        xrefTab.cols.EntryNr.create_csindex()
+        xrefTab.cols.XRefId.create_csindex()
+
+        self.logger.info('creating index for go (EntryNr and TermNr)')
+        goTab = self.h5.get_node('/GeneOntology')
+        goTab.cols.EntryNr.create_csindex()
+        goTab.cols.TermNr.create_index()
 
 
 class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
@@ -611,5 +614,9 @@ def main(name="OmaServer.h5"):
     x.add_proteins()
     x.add_hogs()
     x.add_xrefs()
+    x.close()
+
+    x = DarwinExporter(name, logger=log)
+    x.create_indexes()
     x.close()
 

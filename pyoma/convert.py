@@ -383,7 +383,8 @@ class DarwinExporter(object):
         hogTab = self.h5.get_node('/HogLevel')
         hogTab.cols.Fam.create_index()
         hogTab.cols.ID.create_index()
-        hogTab.cols.OmaHOG.create_csindex()
+        entryTab = self.h5.get_node('/Protein/Entries')
+        entryTab.cols.OmaHOG.create_csindex()
 
         self.logger.info('creating index for xrefs (EntryNr and XRefId)')
         xrefTab = self.h5.get_node('/XRef')

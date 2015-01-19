@@ -136,7 +136,8 @@ class GenomePair(object):
 
         range_of_entry = self.entry_offset[item]
         data = self.matches[range_of_entry[0]:range_of_entry[1]]
-        return RelationManager(data)
+        self.rels[item] = RelationManager(data)
+        return self.rels[item]
 
     def flush(self):
         for i, rel_man in enumerate(self.rels):

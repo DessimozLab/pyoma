@@ -6,6 +6,7 @@ from functools import lru_cache
 import itertools
 from builtins import filter
 
+
 class RelationsOfEntry(object):
     """
     This container class contains the relations from one given query
@@ -14,6 +15,7 @@ class RelationsOfEntry(object):
     types of relations are in fact implemented as different
     subclasses.
     """
+
     def filter(self, x):
         if isinstance(x, np.ndarray):
             return np.array([True] * len(x), dtype='b')
@@ -68,25 +70,32 @@ class RelationsOfEntry(object):
 class CanonicalBestMatchesOfEntry(RelationsOfEntry):
     """"variant that only looks at the main splicing variant"""
     filter = lambda self, row: row['isCanonicalSplicing']
+
     def _set_relationflags_on_rows(self, row_indexes):
-        mask = np.zeros(len(self.data),dtype='bool')
+        mask = np.zeros(len(self.data), dtype='bool')
         mask[row_indexes] = True
         self.data['isCanonicalSplicing'] = mask
 
 
 class StablePairsOfEntry(RelationsOfEntry):
+    """Stable Pairs have to be Canonical Splicing and set isSP to true"""
     filter = lambda self, row: np.logical_and(row['isSP'], row['isCanonicalSplicing'])
+
     def _set_relationflags_on_rows(self, row_indexes):
-        mask = np.zeros(len(self.data),dtype='bool')
+        mask = np.zeros(len(self.data), dtype='bool')
         mask[row_indexes] = True
         self.data['isSP'] = mask
         self.data['isCanonicalSplicing'][row_indexes] = True
 
 
 class VPairsOfEntry(RelationsOfEntry):
+    """Verifiy Pairs have to be Canonical Splicing and set isVP to true.
+    So far we do not enforce isSP to be true as well, because of consistency
+    step where we potentially augment non-sps to vps."""
     filter = lambda self, row: np.logical_and(row['isVP'], row['isCanonicalSplicing'])
+
     def _set_relationflags_on_rows(self, row_indexes):
-        mask = np.zeros(len(self.data),dtype='bool')
+        mask = np.zeros(len(self.data), dtype='bool')
         mask[row_indexes] = True
         self.data['isVP'] = mask
         self.data['isCanonicalSplicing'][row_indexes] = True
@@ -140,10 +149,11 @@ class GenomePair(object):
         return self.rels[item]
 
     def flush(self):
+        modified = 0
         for i, rel_man in enumerate(self.rels):
             if not rel_man is None and rel_man._data_changed:
-                self.matches.modify_rows(self.entry_offset[i,0],
-                                         self.entry_offset[i,1], rel_man.data)
+                modified += self.matches.modify_rows(start=self.entry_offset[i, 0],
+                                                     stop=self.entry_offset[i, 1], rows=rel_man.data)
                 rel_man._data_changed = False
 
     def close(self):
@@ -172,7 +182,7 @@ class OmaDB(object):
         gs = self.genome_data.read_where("UniProtSpeciesCode==b'{}'".format(genome1))
         if len(itab) != gs['TotEntries']:
             raise OmaDBError(u"Nr of Protein does not match: {} vs {}".
-                             format(len(itab),gs['TotEntries']))
+                             format(len(itab), gs['TotEntries']))
         return GenomePair(mtab, itab)
 
     def close(self):

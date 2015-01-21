@@ -115,6 +115,7 @@ class OmaDBTest(unittest.TestCase):
         pair[1]['SP'] = sp
         sp_after = [z['EntryNr2'] for z in pair[1]['SP']]
         self.assertEqual(sp, sp_after)
+        db.close()
 
     def test_write_vps(self):
         db = pyoma.db.OmaDB(self.db_filename, mode='a')
@@ -127,6 +128,7 @@ class OmaDBTest(unittest.TestCase):
         db = pyoma.db.OmaDB(self.db_filename, mode='r')
         vp = [z['EntryNr2'] for z in db.matches('SE001', 'SE002')[1]['VP']]
         self.assertIn(6, vp)
+        db.close()
 
 
 

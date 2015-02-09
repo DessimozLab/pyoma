@@ -1,7 +1,5 @@
 import os
 
-__author__ = 'adriaal'
-
 import unittest
 from pyoma.tabledef import BestMatchesFmt, GenomeFmt
 import pyoma.db
@@ -73,7 +71,7 @@ class GenomePairTest(unittest.TestCase):
         self.assertEqual([1, 5, 6], prot2_after, "change of VP should set BM flag")
 
     def test_fail_if_not_member(self):
-        self.assertRaises(ValueError, self.genome_pair[2]['BM']._set_relations, [4, 6, 8])
+        self.assertRaises(ValueError, self.genome_pair[2]['BM'].set_relations, [4, 6, 8])
 
     def test_iterators_in_sync(self):
         # create iterator before any changes on data

@@ -3,7 +3,6 @@ __author__ = 'adriaal'
 import tables
 import numpy as np
 from functools import lru_cache
-import itertools
 from builtins import filter
 
 
@@ -16,7 +15,8 @@ class RelationsOfEntry(object):
     subclasses.
     """
 
-    def filter(self, x):
+    @staticmethod
+    def filter(x):
         if isinstance(x, np.ndarray):
             return np.array([True] * len(x), dtype='b')
         else:
@@ -42,7 +42,7 @@ class RelationsOfEntry(object):
         passing the filter criterion."""
         return self.data[self.filter(self.data)]
 
-    def _set_relations(self, value):
+    def set_relations(self, value):
         if isinstance(value, (list, set, int)):
             value = np.array(value)
         elif not isinstance(value, np.ndarray):
@@ -69,7 +69,9 @@ class RelationsOfEntry(object):
 
 class CanonicalBestMatchesOfEntry(RelationsOfEntry):
     """"variant that only looks at the main splicing variant"""
-    filter = lambda self, row: row['isCanonicalSplicing']
+    @staticmethod
+    def filter(row):
+        return row['isCanonicalSplicing']
 
     def _set_relationflags_on_rows(self, row_indexes):
         mask = np.zeros(len(self.data), dtype='bool')
@@ -79,7 +81,9 @@ class CanonicalBestMatchesOfEntry(RelationsOfEntry):
 
 class StablePairsOfEntry(RelationsOfEntry):
     """Stable Pairs have to be Canonical Splicing and set isSP to true"""
-    filter = lambda self, row: np.logical_and(row['isSP'], row['isCanonicalSplicing'])
+    @staticmethod
+    def filter(row):
+        return np.logical_and(row['isSP'], row['isCanonicalSplicing'])
 
     def _set_relationflags_on_rows(self, row_indexes):
         mask = np.zeros(len(self.data), dtype='bool')
@@ -92,7 +96,9 @@ class VPairsOfEntry(RelationsOfEntry):
     """Verifiy Pairs have to be Canonical Splicing and set isVP to true.
     So far we do not enforce isSP to be true as well, because of consistency
     step where we potentially augment non-sps to vps."""
-    filter = lambda self, row: np.logical_and(row['isVP'], row['isCanonicalSplicing'])
+    @staticmethod
+    def filter(row):
+        return np.logical_and(row['isVP'], row['isCanonicalSplicing'])
 
     def _set_relationflags_on_rows(self, row_indexes):
         mask = np.zeros(len(self.data), dtype='bool')
@@ -121,8 +127,11 @@ class RelationManager(object):
 
     def __setitem__(self, key, value):
         rels_obj = self.__getitem__(key)
-        rels_obj._set_relations(value)
+        rels_obj.set_relations(value)
         self._data_changed = True
+
+    def is_data_insync(self):
+        return not self._data_changed
 
 
 class GenomePair(object):
@@ -133,6 +142,10 @@ class GenomePair(object):
 
     def __getitem__(self, item):
         if not isinstance(item, int):
+            raise IndexError(u"Invalid index or slice: {0!r:s}".format(item, ))
+        if item < 0:
+            raise IndexError(u"Invalid index or slice: {0!r:s}".format(item, ))
+        if item < 0:
             raise IndexError(u"Invalid index or slice: {0!r:s}".format(item, ))
         if item < 0:
             item += len(self.entry_offset)
@@ -151,7 +164,7 @@ class GenomePair(object):
     def flush(self):
         modified = 0
         for i, rel_man in enumerate(self.rels):
-            if not rel_man is None and rel_man._data_changed:
+            if not rel_man is None and not rel_man.is_data_insync():
                 modified += self.matches.modify_rows(start=self.entry_offset[i, 0],
                                                      stop=self.entry_offset[i, 1], rows=rel_man.data)
                 rel_man._data_changed = False

@@ -3,6 +3,7 @@ from future.builtins import str
 from future.builtins import chr
 from future.builtins import range
 from future.builtins import object
+from future.builtins import super
 import tables
 import numpy
 import numpy.lib.recfunctions
@@ -16,6 +17,7 @@ import re
 import multiprocessing as mp
 import lxml.html
 import collections
+import gzip
 
 from . import common
 from . import locus_parser
@@ -122,6 +124,12 @@ def callDarwinExport(func):
     return data
 
 
+def uniq(seq):
+    """return uniq elements of a list, preserving order"""
+    seen = set()
+    return [x for x in seq if not (x in seen or seen.add(x))]
+
+
 def silentremove(filename):
     """Function to remove a given file. No exception is raised if the
     file does not exist. Other errors are passed to the user."""
@@ -141,19 +149,24 @@ def load_tsv_to_numpy(args):
     dtype = [('EntryNr1','i4'),('EntryNr2','i4'),('Score','i4'),('RelType','i1')]
     for curNr, curFn in enumerate([fn, fn.replace('.ext.','.')]):
         try:
-            augData = numpy.genfromtxt(curFn, dtype=dtype,
-                names=[_[0] for _ in dtype],
-                delimiter='\t',
-                usecols=(0,1,2,3),
-                converters={'EntryNr1': lambda nr: int(nr)+off1,
-                        'EntryNr2': lambda nr: int(nr)+off2,
-                        'RelType': lambda rel: relEnum[rel[::read_dir].decode()]})
-            break;
+            with gzip.GzipFile(curFn) as fh:
+                augData = numpy.genfromtxt(fh, dtype=dtype,
+                    names=[_[0] for _ in dtype],
+                    delimiter='\t',
+                    usecols=(0,1,2,3),
+                    converters={'EntryNr1': lambda nr: int(nr)+off1,
+                            'EntryNr2': lambda nr: int(nr)+off2,
+                            'RelType': lambda rel: relEnum[rel[::read_dir].decode()]})
+                break;
         except OSError as e:
             if curNr<1:
+                common.package_logger.info('tried to load {}'.format(curFn))
                 pass
             else:
                 raise e
+        except IOError as e:
+            common.package_logger.warn('ioerror occured on {}'.format(curFn))
+            raise
 
     ret_cols = ['EntryNr1','EntryNr2','RelType']
     if swap:
@@ -172,8 +185,10 @@ def read_vps_from_tsv(gs, ref_genome):
         off1, off2 = gs.read_coordinates(numpy.array((g1,g2)), 'EntryOff')
         fn = os.path.join(os.environ['DARWIN_OMADATA_PATH'],'Phase4',
                 gs.cols.UniProtSpeciesCode[g1].decode(), 
-                gs.cols.UniProtSpeciesCode[g2].decode()+".ext.orth.txt.gz")
-        jobsArgs.append((fn, off1, off2, g1!=ref_genome_idx))
+                gs.cols.UniProtSpeciesCode[g2].decode()+".orth.txt.gz")
+        tup = (fn, off1, off2, g1!=ref_genome_idx)
+        common.package_logger.info('adding job: {}'.format(tup))
+        jobsArgs.append(tup)
 
     pool = mp.Pool()
     allPairs = pool.map(load_tsv_to_numpy, jobsArgs)
@@ -202,7 +217,7 @@ class DarwinExporter(object):
 
     def add_version(self):
         # FIXME: proper implementation of version
-        version = 'Sep 2014'
+        version = 'Mar 2015'
         self.h5.root._f_setattr('oma_version', version)
 
     def add_species_data(self):
@@ -394,18 +409,15 @@ class DarwinExporter(object):
     def add_xrefs(self):
         self.logger.info('start parsing ServerIndexed to extract XRefs and GO annotations')
         db_parser = IndexedServerParser()
-        xref_importer = XRefImporter(db_parser)
-        db_parser.parse_entrytags()
-
-        self.logger.info('write XRefs / GO to disc')
         xref_tab = self.h5.create_table('/','XRef', XRefTable,
                 'Cross-references of proteins to external ids / descriptions',
-                expectedrows=len(xref_importer.xrefs))
-        self._write_to_table(xref_tab, xref_importer.xrefs)
+                expectedrows=1e8)
         go_tab = self.h5.create_table('/','GeneOntology', GeneOntologyTable,
-                'Gene Ontology annotations', expectedrows=len(xref_importer.go))
-        self._write_to_table(go_tab, xref_importer.go)
-               
+                'Gene Ontology annotations', expectedrows=1e8)
+        xref_importer = XRefImporter(db_parser, xref_tab, go_tab)
+        db_parser.parse_entrytags()
+        xref_importer.flush_buffers()
+
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("c"))
         self.h5.close()
@@ -475,9 +487,11 @@ class HogConverter(object):
 
 
 class XRefImporter(object):
-    def __init__(self, db_parser):
+    def __init__(self, db_parser, xref_tab, go_tab):
         self.xrefs = []
         self.go = []
+        self.xref_tab = xref_tab
+        self.go_tab = go_tab
         xrefEnum = XRefTable.columns.get('XRefSource').enum
         for tag in ['GI','EntrezGene','WikiGene','IPI']:
             db_parser.add_tag_handler(
@@ -514,10 +528,21 @@ class XRefImporter(object):
         self.GO_RE=re.compile(r'GO:(?P<termNr>\d{7})')
         self.quote_re=re.compile(r'([[,])([\w_:]+)([,\]])')
 
+    def flush_buffers(self):
+        common.package_logger.info('flushing xrefs and go buffers')
+        self.xref_tab.append(self.xrefs)
+        self.go_tab.append(self.go)
+        self.xrefs = []
+        self.go = []
+
+
     def _add_to_xrefs(self, eNr, enum_nr, key):
         if not isinstance(eNr,int):
             raise ValueError('eNr is of wrong type:'+str(eNr))
         self.xrefs.append((eNr, enum_nr, key.encode('utf-8'),))
+        if len(self.xrefs) > 5e6:
+            self.flush_buffers()
+
 
     def key_value_handler(self, key, eNr, enum_nr):
         self._add_to_xrefs(eNr, enum_nr, key)
@@ -569,6 +594,8 @@ class XRefImporter(object):
             for evi, refs in eval(rem):
                 for ref in refs:
                     self.go.append((enr, termNr, evi, ref.encode('utf-8')))
+            if len(self.go) > 5e6:
+                self.flush_buffers()
 
 
     def remove_uniprot_code_handler(self, multikey, eNr, enum_nr):
@@ -586,7 +613,7 @@ class IndexedServerParser(object):
     def __init__(self, fn=None):
         if fn is None:
             fn = os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'ServerIndexed.db')
-        if isinstance(fn, str):
+        if isinstance(fn, basestring):
             self.doc = open(fn, 'r')
         else:
             self.doc = fn
@@ -616,13 +643,13 @@ class IndexedServerParser(object):
                 common.package_logger.debug('tag {} ({} handlers)'.format(tag, len(handlers)))
                 tag_text = [t.text for t in entry.findall('./'+tag.lower())]
                 for value in tag_text:
-                    common.package_logger.debug('value of tag: {}'.format(value))
+                    # common.package_logger.debug('value of tag: {}'.format(value.encode('utf-8')))
                     if value is None:
                         continue
                     for handler in handlers:
                        handler(value, eNr)
-                       common.package_logger.debug('called handler {} with ({},{})'.format(
-                           str(handler), str(value), eNr))
+                       #common.package_logger.debug('called handler {} with ({},{})'.format(
+                       #    handler, value.encode('utf-8'), eNr))
 
 
 

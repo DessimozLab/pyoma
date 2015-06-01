@@ -28,6 +28,11 @@ class HOGsTable(tables.IsDescription):
     ID = tables.StringCol(255,pos=2)
     Level = tables.StringCol(255,pos=3)
 
+class OrthoXML_HOG_Table(tables.IsDescription):
+    Fam = tables.UInt32Col(pos=0)
+    HogBufferOffset = tables.UInt32Col(pos=1)
+    HogBufferLength = tables.UInt32Col(pos=2)
+
 class ProteinTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     SeqBufferOffset = tables.UInt32Col(pos=2)
@@ -347,16 +352,44 @@ class DarwinExporter(object):
         hog_converter.attach_newick_taxonomy(tree_filename)
         hogTab = self.h5.create_table('/', 'HogLevel', HOGsTable, 
             'nesting structure for each HOG', expectedrows=1e8)
+        self.orthoxml_buffer = self.h5.create_earray('/OrthoXML', 'Buffer', 
+            tables.StringAtom(1),(0,), 'concatenated orthoxml files',                            
+            expectedrows=1e9, createparents=True)
+        self.orthoxml_index = self.h5.create_table('/OrthoXML', 'Index', OrthoXML_HOG_Table,
+            'Range index per HOG into OrthoXML Buffer', expectedrows=5e6)
         for root, dirs, filenames in os.walk(hog_path):
             for fn in filenames:
                 try:
                     levels = hog_converter.convert_file(os.path.join(root,fn))
                     hogTab.append(levels)
+                    fam_nrs = set([z[0] for z in levels])
+                    self.add_orthoxml(os.path.join(root,fn), fam_nrs)
                 except Exception as e:
                     self.logger.error('an error occured while processing '+fn+':')
                     self.logger.exception(e)
                     
         hog_converter.write_hogs()
+
+    def add_orthoxml(self, orthoxml_path, fam_nrs):
+        """append orthoxml file content to orthoxml_buffer array and add index for the HOG family"""
+        if len(fam_nrs) > 0:
+            self.logger.warning('expected only one family per HOG, but found {}: {}\n'.format(len(fam_nrs), fam_nrs))
+        with open(orthoxml_path, 'r') as fh:
+            orthoxml = fh.read().encode('utf-8')
+            offset = len(self.orthoxml_buffer)
+            length = len(orthoxml)
+            self.orthoxml_buffer(numpy.ndarray((length,),
+                buffer=orthoxml, dtype=tables.StringAtom(1)))
+            for fam in fam_nrs:
+                row = self.orthoxml_index.row
+                row['Fam'] = Fam
+                row['HogBufferOffset'] = offset
+                row['HogBufferLength'] = length
+                offset += length
+                row.append()
+
+
+
 
     def add_xrefs(self):
         self.logger.info('start parsing ServerIndexed to extract XRefs and GO annotations')
@@ -525,7 +558,7 @@ class XRefImporter(object):
             try:
                 term, rem = t.split('@')
             except ValueError as e:
-                common.package_logger.warn('cannot parse GO annotation: '+t)
+                common.package_logger.warning('cannot parse GO annotation: '+t)
                 continue
 
             term_match = self.GO_RE.match(term)

@@ -387,17 +387,17 @@ class DarwinExporter(object):
 
     def add_orthoxml(self, orthoxml_path, fam_nrs):
         """append orthoxml file content to orthoxml_buffer array and add index for the HOG family"""
-        if len(fam_nrs) > 0:
+        if len(fam_nrs) > 1:
             self.logger.warning('expected only one family per HOG, but found {}: {}\n'.format(len(fam_nrs), fam_nrs))
         with open(orthoxml_path, 'r') as fh:
             orthoxml = fh.read().encode('utf-8')
             offset = len(self.orthoxml_buffer)
             length = len(orthoxml)
-            self.orthoxml_buffer(numpy.ndarray((length,),
+            self.orthoxml_buffer.append(numpy.ndarray((length,),
                 buffer=orthoxml, dtype=tables.StringAtom(1)))
             for fam in fam_nrs:
                 row = self.orthoxml_index.row
-                row['Fam'] = Fam
+                row['Fam'] = fam
                 row['HogBufferOffset'] = offset
                 row['HogBufferLength'] = length
                 offset += length
@@ -428,6 +428,8 @@ class DarwinExporter(object):
         hogTab = self.h5.get_node('/HogLevel')
         hogTab.cols.Fam.create_index()
         hogTab.cols.ID.create_index()
+        orthoxmlTab = self.h5.get_node('/OrthoXML/Index')
+        orthoxmlTab.cols.Fam.create_csindex()
         entryTab = self.h5.get_node('/Protein/Entries')
         entryTab.cols.OmaHOG.create_csindex()
 

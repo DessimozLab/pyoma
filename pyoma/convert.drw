@@ -86,9 +86,13 @@ GetProteinsForGenome := proc(g)
     global DB, Splicings;
     if not type(Splicings, table) then ReadProgram(ddir.'/Splicings.drw'); fi:
     SeqDb := ReadDb(ddir.'/ServerSeqs.db');
+    DnaDb := ReadDb(ddir.'/ServerDNA.db');
     tab:= table():
     gNr := SearchArray(g, genomes);
+    DB := SeqDb;
     tab['seqs'] := [seq(Sequence(Entry(Goff[gNr]+i)),i=1..GS[g,TotEntries])]:
+    DB := DnaDb;
+    tab['cdna'] := [seq(Sequence(Entry(Goff[gNr]+i)), i=1..GS[g,TotEntries])]:
     tab['off'] := Goff[gNr]:
     IndDb := ReadDb(ddir.'/ServerIndexed.db');
     tab['ogs'] := [seq(parse(SearchTag('OG',Entry(Goff[gNr]+i))), i=1..GS[g,TotEntries])]:

@@ -1,9 +1,12 @@
 from __future__ import division
+import csv
+import urllib.request
 from future.builtins import str
 from future.builtins import chr
 from future.builtins import range
 from future.builtins import object
 from future.builtins import super
+import resource
 import tables
 import numpy
 import numpy.lib.recfunctions
@@ -18,6 +21,7 @@ import multiprocessing as mp
 import lxml.html
 import collections
 import gzip
+import hashlib
 
 from . import common
 from . import locus_parser
@@ -27,25 +31,32 @@ from . import locus_parser
 
 class HOGsTable(tables.IsDescription):
     Fam = tables.Int32Col(pos=1)
-    ID = tables.StringCol(255,pos=2)
-    Level = tables.StringCol(255,pos=3)
+    ID = tables.StringCol(255, pos=2)
+    Level = tables.StringCol(255, pos=3)
 
-class OrthoXML_HOG_Table(tables.IsDescription):
+
+class OrthoXmlHogTable(tables.IsDescription):
     Fam = tables.UInt32Col(pos=0)
     HogBufferOffset = tables.UInt32Col(pos=1)
     HogBufferLength = tables.UInt32Col(pos=2)
+
 
 class ProteinTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     SeqBufferOffset = tables.UInt32Col(pos=2)
     SeqBufferLength = tables.UInt32Col(pos=3)
-    OmaGroup = tables.UInt32Col(pos=4,dflt=0)
-    OmaHOG = tables.StringCol(255,pos=5,dflt='')
-    Chromosome = tables.StringCol(255,pos=6)
+    OmaGroup = tables.UInt32Col(pos=4, dflt=0)
+    OmaHOG = tables.StringCol(255, pos=5, dflt=b"")
+    Chromosome = tables.StringCol(255, pos=6)
     LocusStart = tables.UInt32Col(pos=7)
     LocusEnd = tables.UInt32Col(pos=8)
-    LocusStrand = tables.Int8Col(pos=9,dflt=1)
-    AltSpliceVariant = tables.Int32Col(pos=10,dflt=0)
+    LocusStrand = tables.Int8Col(pos=9, dflt=1)
+    AltSpliceVariant = tables.Int32Col(pos=10, dflt=0)
+    CanonicalId = tables.StringCol(20, pos=11, dflt=b"")
+    CDNABufferOffset = tables.UInt32Col(pos=12)
+    CDNABufferLength = tables.UInt32Col(pos=13)
+    MD5ProteinHash = tables.StringCol(32, pos=14)
+
 
 class LocusTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
@@ -53,42 +64,53 @@ class LocusTable(tables.IsDescription):
     End = tables.UInt32Col(pos=3)
     Strand = tables.Int8Col(pos=4)
 
+
 class VPairsTable(tables.IsDescription):
     EntryNr1 = tables.UInt32Col(pos=0)
     EntryNr2 = tables.UInt32Col(pos=1)
     RelType = tables.EnumCol(
-        tables.Enum(['1:1','1:n','m:1','m:n','n/a']),
+        tables.Enum(['1:1', '1:n', 'm:1', 'm:n', 'n/a']),
         'n/a', base='uint8', pos=2)
+
 
 class XRefTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     XRefSource = tables.EnumCol(
-        tables.Enum(['UniProtKB/SwissProt', 'UniProtKB/TrEMBL','n/a','EMBL',
-            'Ensembl Gene', 'Ensembl Transcript','Ensembl Protein',
-            'RefSeq','EntrezGene','GI', 'WikiGene', 'IPI', 'Description',
-            'SourceID', 'SourceAC','PMP', 'NCBI', 'FlyBase']),
+        tables.Enum(['UniProtKB/SwissProt', 'UniProtKB/TrEMBL', 'n/a', 'EMBL',
+                     'Ensembl Gene', 'Ensembl Transcript', 'Ensembl Protein',
+                     'RefSeq', 'EntrezGene', 'GI', 'WikiGene', 'IPI', 'Description',
+                     'SourceID', 'SourceAC', 'PMP', 'NCBI', 'FlyBase']),
         'n/a', base='uint8', pos=2)
-    XRefId = tables.StringCol(255,pos=3)
+    XRefId = tables.StringCol(255, pos=3)
+
 
 class GeneOntologyTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     TermNr = tables.UInt32Col(pos=2)
-    Evidence = tables.StringCol(3,pos=3)
-    Reference = tables.StringCol(255,pos=4)
+    Evidence = tables.StringCol(3, pos=3)
+    Reference = tables.StringCol(255, pos=4)
+
 
 class GenomeTable(tables.IsDescription):
     NCBITaxonId = tables.UInt32Col(pos=0)
-    UniProtSpeciesCode = tables.StringCol(5,pos=1)
+    UniProtSpeciesCode = tables.StringCol(5, pos=1)
     TotEntries = tables.UInt32Col(pos=2)
     TotAA = tables.UInt32Col(pos=3)
     EntryOff = tables.UInt32Col(pos=4)
-    SciName = tables.StringCol(255,pos=5)
-    Release = tables.StringCol(255,pos=6)
+    SciName = tables.StringCol(255, pos=5)
+    Release = tables.StringCol(255, pos=6)
+
 
 class TaxonomyTable(tables.IsDescription):
     NCBITaxonId = tables.UInt32Col(pos=0)
     ParentTaxonId = tables.UInt32Col(pos=1)
-    Name = tables.StringCol(255,pos=2)
+    Name = tables.StringCol(255, pos=2)
+
+
+class DomainTable(tables.IsDescription):
+    EntryNr = tables.UInt32Col(pos=0)
+    DomainId = tables.StringCol(20, pos=1)
+    Coords = tables.StringCol(255, pos=2)
 
 
 class DarwinException(Exception):
@@ -102,23 +124,25 @@ def callDarwinExport(func):
     file specified by 'outfn'.
     This function returns the parsed json datastructure"""
 
-    tmpfile = "/tmp/darwinExporter_%d.dat"%(os.getpid())
+    tmpfile = "/tmp/darwinExporter_%d.dat" % (os.getpid())
     drwCodeFn = os.path.abspath(
-        os.path.splitext(__file__)[0]+'.drw')
+        os.path.splitext(__file__)[0] + '.drw')
     try:
-        with open(os.devnull,'w') as DEVNULL:
-            p = subprocess.Popen(['darwin','-q','-E','-B'], stdin=subprocess.PIPE,
-                stderr=subprocess.PIPE, stdout=DEVNULL)
+        with open(os.devnull, 'w') as DEVNULL:
+            resource.setrlimit(resource.RLIMIT_STACK, (65532000, 65532000))
+            p = subprocess.Popen(['darwin', '-q', '-E', '-B'], stdin=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, stdout=DEVNULL)
             drwCmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
                 tmpfile, drwCodeFn, func).encode('utf-8')
+            common.package_logger.debug('calling darwin function: {}'.format(func))
             p.communicate(input=drwCmd)
-            if p.returncode>0:
-                raise DarwinException( p.stderr.read() )
+            if p.returncode > 0:
+                raise DarwinException(p.stderr.read())
 
-        trans_tab = "".join(str(chr(x)) for x in range(128))+" "*128
-        with open(tmpfile,'r') as jsonData:
+        trans_tab = "".join(str(chr(x)) for x in range(128)) + " " * 128
+        with open(tmpfile, 'r') as jsonData:
             rawdata = jsonData.read()
-            data = json.loads(rawdata.translate(trans_tab));
+            data = json.loads(rawdata.translate(trans_tab))
     finally:
         silentremove(tmpfile)
     return data
@@ -136,8 +160,9 @@ def silentremove(filename):
     try:
         os.remove(filename)
     except OSError as e:
-        if e.errno != errno.ENOENT: # errno.ENOENT = no such file or directory
-            raise # re-raise exception if a different error occured
+        if e.errno != errno.ENOENT:  # errno.ENOENT = no such file or directory
+            raise  # re-raise exception if a different error occured
+
 
 def load_tsv_to_numpy(args):
     fn, off1, off2, swap = args
@@ -146,20 +171,20 @@ def load_tsv_to_numpy(args):
     relEnum['1:m'] = relEnum['1:n']
     relEnum['n:m'] = relEnum['m:n']
     read_dir = -1 if swap else 1
-    dtype = [('EntryNr1','i4'),('EntryNr2','i4'),('Score','i4'),('RelType','i1')]
-    for curNr, curFn in enumerate([fn, fn.replace('.ext.','.')]):
+    dtype = [('EntryNr1', 'i4'), ('EntryNr2', 'i4'), ('Score', 'i4'), ('RelType', 'i1')]
+    for curNr, curFn in enumerate([fn, fn.replace('.ext.', '.')]):
         try:
             with gzip.GzipFile(curFn) as fh:
                 augData = numpy.genfromtxt(fh, dtype=dtype,
-                    names=[_[0] for _ in dtype],
-                    delimiter='\t',
-                    usecols=(0,1,2,3),
-                    converters={'EntryNr1': lambda nr: int(nr)+off1,
-                            'EntryNr2': lambda nr: int(nr)+off2,
-                            'RelType': lambda rel: relEnum[rel[::read_dir].decode()]})
-                break;
+                                           names=[_[0] for _ in dtype],
+                                           delimiter='\t',
+                                           usecols=(0, 1, 2, 3),
+                                           converters={'EntryNr1': lambda nr: int(nr) + off1,
+                                                       'EntryNr2': lambda nr: int(nr) + off2,
+                                                       'RelType': lambda rel: relEnum[rel[::read_dir].decode()]})
+                break
         except OSError as e:
-            if curNr<1:
+            if curNr < 1:
                 common.package_logger.info('tried to load {}'.format(curFn))
                 pass
             else:
@@ -168,34 +193,33 @@ def load_tsv_to_numpy(args):
             common.package_logger.warn('ioerror occured on {}'.format(curFn))
             raise
 
-    ret_cols = ['EntryNr1','EntryNr2','RelType']
+    ret_cols = ['EntryNr1', 'EntryNr2', 'RelType']
     if swap:
-        reversed_cols = tuple(augData.dtype.names[z] for z in (1,0,2,3))
+        reversed_cols = tuple(augData.dtype.names[z] for z in (1, 0, 2, 3))
         augData.dtype.names = reversed_cols
     return augData[ret_cols]
 
+
 def read_vps_from_tsv(gs, ref_genome):
     ref_genome_idx = gs.get_where_list("(UniProtSpeciesCode=='{}')".
-            format(ref_genome))[0]
-    jobsArgs = [] 
+                                       format(ref_genome))[0]
+    jobsArgs = []
     for g in range(len(gs)):
-        if g==ref_genome_idx:
+        if g == ref_genome_idx:
             continue
         g1, g2 = sorted((g, ref_genome_idx,))
-        off1, off2 = gs.read_coordinates(numpy.array((g1,g2)), 'EntryOff')
-        fn = os.path.join(os.environ['DARWIN_OMADATA_PATH'],'Phase4',
-                gs.cols.UniProtSpeciesCode[g1].decode(), 
-                gs.cols.UniProtSpeciesCode[g2].decode()+".orth.txt.gz")
-        tup = (fn, off1, off2, g1!=ref_genome_idx)
+        off1, off2 = gs.read_coordinates(numpy.array((g1, g2)), 'EntryOff')
+        fn = os.path.join(os.environ['DARWIN_OMADATA_PATH'], 'Phase4',
+                          gs.cols.UniProtSpeciesCode[g1].decode(),
+                          gs.cols.UniProtSpeciesCode[g2].decode() + ".orth.txt.gz")
+        tup = (fn, off1, off2, g1 != ref_genome_idx)
         common.package_logger.info('adding job: {}'.format(tup))
         jobsArgs.append(tup)
 
     pool = mp.Pool()
     allPairs = pool.map(load_tsv_to_numpy, jobsArgs)
     pool.close()
-
-    return numpy.lib.recfunctions.stack_arrays(allPairs, usemask=False) 
-    
+    return numpy.lib.recfunctions.stack_arrays(allPairs, usemask=False)
 
 
 class DataImportError(Exception):
@@ -209,35 +233,50 @@ class DarwinExporter(object):
             os.environ['DARWIN_BROWSERDATA_PATH'],
             path))
         mode = 'append' if os.path.exists(fn) else 'write'
-        self._compr = tables.Filters(complevel=6,complib='zlib', fletcher32=True)
+        self._compr = tables.Filters(complevel=6, complib='zlib', fletcher32=True)
         self.h5 = tables.open_file(fn, mode=mode[0], filters=self._compr)
-        self.logger.info("opened %s in %s mode, options %s"%(
+        self.logger.info("opened %s in %s mode, options %s" % (
             fn, mode, str(self._compr)))
-        self.h5.root._f_setattr('convertion_start', time.strftime("%c"))
+        if mode == 'write':
+            self.h5.root._f_setattr('convertion_start', time.strftime("%c"))
+
+    def get_version(self):
+        """return version of the dataset.
+
+        Default implementation searches for 'mname' in Matrix or matrix_stats.drw files.
+        """
+        for fname in ('Matrix', 'matrix_stats.drw'):
+            with open(os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'], fname), 'r') as fh:
+                for i, line in enumerate(fh):
+                    if line.startswith('mname :='):
+                        match = re.match(r'mname := \'(?P<version>[^\']*)\'', line)
+                        return match.group('version')
+                    if i > 1000:
+                        break
+        raise DataImportError('No version information found')
 
     def add_version(self):
-        # FIXME: proper implementation of version
-        version = 'Mar 2015'
-        self.h5.root._f_setattr('oma_version', version)
+        version = self.get_version()
+        self.h5.set_node_attr('/', 'oma_version', version)
 
     def add_species_data(self):
         cache_file = os.path.join(
-            os.getenv('DARWIN_NETWORK_SCRATCH_PATH',''),
-            'pyoma','gs.json')
+            os.getenv('DARWIN_NETWORK_SCRATCH_PATH', ''),
+            'pyoma', 'gs.json')
         if os.path.exists(cache_file):
             with open(cache_file, 'r') as fd:
                 data = json.load(fd)
         else:
             data = callDarwinExport('GetGenomeData();')
-        gstab = self.h5.create_table('/', 'Genome', GenomeTable, 
-            expectedrows=len(data['GS']))
+        gstab = self.h5.create_table('/', 'Genome', GenomeTable,
+                                     expectedrows=len(data['GS']))
         self._write_to_table(gstab, data['GS'])
         gstab.cols.NCBITaxonId.create_csindex(filters=self._compr)
         gstab.cols.UniProtSpeciesCode.create_csindex(filters=self._compr)
         gstab.cols.EntryOff.create_csindex(filters=self._compr)
 
-        taxtab = self.h5.create_table('/', 'Taxonomy', TaxonomyTable, 
-            expectedrows=len(data['Tax']))
+        taxtab = self.h5.create_table('/', 'Taxonomy', TaxonomyTable,
+                                      expectedrows=len(data['Tax']))
         self._write_to_table(taxtab, data['Tax'])
         taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
 
@@ -245,38 +284,52 @@ class DarwinExporter(object):
         try:
             vpGrp = self.h5.get_node('/VPairs')
         except tables.NoSuchNodeError:
-            vpGrp = self.h5.create_group('/','VPairs',title='Pairwise Orthologs')
+            vpGrp = self.h5.create_group('/', 'VPairs', title='Pairwise Orthologs')
 
         for gs in self.h5.root.Genome.iterrows():
             genome = gs['UniProtSpeciesCode'].decode()
-            if not '/'+genome in self.h5:
+            if not '/' + genome in self.h5:
                 cache_file = os.path.join(
-                    os.getenv('DARWIN_NETWORK_SCRATCH_PATH',''),
-                    'pyoma','vps','{}.json'.format(genome))
+                    os.getenv('DARWIN_NETWORK_SCRATCH_PATH', ''),
+                    'pyoma', 'vps', '{}.json'.format(genome))
                 if os.path.exists(cache_file):
                     with open(cache_file, 'r') as fd:
                         data = json.load(fd)
-                elif (not os.getenv('DARWIN_OMADATA_PATH') is None and
-                        os.path.exists(os.path.join(
-                            os.environ['DARWIN_OMADATA_PATH'], 'Phase4'))):
+                elif ((not os.getenv('DARWIN_OMADATA_PATH') is None) and
+                          os.path.exists(os.path.join(
+                                  os.environ['DARWIN_OMADATA_PATH'], 'Phase4'))):
                     # try to read from Phase4 in parallel.
-                    data = read_vps_from_tsv(self.h5.root.Genome, 
+                    data = read_vps_from_tsv(self.h5.root.Genome,
                                              genome.encode('utf-8'))
                 else:
                     # fallback to read from VPsDB
                     data = callDarwinExport('GetVPsForGenome({})'.
-                            format(genome))
+                                            format(genome))
 
                 self.logger.debug(data[1])
                 vpTab = self.h5.create_table(vpGrp, genome, VPairsTable,
-                    expectedrows=len(data))
+                                             expectedrows=len(data))
                 if isinstance(data, list):
-                    enum= vpTab.get_enum('RelType')
+                    enum = vpTab.get_enum('RelType')
                     for row in data:
-                        row[2] = enum[row[2].decode()]
+                        row[2] = enum[row[2]]  #.decode()]
 
                 self._write_to_table(vpTab, data)
 
+    def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):
+        # add ' ' after each sequence (Ascii is smaller than
+        # any AA, allows to build PAT array with split between
+        # sequences.
+        seqLen = len(sequence) + 1
+        row[typ + 'BufferOffset'] = off
+        row[typ + 'BufferLength'] = seqLen
+        seqNumpyObj = numpy.ndarray((seqLen,),
+                                    buffer=(sequence + " ").encode('utf-8'),
+                                    dtype=tables.StringAtom(1))
+        sequence_array.append(seqNumpyObj)
+        if typ == "Seq":
+            row['MD5ProteinHash'] = hashlib.md5(sequence.encode('utf-8')).hexdigest()
+        return seqLen
 
     def add_proteins(self):
         gsNode = self.h5.get_node('/Genome')
@@ -285,51 +338,48 @@ class DarwinExporter(object):
         try:
             protGrp = self.h5.get_node('/Protein')
         except tables.NoSuchNodeError:
-            protGrp = self.h5.create_group('/','Protein')
+            protGrp = self.h5.create_group('/', 'Protein')
         protTab = self.h5.create_table(protGrp, 'Entries', ProteinTable,
-            expectedrows=nrProt)
-        seqArr = self.h5.create_earray(protGrp,'SequenceBuffer', 
-            tables.StringAtom(1),(0,),'concatenated protein sequences',
-            expectedrows=nrAA+nrProt)
-
-        seqOff = 0
+                                       expectedrows=nrProt)
+        seqArr = self.h5.create_earray(protGrp, 'SequenceBuffer',
+                                       tables.StringAtom(1), (0,), 'concatenated protein sequences',
+                                       expectedrows=nrAA + nrProt)
+        cdnaArr = self.h5.create_earray(protGrp, 'CDNABuffer',
+                                        tables.StringAtom(1), (0,), 'concatenated cDNA sequences',
+                                        expectedrows=3 * nrAA + nrProt)
+        seqOff = cdnaOff = 0
         for gs in gsNode.iterrows():
             genome = gs['UniProtSpeciesCode'].decode()
             cache_file = os.path.join(
-                os.getenv('DARWIN_NETWORK_SCRATCH_PATH',''),
-                'pyoma','prots','{}.json'.format(genome))
+                os.getenv('DARWIN_NETWORK_SCRATCH_PATH', ''),
+                'pyoma', 'prots', '{}.json'.format(genome))
             if os.path.exists(cache_file):
-                with open(cache_file,'r') as fd:
+                with open(cache_file, 'r') as fd:
                     data = json.load(fd)
             else:
-                data = callDarwinExport('GetProteinsForGenome(%s)'%(genome))
+                data = callDarwinExport('GetProteinsForGenome(%s)' % (genome))
 
             if len(data['seqs']) != gs['TotEntries']:
                 raise DataImportError('number of entries (%d) does '
-                    'not match number of seqs (%d) for %s'%
-                    (len(data['seqs']), gs['TotEntries'], genome))
+                                      'not match number of seqs (%d) for %s' %
+                                      (len(data['seqs']), gs['TotEntries'], genome))
 
-            locTab = self.h5.create_table('/Protein/Locus', 
-                genome, LocusTable, createparents=True, 
-                expectedrows=gs['TotEntries']*4)
+            locTab = self.h5.create_table('/Protein/Locus',
+                                          genome, LocusTable, createparents=True,
+                                          expectedrows=gs['TotEntries'] * 4)
 
             for nr in range(gs['TotEntries']):
-                eNr = data['off']+nr+1
-                protTab.row['EntryNr'] = eNr 
+                eNr = data['off'] + nr + 1
+                protTab.row['EntryNr'] = eNr
                 protTab.row['OmaGroup'] = data['ogs'][nr]
-                # add ' ' after each sequence (Ascii is smaller than 
-                # any AA, allows to build PAT array with split between 
-                # sequences.
-                seqLen = len(data['seqs'][nr])+1
-                protTab.row['SeqBufferOffset'] = seqOff
-                protTab.row['SeqBufferLength'] = seqLen
-                seqNumpyObj = numpy.ndarray((seqLen,), 
-                    buffer=(data['seqs'][nr]+" ").encode('utf-8'),
-                    dtype=tables.StringAtom(1))
-                seqArr.append(seqNumpyObj)
-                seqOff += seqLen
+
+                seqOff += self._add_sequence(data['seqs'][nr], protTab.row, seqArr, seqOff)
+                cdnaOff += self._add_sequence(data['cdna'][nr], protTab.row, cdnaArr, cdnaOff, 'CDNA')
+
                 protTab.row['Chromosome'] = data['chrs'][nr]
                 protTab.row['AltSpliceVariant'] = data['alts'][nr]
+                protTab.row['OmaHOG'] = b""  # will be assigned later
+                protTab.row['CanonicalId'] = b""  # will be assigned later
 
                 locus_str = data['locs'][nr]
                 try:
@@ -345,44 +395,45 @@ class DarwinExporter(object):
             protTab.flush()
             seqArr.flush()
             for n in (protTab, seqArr, locTab):
-                self.logger.info('worte %s: compression ratio %3f%%'%
-                    (n._v_pathname, 100*n.size_on_disk/n.size_in_memory))
+                self.logger.info('worte %s: compression ratio %3f%%' %
+                                 (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory))
         protTab.cols.EntryNr.create_csindex(filters=self._compr)
+        protTab.cols.MD5ProteinHash.create_csindex(filters=self._compr)
 
 
     def _write_to_table(self, tab, data):
         tab.append(data)
-        self.logger.info('wrote %s : compression ratio %.3f%%'%
-                (tab._v_pathname, 100*tab.size_on_disk/tab.size_in_memory))
+        self.logger.info('wrote %s : compression ratio %.3f%%' %
+                         (tab._v_pathname, 100 * tab.size_on_disk / tab.size_in_memory))
 
     def add_hogs(self):
         hog_path = os.path.normpath(os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'],
-            '..','downloads','HOGs'))
+            '..', 'downloads', 'HOGs'))
         entryTab = self.h5.get_node('/Protein/Entries')
         tree_filename = os.path.join(
-                os.environ['DARWIN_BROWSERDATA_PATH'],
-                'speciestree.nwk')
+            os.environ['DARWIN_BROWSERDATA_PATH'],
+            'speciestree.nwk')
         hog_converter = HogConverter(entryTab)
         hog_converter.attach_newick_taxonomy(tree_filename)
-        hogTab = self.h5.create_table('/', 'HogLevel', HOGsTable, 
-            'nesting structure for each HOG', expectedrows=1e8)
-        self.orthoxml_buffer = self.h5.create_earray('/OrthoXML', 'Buffer', 
-            tables.StringAtom(1),(0,), 'concatenated orthoxml files',                            
-            expectedrows=1e9, createparents=True)
-        self.orthoxml_index = self.h5.create_table('/OrthoXML', 'Index', OrthoXML_HOG_Table,
-            'Range index per HOG into OrthoXML Buffer', expectedrows=5e6)
+        hogTab = self.h5.create_table('/', 'HogLevel', HOGsTable,
+                                      'nesting structure for each HOG', expectedrows=1e8)
+        self.orthoxml_buffer = self.h5.create_earray('/OrthoXML', 'Buffer',
+                                                     tables.StringAtom(1), (0,), 'concatenated orthoxml files',
+                                                     expectedrows=1e9, createparents=True)
+        self.orthoxml_index = self.h5.create_table('/OrthoXML', 'Index', OrthoXmlHogTable,
+                                                   'Range index per HOG into OrthoXML Buffer', expectedrows=5e6)
         for root, dirs, filenames in os.walk(hog_path):
             for fn in filenames:
                 try:
-                    levels = hog_converter.convert_file(os.path.join(root,fn))
+                    levels = hog_converter.convert_file(os.path.join(root, fn))
                     hogTab.append(levels)
                     fam_nrs = set([z[0] for z in levels])
-                    self.add_orthoxml(os.path.join(root,fn), fam_nrs)
+                    self.add_orthoxml(os.path.join(root, fn), fam_nrs)
                 except Exception as e:
-                    self.logger.error('an error occured while processing '+fn+':')
+                    self.logger.error('an error occured while processing ' + fn + ':')
                     self.logger.exception(e)
-                    
+
         hog_converter.write_hogs()
 
     def add_orthoxml(self, orthoxml_path, fam_nrs):
@@ -393,6 +444,7 @@ class DarwinExporter(object):
             orthoxml = fh.read().encode('utf-8')
             offset = len(self.orthoxml_buffer)
             length = len(orthoxml)
+
             self.orthoxml_buffer.append(numpy.ndarray((length,),
                 buffer=orthoxml, dtype=tables.StringAtom(1)))
             for fam in fam_nrs:
@@ -404,16 +456,14 @@ class DarwinExporter(object):
                 row.append()
 
 
-
-
     def add_xrefs(self):
         self.logger.info('start parsing ServerIndexed to extract XRefs and GO annotations')
         db_parser = IndexedServerParser()
-        xref_tab = self.h5.create_table('/','XRef', XRefTable,
-                'Cross-references of proteins to external ids / descriptions',
-                expectedrows=1e8)
-        go_tab = self.h5.create_table('/','GeneOntology', GeneOntologyTable,
-                'Gene Ontology annotations', expectedrows=1e8)
+        xref_tab = self.h5.create_table('/', 'XRef', XRefTable,
+                                        'Cross-references of proteins to external ids / descriptions',
+                                        expectedrows=1e8)
+        go_tab = self.h5.create_table('/', 'GeneOntology', GeneOntologyTable,
+                                      'Gene Ontology annotations', expectedrows=1e8)
         xref_importer = XRefImporter(db_parser, xref_tab, go_tab)
         db_parser.parse_entrytags()
         xref_importer.flush_buffers()
@@ -421,7 +471,7 @@ class DarwinExporter(object):
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("c"))
         self.h5.close()
-        self.logger.info('closed %s'%(self.h5.filename))
+        self.logger.info('closed %s' % (self.h5.filename))
 
     def create_indexes(self):
         self.logger.info('createing indexes for HOGs')
@@ -443,6 +493,91 @@ class DarwinExporter(object):
         goTab.cols.EntryNr.create_csindex()
         goTab.cols.TermNr.create_index()
 
+        self.logger.info('creating index for domains (EntryNr)')
+        domtab = self.h5.get_node('/Annotations/Domains')
+        domtab.cols.EntryNr.create_csindex()
+
+    def _iter_canonical_xref(self):
+        """extract one canonical xref id for each protein.
+
+        We take the first valid xref per gene with the ordering of xrefsources
+        as given in the xrefsource_order."""
+        xrefsource_order = ('UniProtKB/SwissProt', 'UniProtKB/TrEMBL',
+                            'Ensembl Gene', 'Ensembl Protein', 'FlyBase',)
+
+        xrefs = self.h5.get_node('/XRef')
+        source_enum = xrefs.get_enum('XRefSource')
+        canonical_sources = [source_enum[z] for z in xrefsource_order]
+        current_protein = None
+        past_proteins = set([])
+        for xref in xrefs:
+            if xref['EntryNr'] != current_protein:
+                if current_protein:
+                    past_proteins.add(current_protein)
+                    yield (current_protein, current_xrefs.pop()[1])
+                current_protein = xref['EntryNr']
+                current_xrefs = [(1000, b'')]  # init with a sentinel
+                if current_protein in past_proteins:
+                    raise DataImportError('Data in /XRef is not sorted w.r.t. EntryNr')
+            if xref['XRefSource'] in canonical_sources and xref['XRefSource'] < current_xrefs[-1][0]:
+                current_xrefs.append((xref['XRefSource'], xref['XRefId']))
+        if current_protein:
+            yield (current_protein, current_xrefs.pop()[1])
+
+    def add_canonical_id(self):
+        """add one canonical xref id to the /Protein/Entries table."""
+        self.logger.info('adding canonical ids for each protein...')
+        prot_tab = self.h5.get_node('/Protein/Entries')
+        canonical_ids = numpy.chararray(shape=(len(prot_tab),), itemsize=prot_tab.cols.CanonicalId.dtype.itemsize)
+        for eNr, canonical_id in self._iter_canonical_xref():
+            row_nr = eNr - 1
+            row = prot_tab[row_nr]
+            if row['EntryNr'] != eNr:
+                self.logger.warn('Entries table not properly sorted: {}, expected {}'.format(row['EntryNr'], eNr))
+                raise DataImportError('Entries table not properly sorted')
+            canonical_ids[row_nr] = canonical_id
+        prot_tab.modify_column(0, len(prot_tab), 1, column=canonical_ids, colname='CanonicalId')
+        prot_tab.flush()
+
+    def add_domain_info(self, domains):
+        self.logger.info('adding domain information...')
+        domtab = self.h5.create_table('/Annotations', 'Domains', DomainTable, createparents=True, expectedrows=1e7)
+        entrytab = self.h5.get_node('/Protein/Entries')
+        md5_to_enr = collections.defaultdict(list)
+        for e in entrytab:
+            md5_to_enr[e['MD5ProteinHash']].append(e['EntryNr'])
+
+        buffer = []
+        for i, domain in enumerate(domains):
+            for entry_nr in md5_to_enr[domain.md5.encode('utf-8')]:
+                buffer.append((entry_nr, domain.id, domain.coords))
+                if len(buffer) > 5000:
+                    domtab.append(buffer)
+                    buffer = []
+            if i % 50000 == 0:
+                self.logger.info('processed {:d} domain annotations so far'.format(i))
+        if len(buffer) > 0:
+            domtab.append(buffer)
+        domtab.flush()
+
+
+def iter_domains(url):
+    DomainTuple = collections.namedtuple('DomainTuple', ('md5', 'id', 'coords'))
+    try:
+        with urllib.request.urlopen(url) as response:
+            with gzip.open(response, 'rt') as uncompressed:
+                csv_reader = csv.reader(uncompressed)
+                for lineNr, row in enumerate(csv_reader):
+                    try:
+                        dom = DomainTuple(*row)
+                        yield dom
+                    except Exception as e:
+                        common.package_logger.exception('cannot create tuple from line {}'.format(lineNr))
+    except urllib.request.URLError as e:
+        common.package_logger.warn('cannot access domain url')
+        raise StopIteration()
+
+
 
 class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
     def _annotateGroupR(self, node, og, idx=0):
@@ -455,13 +590,13 @@ class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
 class HogConverter(object):
     def __init__(self, entry_tab):
         self.fam_re = re.compile(r'HOG:(?P<fam_nr>\d+)')
-        self.hogs = numpy.chararray(shape=(len(entry_tab)+1,), itemsize=255)
+        self.hogs = numpy.chararray(shape=(len(entry_tab) + 1,), itemsize=255)
         self.hogs[:] = ''
         self.entry_tab = entry_tab
 
     def attach_newick_taxonomy(self, tree):
         self.taxonomy = familyanalyzer.NewickTaxonomy(tree)
-    
+
     def convert_file(self, fn):
         p = familyanalyzer.OrthoXMLParser(fn)
         if self.taxonomy:
@@ -472,19 +607,19 @@ class HogConverter(object):
         for fam in p.getToplevelGroups():
             m = self.fam_re.match(fam.get('og'))
             fam_nr = int(m.group('fam_nr'))
-            levs.extend([(fam_nr, n.getparent().get('og'),n.get('value'),) 
-                for n in p._findSubNodes('property')
-                    if n.get('name')=="TaxRange"])
+            levs.extend([(fam_nr, n.getparent().get('og'), n.get('value'),)
+                         for n in p._findSubNodes('property')
+                         if n.get('name') == "TaxRange"])
 
         geneNodes = p.root.findall('.//{{{ns0}}}geneRef'.
-              format(**familyanalyzer.OrthoXMLParser.ns))
+                                   format(**familyanalyzer.OrthoXMLParser.ns))
         for x in geneNodes:
             self.hogs[int(x.get('id'))] = x.get('og')
 
         return levs
 
     def write_hogs(self):
-        self.entry_tab.modify_column(0,len(self.entry_tab),1, self.hogs[1:], 'OmaHOG') 
+        self.entry_tab.modify_column(0, len(self.entry_tab), 1, self.hogs[1:], 'OmaHOG')
         self.entry_tab.flush()
 
 
@@ -495,52 +630,54 @@ class XRefImporter(object):
         self.xref_tab = xref_tab
         self.go_tab = go_tab
         xrefEnum = XRefTable.columns.get('XRefSource').enum
-        for tag in ['GI','EntrezGene','WikiGene','IPI']:
+        for tag in ['GI', 'EntrezGene', 'WikiGene', 'IPI']:
             db_parser.add_tag_handler(
-                    tag, 
-                    lambda key, enr, typ=xrefEnum[tag]: self.key_value_handler(key, enr, typ))
-        db_parser.add_tag_handler('Refseq_ID', 
-            lambda key, enr: self.key_value_handler(key, enr, xrefEnum['RefSeq']))
-        db_parser.add_tag_handler('SwissProt', 
-            lambda key, enr: self.key_value_handler(key, enr, xrefEnum['UniProtKB/SwissProt']))
-        db_parser.add_tag_handler('DE', 
-            lambda key, enr: self.key_value_handler(key, enr, xrefEnum['Description']))
-        db_parser.add_tag_handler('GO',self.go_handler)
+                tag,
+                lambda key, enr, typ=xrefEnum[tag]: self.key_value_handler(key, enr, typ))
+        db_parser.add_tag_handler('Refseq_ID',
+                                  lambda key, enr: self.key_value_handler(key, enr, xrefEnum['RefSeq']))
+        db_parser.add_tag_handler('SwissProt',
+                                  lambda key, enr: self.key_value_handler(key, enr, xrefEnum['UniProtKB/SwissProt']))
+        db_parser.add_tag_handler('DE',
+                                  lambda key, enr: self.key_value_handler(key, enr, xrefEnum['Description']))
+        db_parser.add_tag_handler('GO', self.go_handler)
         db_parser.add_tag_handler('ID', self.assign_source_handler)
         db_parser.add_tag_handler('AC', self.assign_source_handler)
 
-        db_parser.add_tag_handler('ID', 
-            lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['SourceID']))
-        db_parser.add_tag_handler('AC', 
-            lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['SourceAC']))
-        for tag in ['PMP','EMBL']:
+        db_parser.add_tag_handler('ID',
+                                  lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['SourceID']))
+        db_parser.add_tag_handler('AC',
+                                  lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['SourceAC']))
+        for tag in ['PMP', 'EMBL']:
             db_parser.add_tag_handler(
-                    tag, 
-                    lambda key, enr, typ=xrefEnum[tag]: self.multi_key_handler(key, enr, typ))
-        for tag in ['SwissProt_AC','UniProt']: #UniProt/TrEMBL tag is cut to UniProt!
+                tag,
+                lambda key, enr, typ=xrefEnum[tag]: self.multi_key_handler(key, enr, typ))
+        for tag in ['SwissProt_AC', 'UniProt']:  # UniProt/TrEMBL tag is cut to UniProt!
             db_parser.add_tag_handler(tag,
-                lambda key, enr, typ=xrefEnum['UniProtKB/TrEMBL']: 
-                    self.remove_uniprot_code_handler(key, enr,typ))
+                                      lambda key, enr, typ=xrefEnum['UniProtKB/TrEMBL']:
+                                      self.remove_uniprot_code_handler(key, enr, typ))
 
         self.db_parser = db_parser
         self.xrefEnum = xrefEnum
-        self.ENS_RE=re.compile(r'ENS(?P<species>[A-Z]{0,3})(?P<typ>[GTP])(?P<num>\d{11})')
-        self.FB_RE=re.compile(r'FB(?P<typ>[gnptr]{2})(?P<num>\d{7})')
-        self.NCBI_RE=re.compile(r'[A-Z]{3}\d{5}\.\d$')
-        self.GO_RE=re.compile(r'GO:(?P<termNr>\d{7})')
-        self.quote_re=re.compile(r'([[,])([\w_:]+)([,\]])')
+        self.ENS_RE = re.compile(r'ENS(?P<species>[A-Z]{0,3})(?P<typ>[GTP])(?P<num>\d{11})')
+        self.FB_RE = re.compile(r'FB(?P<typ>[gnptr]{2})(?P<num>\d{7})')
+        self.NCBI_RE = re.compile(r'[A-Z]{3}\d{5}\.\d$')
+        self.GO_RE = re.compile(r'GO:(?P<termNr>\d{7})')
+        self.quote_re = re.compile(r'([[,])([\w_:]+)([,\]])')
 
     def flush_buffers(self):
         common.package_logger.info('flushing xrefs and go buffers')
-        self.xref_tab.append(self.xrefs)
-        self.go_tab.append(self.go)
-        self.xrefs = []
-        self.go = []
+        if len(self.xrefs) > 0:
+            self.xref_tab.append(self.xrefs)
+            self.xrefs = []
+        if len(self.go) > 0:
+            self.go_tab.append(self.go)
+            self.go = []
 
 
     def _add_to_xrefs(self, eNr, enum_nr, key):
-        if not isinstance(eNr,int):
-            raise ValueError('eNr is of wrong type:'+str(eNr))
+        if not isinstance(eNr, int):
+            raise ValueError('eNr is of wrong type:' + str(eNr))
         self.xrefs.append((eNr, enum_nr, key.encode('utf-8'),))
         if len(self.xrefs) > 5e6:
             self.flush_buffers()
@@ -553,8 +690,8 @@ class XRefImporter(object):
     def multi_key_handler(self, multikey, eNr, enum_nr):
         for key in multikey.split('; '):
             pos = key.find('.Rep')
-            if pos>0: 
-                key=key[0:pos]
+            if pos > 0:
+                key = key[0:pos]
             self._add_to_xrefs(eNr, enum_nr, key)
 
     def assign_source_handler(self, multikey, eNr):
@@ -562,17 +699,17 @@ class XRefImporter(object):
             ens_match = self.ENS_RE.match(key)
             if not ens_match is None:
                 typ = ens_match.group('typ')
-                if typ=='P':
+                if typ == 'P':
                     enum_nr = self.xrefEnum['Ensembl Protein']
-                elif typ=='G':
+                elif typ == 'G':
                     enum_nr = self.xrefEnum['Ensembl Gene']
-                elif typ=='T':
+                elif typ == 'T':
                     enum_nr = self.xrefEnum['Ensembl Transcript']
                 common.package_logger.debug(
-                   'ensembl: ({}, {}, {})'.format(key,typ, enum_nr))
+                    'ensembl: ({}, {}, {})'.format(key, typ, enum_nr))
                 self._add_to_xrefs(eNr, enum_nr, key)
-            
-            for enum, regex in {'FlyBase':self.FB_RE, 'NCBI':self.NCBI_RE}.items():
+
+            for enum, regex in {'FlyBase': self.FB_RE, 'NCBI': self.NCBI_RE}.items():
                 match = regex.match(key)
                 if not match is None:
                     enum_nr = self.xrefEnum[enum]
@@ -585,14 +722,14 @@ class XRefImporter(object):
             try:
                 term, rem = t.split('@')
             except ValueError as e:
-                common.package_logger.warning('cannot parse GO annotation: '+t)
+                common.package_logger.warning('cannot parse GO annotation: ' + t)
                 continue
 
             term_match = self.GO_RE.match(term)
             termNr = int(term_match.group('termNr'))
-            rem = rem.replace('{','[')
-            rem = rem.replace('}',']')
-            rem = self.quote_re.sub('\g<1>"\g<2>"\g<3>',rem)
+            rem = rem.replace('{', '[')
+            rem = rem.replace('}', ']')
+            rem = self.quote_re.sub('\g<1>"\g<2>"\g<3>', rem)
             for evi, refs in eval(rem):
                 for ref in refs:
                     self.go.append((enr, termNr, evi, ref.encode('utf-8')))
@@ -602,29 +739,34 @@ class XRefImporter(object):
 
     def remove_uniprot_code_handler(self, multikey, eNr, enum_nr):
         common.package_logger.debug(
-                'remove_uniprot_code_handler called ({}, {},{})'.format(multikey,eNr, enum_nr))
+            'remove_uniprot_code_handler called ({}, {},{})'.format(multikey, eNr, enum_nr))
         for key in multikey.split('; '):
             pos = key.find('_')
-            if pos>0:
+            if pos > 0:
                 self._add_to_xrefs(eNr, enum_nr, key[0:pos])
             else:
                 self._add_to_xrefs(eNr, enum_nr, key)
 
 
 class IndexedServerParser(object):
-    def __init__(self, fn=None):
-        if fn is None:
-            fn = os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'ServerIndexed.db')
-        if isinstance(fn, basestring):
-            self.doc = open(fn, 'r')
-        else:
-            self.doc = fn
+    def __init__(self, fh=None):
+        """Initializes a Parser for SGML formatted IndexedServer file
+
+        :param fh: file handle of the IndexServer file. If not provided,
+                   the file ServerIndexed.db in DARWIN_BROWSERDATA_PATH is
+                   used instead.
+        """
+        self.do_close_at_end = False
+        if fh is None:
+            fh = open(os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'ServerIndexed.db'), 'r')
+            self.do_close_at_end = True
+        self.doc = fh
         self.tag_handlers = collections.defaultdict(list)
 
     def add_tag_handler(self, tag, handler):
         self.tag_handlers[tag].append(handler)
         common.package_logger.debug('# handlers for {}: {}'.format(tag, len(self.tag_handlers[tag])))
-        
+
 
     def parse_entrytags(self):
         """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym, 
@@ -635,48 +777,52 @@ class IndexedServerParser(object):
         for line in self.doc:
             line = line.strip()
             if not line.startswith('<E>'):
-                common.package_logger.debug('skipping line:'+line)
+                common.package_logger.debug('skipping line:' + line)
                 continue
 
             eNr += 1
-            common.package_logger.debug('entry {}: {}'.format(eNr,line))
+            common.package_logger.debug('entry {}: {}'.format(eNr, line))
             entry = lxml.html.fragment_fromstring(line)
             for tag, handlers in self.tag_handlers.items():
                 common.package_logger.debug('tag {} ({} handlers)'.format(tag, len(handlers)))
-                tag_text = [t.text for t in entry.findall('./'+tag.lower())]
+                tag_text = [t.text for t in entry.findall('./' + tag.lower())]
                 for value in tag_text:
                     # common.package_logger.debug('value of tag: {}'.format(value.encode('utf-8')))
                     if value is None:
                         continue
                     for handler in handlers:
-                       handler(value, eNr)
-                       #common.package_logger.debug('called handler {} with ({},{})'.format(
-                       #    handler, value.encode('utf-8'), eNr))
-
+                        handler(value, eNr)
+                        # common.package_logger.debug('called handler {} with ({},{})'.format(
+                        #    handler, value.encode('utf-8'), eNr))
+        if self.do_close_at_end:
+            self.doc.close()
 
 
 
 def getDebugLogger():
     import logging
+
     log = logging.getLogger('pyoma')
     log.setLevel(logging.DEBUG)
-    logHandler=logging.StreamHandler()
+    logHandler = logging.StreamHandler()
     logHandler.setLevel(logging.DEBUG)
     logHandler.setFormatter(logging.Formatter(
-       '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     log.addHandler(logHandler)
     return log
 
 
 def main(name="OmaServer.h5"):
     log = getDebugLogger()
-    x=DarwinExporter(name, logger=log)
+    x = DarwinExporter(name, logger=log)
     x.add_version()
     x.add_species_data()
     x.add_orthologs()
     x.add_proteins()
     x.add_hogs()
     x.add_xrefs()
+    x.add_domain_info(iter_domains('ftp://ftp.biochem.ucl.ac.uk/pub/gene3d_data/CURRENT_RELEASE/mdas.csv.gz'))
+    x.add_canonical_id()
     x.close()
 
     x = DarwinExporter(name, logger=log)

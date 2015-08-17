@@ -258,6 +258,8 @@ class DarwinExporter(object):
     def add_version(self):
         version = self.get_version()
         self.h5.set_node_attr('/', 'oma_version', version)
+        self.h5.set_node_attr('/', 'pytables', tables.get_pytables_version())
+        self.h5.set_node_attr('/', 'hdf5_version', tables.get_hdf5_version())
 
     def add_species_data(self):
         cache_file = os.path.join(
@@ -378,8 +380,8 @@ class DarwinExporter(object):
 
                 protTab.row['Chromosome'] = data['chrs'][nr]
                 protTab.row['AltSpliceVariant'] = data['alts'][nr]
-                protTab.row['OmaHOG'] = b""  # will be assigned later
-                protTab.row['CanonicalId'] = b""  # will be assigned later
+                protTab.row['OmaHOG'] = b" "  # will be assigned later
+                protTab.row['CanonicalId'] = b" "  # will be assigned later
 
                 locus_str = data['locs'][nr]
                 try:
@@ -469,7 +471,7 @@ class DarwinExporter(object):
         xref_importer.flush_buffers()
 
     def close(self):
-        self.h5.root._f_setattr('conversion_end', time.strftime("c"))
+        self.h5.root._f_setattr('conversion_end', time.strftime("%c"))
         self.h5.close()
         self.logger.info('closed %s' % (self.h5.filename))
 

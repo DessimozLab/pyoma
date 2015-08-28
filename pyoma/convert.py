@@ -1,11 +1,13 @@
-from __future__ import division
-import csv
-import urllib.request
+
 from future.builtins import str
 from future.builtins import chr
 from future.builtins import range
 from future.builtins import object
 from future.builtins import super
+from future.standard_library import hooks
+with hooks():
+    import urllib.request
+import csv
 import resource
 import tables
 import numpy
@@ -565,19 +567,26 @@ class DarwinExporter(object):
 
 def iter_domains(url):
     DomainTuple = collections.namedtuple('DomainTuple', ('md5', 'id', 'coords'))
-    try:
-        with urllib.request.urlopen(url) as response:
-            with gzip.open(response, 'rt') as uncompressed:
-                csv_reader = csv.reader(uncompressed)
-                for lineNr, row in enumerate(csv_reader):
-                    try:
-                        dom = DomainTuple(*row)
-                        yield dom
-                    except Exception as e:
-                        common.package_logger.exception('cannot create tuple from line {}'.format(lineNr))
-    except urllib.request.URLError as e:
-        common.package_logger.warn('cannot access domain url')
-        raise StopIteration()
+
+    fname = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH', '/tmp'), "Browser", "xref", 
+                         url.split('/')[-1])
+    if not os.path.exists(fname):
+        try:
+            filename, header = urllib.request.urlretrieve(url, fname)
+            if not filename == fname:
+                common.package_logger.exception('wrong filename')
+        except urllib.request.URLError as e:
+            common.package_logger.warn('cannot access domain url')
+            return
+
+    with gzip.open(fname, 'rt') as uncompressed:
+        csv_reader = csv.reader(uncompressed)
+        for lineNr, row in enumerate(csv_reader):
+            try:
+                dom = DomainTuple(*row)
+                yield dom
+            except Exception as e:
+                common.package_logger.exception('cannot create tuple from line {}'.format(lineNr))
 
 
 

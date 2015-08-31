@@ -203,7 +203,7 @@ def load_tsv_to_numpy(args):
 
 
 def read_vps_from_tsv(gs, ref_genome):
-    ref_genome_idx = gs.get_where_list("(UniProtSpeciesCode=='{}')".
+    ref_genome_idx = gs.get_where_list('(UniProtSpeciesCode=={!r})'.
                                        format(ref_genome))[0]
     jobsArgs = []
     for g in range(len(gs)):

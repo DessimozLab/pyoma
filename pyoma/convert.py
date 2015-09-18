@@ -59,7 +59,7 @@ class ProteinTable(tables.IsDescription):
     CDNABufferLength = tables.UInt32Col(pos=13)
     MD5ProteinHash = tables.StringCol(32, pos=14)
     DescriptionOffset = tables.UInt32Col(pos=15)
-    DescriptionLength = tables.UINt16Col(pos=16)
+    DescriptionLength = tables.UInt16Col(pos=16)
 
 
 class LocusTable(tables.IsDescription):
@@ -82,10 +82,10 @@ class XRefTable(tables.IsDescription):
     XRefSource = tables.EnumCol(
         tables.Enum(['UniProtKB/SwissProt', 'UniProtKB/TrEMBL', 'n/a', 'EMBL',
                      'Ensembl Gene', 'Ensembl Transcript', 'Ensembl Protein',
-                     'RefSeq', 'EntrezGene', 'GI', 'WikiGene', 'IPI', 'Description',
+                     'RefSeq', 'EntrezGene', 'GI', 'WikiGene', 'IPI',
                      'SourceID', 'SourceAC', 'PMP', 'NCBI', 'FlyBase']),
         'n/a', base='uint8', pos=2)
-    XRefId = tables.StringCol(255, pos=3)
+    XRefId = tables.StringCol(50, pos=3)
 
 
 class GeneOntologyTable(tables.IsDescription):
@@ -600,12 +600,12 @@ class DescriptionManager(object):
 
     def __enter__(self):
         self.entry_tab = self.db.get_node(self.entry_path)
-        if not numpy.all(numpy.equal(self.entry_tab.EntryNr,
+        if not numpy.all(numpy.equal(self.entry_tab.col('EntryNr'),
                                      numpy.arange(1,len(self.entry_tab)+1))):
             raise RuntimeError('entry table is not sorted')
 
         root, name = self.buffer_path.rsplit('/', 1)
-        self.desc_buf = self.h5.create_earray(root, name,
+        self.desc_buf = self.db.create_earray(root, name,
             tables.StringAtom(1), (0,), 'concatenated protein descriptions',
             expectedrows=len(self.entry_tab)*100)
         self.cur_eNr = None
@@ -614,6 +614,7 @@ class DescriptionManager(object):
             for col in ('DescriptionOffset','DescriptionLength')])
         # columns to be stored in entry table with buffer index data
         self.buf_index = numpy.zeros(len(self.entry_tab), dtype=bufindex_dtype)
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.cur_eNr:
@@ -629,11 +630,12 @@ class DescriptionManager(object):
         related to eNr X must be staged before changeing to another eNr."""
         if self.cur_eNr and self.cur_eNr != eNr:
             self._store_description()
-            self.cur_eNr = eNr
+            self.cur_desc = []
+        self.cur_eNr = eNr
         self.cur_desc.append(desc)
         
     def _store_description(self):
-        buf = self.cur_desc.join("; ").encode('utf-8')
+        buf = "; ".join(self.cur_desc).encode('utf-8')
         buf = buf[0:2**16-1]  #limit to max value of buffer length field
         len_buf = len(buf)
         idx = self.cur_eNr - 1
@@ -699,9 +701,9 @@ class XRefImporter(object):
         for tag in ['GI', 'EntrezGene', 'WikiGene', 'IPI']:
             db_parser.add_tag_handler(
                 tag, 
-                lambda key, enr, typ=xrefEnum[tag]: self.multikey_handler(key, enr, typ))
+                lambda key, enr, typ=xrefEnum[tag]: self.multi_key_handler(key, enr, typ))
         db_parser.add_tag_handler('Refseq_ID', 
-                                  lambda key, enr: self.multikey_handler(key, enr, xrefEnum['RefSeq']))
+                                  lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['RefSeq']))
         db_parser.add_tag_handler('SwissProt', 
                                   lambda key, enr: self.key_value_handler(key, enr, xrefEnum['UniProtKB/SwissProt']))
         db_parser.add_tag_handler('DE', 
@@ -810,7 +812,7 @@ class XRefImporter(object):
                 self.flush_buffers()
 
     def description_handler(self, de, eNr):
-        self.desc_manager.add((eNr, de))
+        self.desc_manager.add_description(eNr, de)
 
     def remove_uniprot_code_handler(self, multikey, eNr, enum_nr):
         """remove the species part (sep by '_') of a uniprot long accession to the short acc"""

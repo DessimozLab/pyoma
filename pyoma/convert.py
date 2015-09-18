@@ -58,6 +58,8 @@ class ProteinTable(tables.IsDescription):
     CDNABufferOffset = tables.UInt32Col(pos=12)
     CDNABufferLength = tables.UInt32Col(pos=13)
     MD5ProteinHash = tables.StringCol(32, pos=14)
+    DescriptionOffset = tables.UInt32Col(pos=15)
+    DescriptionLength = tables.UINt16Col(pos=16)
 
 
 class LocusTable(tables.IsDescription):
@@ -468,9 +470,10 @@ class DarwinExporter(object):
                                         expectedrows=1e8)
         go_tab = self.h5.create_table('/', 'GeneOntology', GeneOntologyTable,
                                       'Gene Ontology annotations', expectedrows=1e8)
-        xref_importer = XRefImporter(db_parser, xref_tab, go_tab)
-        db_parser.parse_entrytags()
-        xref_importer.flush_buffers()
+        with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
+            xref_importer = XRefImporter(db_parser, xref_tab, go_tab, de_man)
+            db_parser.parse_entrytags()
+            xref_importer.flush_buffers()
 
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("%c"))
@@ -589,6 +592,56 @@ def iter_domains(url):
                 common.package_logger.exception('cannot create tuple from line {}'.format(lineNr))
 
 
+class DescriptionManager(object):
+    def __init__(self, db, entry_path, buffer_path):
+        self.db = db
+        self.entry_path = entry_path
+        self.buffer_path = buffer_path
+
+    def __enter__(self):
+        self.entry_tab = self.db.get_node(self.entry_path)
+        if not numpy.all(numpy.equal(self.entry_tab.EntryNr,
+                                     numpy.arange(1,len(self.entry_tab)+1))):
+            raise RuntimeError('entry table is not sorted')
+
+        root, name = self.buffer_path.rsplit('/', 1)
+        self.desc_buf = self.h5.create_earray(root, name,
+            tables.StringAtom(1), (0,), 'concatenated protein descriptions',
+            expectedrows=len(self.entry_tab)*100)
+        self.cur_eNr = None
+        self.cur_desc = []
+        bufindex_dtype = numpy.dtype([(col, self.entry_tab.coldtypes[col]) 
+            for col in ('DescriptionOffset','DescriptionLength')])
+        # columns to be stored in entry table with buffer index data
+        self.buf_index = numpy.zeros(len(self.entry_tab), dtype=bufindex_dtype)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.cur_eNr:
+            self._store_description()
+        self.desc_buf.flush()
+        self.entry_tab.modify_columns(columns=self.buf_index, 
+                                      names=self.buf_index.dtype.names) 
+        self.entry_tab.flush()
+
+    def add_description(self, eNr, desc):
+        """stages a description for addition. Note that the descriptions 
+        must be ordered according to the entryNr, i.e. all descriptions 
+        related to eNr X must be staged before changeing to another eNr."""
+        if self.cur_eNr and self.cur_eNr != eNr:
+            self._store_description()
+            self.cur_eNr = eNr
+        self.cur_desc.append(desc)
+        
+    def _store_description(self):
+        buf = self.cur_desc.join("; ").encode('utf-8')
+        buf = buf[0:2**16-1]  #limit to max value of buffer length field
+        len_buf = len(buf)
+        idx = self.cur_eNr - 1
+        self.buf_index[idx]['DescriptionOffset'] = len(self.desc_buf)
+        self.buf_index[idx]['DescriptionLength'] = len_buf
+        self.desc_buf.append(numpy.ndarray((len_buf,), buffer=buf, dtype=tables.StringAtom(1)))
+
+
 
 class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
     def _annotateGroupR(self, node, og, idx=0):
@@ -635,23 +688,25 @@ class HogConverter(object):
 
 
 class XRefImporter(object):
-    def __init__(self, db_parser, xref_tab, go_tab):
+    def __init__(self, db_parser, xref_tab, go_tab, desc_manager):
         self.xrefs = []
         self.go = []
         self.xref_tab = xref_tab
         self.go_tab = go_tab
+        self.desc_manager = desc_manager
+
         xrefEnum = XRefTable.columns.get('XRefSource').enum
         for tag in ['GI', 'EntrezGene', 'WikiGene', 'IPI']:
             db_parser.add_tag_handler(
-                tag,
-                lambda key, enr, typ=xrefEnum[tag]: self.key_value_handler(key, enr, typ))
-        db_parser.add_tag_handler('Refseq_ID',
-                                  lambda key, enr: self.key_value_handler(key, enr, xrefEnum['RefSeq']))
-        db_parser.add_tag_handler('SwissProt',
+                tag, 
+                lambda key, enr, typ=xrefEnum[tag]: self.multikey_handler(key, enr, typ))
+        db_parser.add_tag_handler('Refseq_ID', 
+                                  lambda key, enr: self.multikey_handler(key, enr, xrefEnum['RefSeq']))
+        db_parser.add_tag_handler('SwissProt', 
                                   lambda key, enr: self.key_value_handler(key, enr, xrefEnum['UniProtKB/SwissProt']))
-        db_parser.add_tag_handler('DE',
-                                  lambda key, enr: self.key_value_handler(key, enr, xrefEnum['Description']))
-        db_parser.add_tag_handler('GO', self.go_handler)
+        db_parser.add_tag_handler('DE', 
+                                  lambda key, enr: self.description_handler(key, enr))
+        db_parser.add_tag_handler('GO',self.go_handler)
         db_parser.add_tag_handler('ID', self.assign_source_handler)
         db_parser.add_tag_handler('AC', self.assign_source_handler)
 
@@ -677,7 +732,7 @@ class XRefImporter(object):
         self.quote_re = re.compile(r'([[,])([\w_:]+)([,\]])')
 
     def flush_buffers(self):
-        common.package_logger.info('flushing xrefs and go buffers')
+        common.package_logger.info('flushing xrefs, go and description buffers')
         if len(self.xrefs) > 0:
             self.xref_tab.append(self.xrefs)
             self.xrefs = []
@@ -695,10 +750,13 @@ class XRefImporter(object):
 
 
     def key_value_handler(self, key, eNr, enum_nr):
+        """basic handler that simply adds a key (the xref) under a given enum_nr"""
         self._add_to_xrefs(eNr, enum_nr, key)
 
 
     def multi_key_handler(self, multikey, eNr, enum_nr):
+        """try to split the myltikey field using '; ' as a delimiter and add each
+        part individually under the passed enum_nr id type."""
         for key in multikey.split('; '):
             pos = key.find('.Rep')
             if pos > 0:
@@ -706,6 +764,9 @@ class XRefImporter(object):
             self._add_to_xrefs(eNr, enum_nr, key)
 
     def assign_source_handler(self, multikey, eNr):
+        """handler that splits the multikey field at '; ' locations and 
+        tries to guess for each part the id_type. If a type could be
+        identified, it is added under with this id type, otherwise left out."""
         for key in multikey.split('; '):
             ens_match = self.ENS_RE.match(key)
             if not ens_match is None:
@@ -728,6 +789,7 @@ class XRefImporter(object):
 
 
     def go_handler(self, gos, enr):
+        """parse go annotations and add them to the go buffer"""
         for t in gos.split('; '):
             t = t.strip()
             try:
@@ -747,8 +809,11 @@ class XRefImporter(object):
             if len(self.go) > 5e6:
                 self.flush_buffers()
 
+    def description_handler(self, de, eNr):
+        self.desc_manager.add((eNr, de))
 
     def remove_uniprot_code_handler(self, multikey, eNr, enum_nr):
+        """remove the species part (sep by '_') of a uniprot long accession to the short acc"""
         common.package_logger.debug(
             'remove_uniprot_code_handler called ({}, {},{})'.format(multikey, eNr, enum_nr))
         for key in multikey.split('; '):

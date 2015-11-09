@@ -117,6 +117,12 @@ class DomainTable(tables.IsDescription):
     Coords = tables.StringCol(255, pos=2)
 
 
+class DomainDescriptionTable(tables.IsDescription):
+    DomainId = tables.StringCol(20, pos=0)
+    Source = tables.StringCol(11, pos=1)
+    Description = tables.StringCol(150, pos=2)
+
+
 class DarwinException(Exception):
     pass
 
@@ -567,21 +573,38 @@ class DarwinExporter(object):
             domtab.append(buffer)
         domtab.flush()
 
+    def add_domainname_info(self, domainname_infos):
+        self.logger.info('adding domain name information...')
+        dom_name_tab = self.h5.create_table('Annotations', 'DomainDescription', DomainDescriptionTable,
+                                            createparetns=True, expectedrows=2e5)
+        buffer = []
+        for i, dom_info in enumerate(domainname_infos):
+            buffer.append(dom_info)
+            if len(buffer) > 5000:
+                self._write_to_table(dom_name_tab, buffer)
+                buffer = []
+            if i % 50000 == 0:
+                self.logger.info('processed {:d} domain name descriptions so far'.format(i))
+        if len(buffer) > 0:
+            self._write_to_table(dom_name_tab, buffer)
+        dom_name_tab.flush()
+
+
+def download_url_if_not_present(url):
+    fname = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH', '/tmp'), "Browser", "xref",
+                         url.split('/')[-1])
+    if not os.path.exists(fname):
+        try:
+            urllib.request.urlretrieve(url, fname)
+        except urllib.request.URLError:
+            common.package_logger.warn('cannot access domain url')
+    return fname
+
 
 def iter_domains(url):
     DomainTuple = collections.namedtuple('DomainTuple', ('md5', 'id', 'coords'))
 
-    fname = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH', '/tmp'), "Browser", "xref", 
-                         url.split('/')[-1])
-    if not os.path.exists(fname):
-        try:
-            filename, header = urllib.request.urlretrieve(url, fname)
-            if not filename == fname:
-                common.package_logger.exception('wrong filename')
-        except urllib.request.URLError as e:
-            common.package_logger.warn('cannot access domain url')
-            return
-
+    fname = download_url_if_not_present(url)
     with gzip.open(fname, 'rt') as uncompressed:
         csv_reader = csv.reader(uncompressed)
         for lineNr, row in enumerate(csv_reader):
@@ -876,6 +899,31 @@ class IndexedServerParser(object):
             self.doc.close()
 
 
+DomainDescription = collections.namedtuple('DomainDescription', tables.dtype_from_descr(DomainDescriptionTable).names)
+class CathDomainNameParser(object):
+    re_pattern = re.compile(r'(?P<id>[0-9.]*)\s{3,}\w{7}\s{3,}:\s*(?P<desc>.*)')
+    source = 'CATH/Gene3D'
+
+    def __init__(self, url):
+        self.fname = download_url_if_not_present(url)
+
+    def get_domaindescription_from_row(self, row):
+        return DomainDescription(DomainId=row[0], Source='CATH/Gene3D', Description=row[3])
+
+    def parse(self):
+        open_lib = gzip.open if self.fname.endswith('.gz') else open
+        with open_lib(self.fname, 'rt') as fh:
+            for line in fh:
+                match = self.re_pattern.match(line)
+                if match is not None:
+                    yield DomainDescription(DomainId=match.group('id'), Source=self.source,
+                                            Description=match.group('desc'))
+
+
+class PfamDomainNameParser(CathDomainNameParser):
+    re_pattern = re.compile(r'(?P<id>\w*)\t\w*\t\w*\t\w*\t(?P<desc>.*)')
+    source = 'Pfam'
+
 
 def getDebugLogger():
     import logging
@@ -900,6 +948,8 @@ def main(name="OmaServer.h5"):
     x.add_hogs()
     x.add_xrefs()
     x.add_domain_info(iter_domains('ftp://ftp.biochem.ucl.ac.uk/pub/gene3d_data/CURRENT_RELEASE/mdas.csv.gz'))
+    x.add_domainname_info(itertools.chain(CathDomainNameParser('ftp://ftp.biochem.ucl.ac.uk/pub/cath/latest_release/CathNames').parse(),
+                                          PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
     x.add_canonical_id()
     x.close()
 

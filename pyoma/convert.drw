@@ -4,6 +4,11 @@ GS := GenomeSummaries:
 NS := length(genomes):
 Goff := CreateArray(1..NS+1):
 for i to NS do Goff[i+1] := Goff[i]+GS[genomes[i],TotEntries] od:
+err := traperror(ReadProgram(ddir.'/SubGenome.drw'));
+if err=lasterror then
+    warning('no SubGenome data found.');
+    SubGenome := table(0);
+fi:
 
 
 # code from PhylogeneticTree (LINEAGE) augmented to store the internal
@@ -56,7 +61,8 @@ GetGenomeData := proc()
     for gNr to NS do 
         g := genomes[gNr];
         gs := append(gs, [parse(GS[g,TAXONID]), g, GS[g,TotEntries], 
-            GS[g,TotAA], Goff[gNr], GS[g,SCINAME], GS[g,DBRELEASE]]);
+            GS[g,TotAA], Goff[gNr], GS[g,SCINAME], GS[g,DBRELEASE],
+            SubGenome[g]<>0]);
     od:
     
     _parents := []: _next_new_taxid := -1:
@@ -82,6 +88,24 @@ GetVPsForGenome := proc(g)
     StoreResults(json(vptab)):
 end:
 
+GetSameSpeciesRelations := proc(g)
+    global DB;
+    ReadDb(ddir.'/ServerVPs.db');
+    gNr := SearchArray(g, genomes);
+    ssTab :=  []:
+    for i from Goff[gNr]+1 to Goff[gNr+1] do
+        e := Entry(i);
+        for cp in parse(SearchTag('CP', e)) do
+            ssTab := append(ssTab, [i, cp, 'close paralog', -1, -1, -1, -1]);
+        od:
+        hpTag := SearchTag('HP', e);
+        if hpTag<>'' then for hp in parse(hpTag) do
+            ssTab := append(ssTab, [i, hp[1], 'homeolog', -1, hp[2], -1, -1, -1]);
+        od fi:
+    od:
+    StoreResults(json(ssTab));
+end:
+
 GetProteinsForGenome := proc(g)
     global DB, Splicings;
     if not type(Splicings, table) then ReadProgram(ddir.'/Splicings.drw'); fi:
@@ -98,6 +122,11 @@ GetProteinsForGenome := proc(g)
     tab['ogs'] := [seq(parse(SearchTag('OG',Entry(Goff[gNr]+i))), i=1..GS[g,TotEntries])]:
     tab['chrs'] := [seq(SearchTag('CHR',Entry(Goff[gNr]+i)), i=1..GS[g,TotEntries])];
     tab['locs'] := [seq(SearchTag('LOC',Entry(Goff[gNr]+i)), i=1..GS[g,TotEntries])];
+    if SubGenome[g]<>0 then
+        tab['subgenome'] := [seq(SubGenome[g,i], i=1..GS[g,TotEntries])]
+    else
+        tab['subgenome'] := [seq('', GS[g,TotEntries])]
+    fi:
     sp := Splicings[g]:
     alt := CreateArray(1..GS[g,TotEntries]):
     if sp<>0 then 

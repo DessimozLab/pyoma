@@ -1,12 +1,10 @@
-
+from __future__ import division
 from future.builtins import str
 from future.builtins import chr
 from future.builtins import range
 from future.builtins import object
 from future.builtins import super
 from future.standard_library import hooks
-with hooks():
-    import urllib.request
 import csv
 import resource
 import tables
@@ -24,9 +22,12 @@ import lxml.html
 import collections
 import gzip
 import hashlib
+import itertools
 
 from . import common
 from . import locus_parser
+with hooks():
+    import urllib.request
 
 
 # definitions of the pytables formats
@@ -60,6 +61,7 @@ class ProteinTable(tables.IsDescription):
     MD5ProteinHash = tables.StringCol(32, pos=14)
     DescriptionOffset = tables.UInt32Col(pos=15)
     DescriptionLength = tables.UInt16Col(pos=16)
+    SubGenome = tables.StringCol(1, pos=17, dflt=b"")
 
 
 class LocusTable(tables.IsDescription):
@@ -69,12 +71,18 @@ class LocusTable(tables.IsDescription):
     Strand = tables.Int8Col(pos=4)
 
 
-class VPairsTable(tables.IsDescription):
+class PairwiseRelationTable(tables.IsDescription):
     EntryNr1 = tables.UInt32Col(pos=0)
     EntryNr2 = tables.UInt32Col(pos=1)
     RelType = tables.EnumCol(
-        tables.Enum(['1:1', '1:n', 'm:1', 'm:n', 'n/a']),
+        tables.Enum({'1:1': 0, '1:n': 1, 'm:1': 2, 'm:n': 3,
+                     'close paralog': 4, 'homeolog': 5, 'n/a': 6}),
         'n/a', base='uint8', pos=2)
+    Score = tables.Float32Col(pos=3, dflt=-1)
+    Distance = tables.Float32Col(pos=4, dflt=-1)
+    AlignmentOverlap = tables.Float16Col(pos=5, dflt=-1)
+    SyntenyConservationLocal = tables.Float16Col(pos=6, dflt=-1)
+    SyntenyConservationChromosome = tables.Float16Col(pos=7, dflt=-1)
 
 
 class XRefTable(tables.IsDescription):
@@ -103,6 +111,7 @@ class GenomeTable(tables.IsDescription):
     EntryOff = tables.UInt32Col(pos=4)
     SciName = tables.StringCol(255, pos=5)
     Release = tables.StringCol(255, pos=6)
+    IsPolyploid = tables.BoolCol(pos=7)
 
 
 class TaxonomyTable(tables.IsDescription):
@@ -134,7 +143,7 @@ def callDarwinExport(func):
     file specified by 'outfn'.
     This function returns the parsed json datastructure"""
 
-    tmpfile = "/tmp/darwinExporter_%d.dat" % (os.getpid())
+    tmpfile = "/tmp/darwinExporter_{:d}.dat".format(os.getpid())
     drwCodeFn = os.path.abspath(
         os.path.splitext(__file__)[0] + '.drw')
     try:
@@ -176,22 +185,24 @@ def silentremove(filename):
 
 def load_tsv_to_numpy(args):
     fn, off1, off2, swap = args
-    relEnum = VPairsTable.columns['RelType'].enum._names
+    relEnum = PairwiseRelationTable.columns['RelType'].enum._names
     relEnum['n:1'] = relEnum['m:1']
     relEnum['1:m'] = relEnum['1:n']
     relEnum['n:m'] = relEnum['m:n']
     read_dir = -1 if swap else 1
-    dtype = [('EntryNr1', 'i4'), ('EntryNr2', 'i4'), ('Score', 'i4'), ('RelType', 'i1')]
+    dtype = [('EntryNr1', 'i4'), ('EntryNr2', 'i4'), ('Score', 'f4'), ('RelType', 'i1'),
+             ('AlignmentOverlap', 'f2'), ('Distance', 'f4')]
     for curNr, curFn in enumerate([fn, fn.replace('.ext.', '.')]):
         try:
             with gzip.GzipFile(curFn) as fh:
                 augData = numpy.genfromtxt(fh, dtype=dtype,
                                            names=[_[0] for _ in dtype],
                                            delimiter='\t',
-                                           usecols=(0, 1, 2, 3),
+                                           usecols=(0, 1, 2, 3, 4, 5),
                                            converters={'EntryNr1': lambda nr: int(nr) + off1,
                                                        'EntryNr2': lambda nr: int(nr) + off2,
-                                                       'RelType': lambda rel: relEnum[rel[::read_dir].decode()]})
+                                                       'RelType': lambda rel: relEnum[rel[::read_dir].decode()],
+                                                       'Score': lambda score: float(score)/100})
                 break
         except OSError as e:
             if curNr < 1:
@@ -199,21 +210,21 @@ def load_tsv_to_numpy(args):
                 pass
             else:
                 raise e
-        except IOError as e:
-            common.package_logger.warn('ioerror occured on {}'.format(curFn))
-            raise
 
-    ret_cols = ['EntryNr1', 'EntryNr2', 'RelType']
     if swap:
-        reversed_cols = tuple(augData.dtype.names[z] for z in (1, 0, 2, 3))
+        reversed_cols = tuple(augData.dtype.names[z] for z in (1, 0, 2, 3, 4, 5))
         augData.dtype.names = reversed_cols
-    return augData[ret_cols]
+    full_table = numpy.empty(len(augData), dtype=tables.dtype_from_descr(PairwiseRelationTable))
+    full_table[0:] = augData
+    for col_not_in_tsv in set(full_table.dtype.names) - set(augData.dtype.names):
+        full_table[col_not_in_tsv] = -1
+    return full_table
 
 
 def read_vps_from_tsv(gs, ref_genome):
     ref_genome_idx = gs.get_where_list('(UniProtSpeciesCode=={!r})'.
                                        format(ref_genome))[0]
-    jobsArgs = []
+    job_args = []
     for g in range(len(gs)):
         if g == ref_genome_idx:
             continue
@@ -224,12 +235,12 @@ def read_vps_from_tsv(gs, ref_genome):
                           gs.cols.UniProtSpeciesCode[g2].decode() + ".orth.txt.gz")
         tup = (fn, off1, off2, g1 != ref_genome_idx)
         common.package_logger.info('adding job: {}'.format(tup))
-        jobsArgs.append(tup)
+        job_args.append(tup)
 
     pool = mp.Pool()
-    allPairs = pool.map(load_tsv_to_numpy, jobsArgs)
+    all_pairs = pool.map(load_tsv_to_numpy, job_args)
     pool.close()
-    return numpy.lib.recfunctions.stack_arrays(allPairs, usemask=False)
+    return numpy.lib.recfunctions.stack_arrays(all_pairs, usemask=False)
 
 
 class DataImportError(Exception):
@@ -237,6 +248,8 @@ class DataImportError(Exception):
 
 
 class DarwinExporter(object):
+    DB_SCHEMA_VERSION = '2.0'
+
     def __init__(self, path, logger=None):
         self.logger = logger if logger is not None else common.package_logger
         fn = os.path.normpath(os.path.join(
@@ -245,10 +258,18 @@ class DarwinExporter(object):
         mode = 'append' if os.path.exists(fn) else 'write'
         self._compr = tables.Filters(complevel=6, complib='zlib', fletcher32=True)
         self.h5 = tables.open_file(fn, mode=mode[0], filters=self._compr)
-        self.logger.info("opened %s in %s mode, options %s" % (
+        self.logger.info("opened {} in {} mode, options {}".format(
             fn, mode, str(self._compr)))
         if mode == 'write':
             self.h5.root._f_setattr('convertion_start', time.strftime("%c"))
+
+    def _get_or_create_node(self, path, desc=None):
+        try:
+            grp = self.h5.get_node(path)
+        except tables.NoSuchNodeError:
+            base, name = os.path.split(path)
+            grp = self.h5.create_group(base, name, title=desc, createparents=True)
+        return grp
 
     def get_version(self):
         """return version of the dataset.
@@ -270,6 +291,7 @@ class DarwinExporter(object):
         self.h5.set_node_attr('/', 'oma_version', version)
         self.h5.set_node_attr('/', 'pytables', tables.get_pytables_version())
         self.h5.set_node_attr('/', 'hdf5_version', tables.get_hdf5_version())
+        self.h5.set_node_attr('/', 'db_schema_version', self.DB_SCHEMA_VERSION)
 
     def add_species_data(self):
         cache_file = os.path.join(
@@ -292,15 +314,37 @@ class DarwinExporter(object):
         self._write_to_table(taxtab, data['Tax'])
         taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
 
-    def add_orthologs(self):
-        try:
-            vpGrp = self.h5.get_node('/VPairs')
-        except tables.NoSuchNodeError:
-            vpGrp = self.h5.create_group('/', 'VPairs', title='Pairwise Orthologs')
+    def _convert_to_numpyarray(self, data, tab):
+        """convert a list of list dataset into a numpy rec array that
+        corresponds to the table definition of `tab`.
 
+        :param data: the data to be converted.
+        :param tab: a pytables table node."""
+
+        enum_cols = {i: tab.get_enum(col) for (i, col) in enumerate(tab.colnames)
+                     if tab.coltypes[col] == 'enum'}
+        dflts = [tab.coldflts[col] for col in tab.colnames]
+
+        def map_data(col, data):
+            try:
+                val = data[col]
+                return enum_cols[col][val]
+            except IndexError:
+                return dflts[col]
+            except KeyError:
+                return val
+
+        arr = numpy.empty(len(data), dtype=tab.dtype)
+        for i, row in enumerate(data):
+            as_tup = tuple(map_data(c, row) for c in range(len(dflts)))
+            arr[i] = as_tup
+        return arr
+
+    def add_orthologs(self):
         for gs in self.h5.root.Genome.iterrows():
             genome = gs['UniProtSpeciesCode'].decode()
-            if not '/' + genome in self.h5:
+            rel_node_for_genome = self._get_or_create_node('/PairwiseRelation/{}'.format(genome))
+            if 'VPairs' not in rel_node_for_genome:
                 cache_file = os.path.join(
                     os.getenv('DARWIN_NETWORK_SCRATCH_PATH', ''),
                     'pyoma', 'vps', '{}.json'.format(genome))
@@ -315,18 +359,36 @@ class DarwinExporter(object):
                                              genome.encode('utf-8'))
                 else:
                     # fallback to read from VPsDB
-                    data = callDarwinExport('GetVPsForGenome({})'.
-                                            format(genome))
+                    data = callDarwinExport('GetVPsForGenome({})'.format(genome))
 
-                self.logger.debug(data[1])
-                vpTab = self.h5.create_table(vpGrp, genome, VPairsTable,
-                                             expectedrows=len(data))
+                vp_tab = self.h5.create_table(rel_node_for_genome, 'VPairs', PairwiseRelationTable,
+                                              expectedrows=len(data))
                 if isinstance(data, list):
-                    enum = vpTab.get_enum('RelType')
-                    for row in data:
-                        row[2] = enum[row[2]]  #.decode()]
+                    data = self._convert_to_numpyarray(data, vp_tab)
+                self._write_to_table(vp_tab, data)
+                vp_tab.cols.EntryNr1.create_csindex()
 
-                self._write_to_table(vpTab, data)
+    def add_same_species_relations(self):
+        for gs in self.h5.root.Genome.iterrows():
+            genome = gs['UniProtSpeciesCode'].decode()
+            rel_node_for_genome = self._get_or_create_node('/PairwiseRelation/{}'.format(genome))
+            if 'within' not in rel_node_for_genome:
+                cache_file = os.path.join(
+                    os.getenv('DARWIN_NETWORK_SCRATCH_PATH', ''),
+                    'pyoma', 'cps', '{}.json'.format(genome))
+                if os.path.exists(cache_file):
+                    with open(cache_file, 'r') as fd:
+                        data = json.load(fd)
+                else:
+                    # fallback to read from VPsDB
+                    data = callDarwinExport('GetSameSpeciesRelations({})'.format(genome))
+
+                ss_tab = self.h5.create_table(rel_node_for_genome, 'within', PairwiseRelationTable,
+                                              expectedrows=len(data))
+                if isinstance(data, list):
+                    data = self._convert_to_numpyarray(data, ss_tab)
+                self._write_to_table(ss_tab, data)
+                ss_tab.cols.EntryNr1.create_csindex()
 
     def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):
         # add ' ' after each sequence (Ascii is smaller than
@@ -369,12 +431,12 @@ class DarwinExporter(object):
                 with open(cache_file, 'r') as fd:
                     data = json.load(fd)
             else:
-                data = callDarwinExport('GetProteinsForGenome(%s)' % (genome))
+                data = callDarwinExport('GetProteinsForGenome({})'.format(genome))
 
             if len(data['seqs']) != gs['TotEntries']:
-                raise DataImportError('number of entries (%d) does '
-                                      'not match number of seqs (%d) for %s' %
-                                      (len(data['seqs']), gs['TotEntries'], genome))
+                raise DataImportError('number of entries ({:d}) does '
+                                      'not match number of seqs ({:d}) for {}'.format(
+                                        len(data['seqs']), gs['TotEntries'], genome))
 
             locTab = self.h5.create_table('/Protein/Locus',
                                           genome, LocusTable, createparents=True,
@@ -403,6 +465,7 @@ class DarwinExporter(object):
                     protTab.row['LocusStrand'] = locus_tab[0].Strand
                 except ValueError as e:
                     self.logger.warning(e)
+                protTab.row['SubGenome'] = data['subgenome'][nr].encode('ascii')
                 protTab.row.append()
             protTab.flush()
             seqArr.flush()
@@ -411,7 +474,6 @@ class DarwinExporter(object):
                                  (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory))
         protTab.cols.EntryNr.create_csindex(filters=self._compr)
         protTab.cols.MD5ProteinHash.create_csindex(filters=self._compr)
-
 
     def _write_to_table(self, tab, data):
         tab.append(data)
@@ -467,7 +529,6 @@ class DarwinExporter(object):
                 offset += length
                 row.append()
 
-
     def add_xrefs(self):
         self.logger.info('start parsing ServerIndexed to extract XRefs and GO annotations')
         db_parser = IndexedServerParser()
@@ -484,7 +545,7 @@ class DarwinExporter(object):
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("%c"))
         self.h5.close()
-        self.logger.info('closed %s' % (self.h5.filename))
+        self.logger.info('closed {}'.format(self.h5.filename))
 
     def create_indexes(self):
         self.logger.info('createing indexes for HOGs')
@@ -575,8 +636,8 @@ class DarwinExporter(object):
 
     def add_domainname_info(self, domainname_infos):
         self.logger.info('adding domain name information...')
-        dom_name_tab = self.h5.create_table('Annotations', 'DomainDescription', DomainDescriptionTable,
-                                            createparetns=True, expectedrows=2e5)
+        dom_name_tab = self.h5.create_table('/Annotations', 'DomainDescription', DomainDescriptionTable,
+                                            createparents=True, expectedrows=2e5)
         buffer = []
         for i, dom_info in enumerate(domainname_infos):
             buffer.append(dom_info)
@@ -609,9 +670,9 @@ def iter_domains(url):
         csv_reader = csv.reader(uncompressed)
         for lineNr, row in enumerate(csv_reader):
             try:
-                dom = DomainTuple(*row)
+                dom = DomainTuple(*row[0:3])
                 yield dom
-            except Exception as e:
+            except Exception:
                 common.package_logger.exception('cannot create tuple from line {}'.format(lineNr))
 
 
@@ -633,8 +694,8 @@ class DescriptionManager(object):
             expectedrows=len(self.entry_tab)*100)
         self.cur_eNr = None
         self.cur_desc = []
-        bufindex_dtype = numpy.dtype([(col, self.entry_tab.coldtypes[col]) 
-            for col in ('DescriptionOffset','DescriptionLength')])
+        bufindex_dtype = numpy.dtype([(col, self.entry_tab.coldtypes[col])
+            for col in ('DescriptionOffset', 'DescriptionLength')])
         # columns to be stored in entry table with buffer index data
         self.buf_index = numpy.zeros(len(self.entry_tab), dtype=bufindex_dtype)
         return self
@@ -643,8 +704,8 @@ class DescriptionManager(object):
         if self.cur_eNr:
             self._store_description()
         self.desc_buf.flush()
-        self.entry_tab.modify_columns(columns=self.buf_index, 
-                                      names=self.buf_index.dtype.names) 
+        self.entry_tab.modify_columns(columns=self.buf_index,
+                                      names=self.buf_index.dtype.names)
         self.entry_tab.flush()
 
     def add_description(self, eNr, desc):
@@ -656,7 +717,7 @@ class DescriptionManager(object):
             self.cur_desc = []
         self.cur_eNr = eNr
         self.cur_desc.append(desc)
-        
+
     def _store_description(self):
         buf = "; ".join(self.cur_desc).encode('utf-8')
         buf = buf[0:2**16-1]  #limit to max value of buffer length field
@@ -665,7 +726,6 @@ class DescriptionManager(object):
         self.buf_index[idx]['DescriptionOffset'] = len(self.desc_buf)
         self.buf_index[idx]['DescriptionLength'] = len_buf
         self.desc_buf.append(numpy.ndarray((len_buf,), buffer=buf, dtype=tables.StringAtom(1)))
-
 
 
 class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
@@ -723,13 +783,13 @@ class XRefImporter(object):
         xrefEnum = XRefTable.columns.get('XRefSource').enum
         for tag in ['GI', 'EntrezGene', 'WikiGene', 'IPI']:
             db_parser.add_tag_handler(
-                tag, 
+                tag,
                 lambda key, enr, typ=xrefEnum[tag]: self.multi_key_handler(key, enr, typ))
-        db_parser.add_tag_handler('Refseq_ID', 
+        db_parser.add_tag_handler('Refseq_ID',
                                   lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['RefSeq']))
-        db_parser.add_tag_handler('SwissProt', 
+        db_parser.add_tag_handler('SwissProt',
                                   lambda key, enr: self.key_value_handler(key, enr, xrefEnum['UniProtKB/SwissProt']))
-        db_parser.add_tag_handler('DE', 
+        db_parser.add_tag_handler('DE',
                                   lambda key, enr: self.description_handler(key, enr))
         db_parser.add_tag_handler('GO',self.go_handler)
         db_parser.add_tag_handler('ID', self.assign_source_handler)
@@ -765,7 +825,6 @@ class XRefImporter(object):
             self.go_tab.append(self.go)
             self.go = []
 
-
     def _add_to_xrefs(self, eNr, enum_nr, key):
         if not isinstance(eNr, int):
             raise ValueError('eNr is of wrong type:' + str(eNr))
@@ -773,11 +832,9 @@ class XRefImporter(object):
         if len(self.xrefs) > 5e6:
             self.flush_buffers()
 
-
     def key_value_handler(self, key, eNr, enum_nr):
         """basic handler that simply adds a key (the xref) under a given enum_nr"""
         self._add_to_xrefs(eNr, enum_nr, key)
-
 
     def multi_key_handler(self, multikey, eNr, enum_nr):
         """try to split the myltikey field using '; ' as a delimiter and add each
@@ -811,7 +868,6 @@ class XRefImporter(object):
                 if not match is None:
                     enum_nr = self.xrefEnum[enum]
                     self._add_to_xrefs(eNr, enum_nr, key)
-
 
     def go_handler(self, gos, enr):
         """parse go annotations and add them to the go buffer"""
@@ -868,7 +924,6 @@ class IndexedServerParser(object):
         self.tag_handlers[tag].append(handler)
         common.package_logger.debug('# handlers for {}: {}'.format(tag, len(self.tag_handlers[tag])))
 
-
     def parse_entrytags(self):
         """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym, 
         ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ, 
@@ -902,13 +957,10 @@ class IndexedServerParser(object):
 DomainDescription = collections.namedtuple('DomainDescription', tables.dtype_from_descr(DomainDescriptionTable).names)
 class CathDomainNameParser(object):
     re_pattern = re.compile(r'(?P<id>[0-9.]*)\s{3,}\w{7}\s{3,}:\s*(?P<desc>.*)')
-    source = 'CATH/Gene3D'
+    source = b'CATH/Gene3D'
 
     def __init__(self, url):
         self.fname = download_url_if_not_present(url)
-
-    def get_domaindescription_from_row(self, row):
-        return DomainDescription(DomainId=row[0], Source='CATH/Gene3D', Description=row[3])
 
     def parse(self):
         open_lib = gzip.open if self.fname.endswith('.gz') else open
@@ -916,13 +968,14 @@ class CathDomainNameParser(object):
             for line in fh:
                 match = self.re_pattern.match(line)
                 if match is not None:
-                    yield DomainDescription(DomainId=match.group('id'), Source=self.source,
-                                            Description=match.group('desc'))
+                    yield DomainDescription(DomainId=match.group('id').encode('utf-8'),
+                                            Source=self.source,
+                                            Description=match.group('desc').encode('utf-8'))
 
 
 class PfamDomainNameParser(CathDomainNameParser):
     re_pattern = re.compile(r'(?P<id>\w*)\t\w*\t\w*\t\w*\t(?P<desc>.*)')
-    source = 'Pfam'
+    source = b'Pfam'
 
 
 def getDebugLogger():
@@ -944,6 +997,7 @@ def main(name="OmaServer.h5"):
     x.add_version()
     x.add_species_data()
     x.add_orthologs()
+    x.add_same_species_relations()
     x.add_proteins()
     x.add_hogs()
     x.add_xrefs()

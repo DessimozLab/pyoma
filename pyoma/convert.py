@@ -676,6 +676,13 @@ def iter_domains(url):
                 common.package_logger.exception('cannot create tuple from line {}'.format(lineNr))
 
 
+def only_pfam_or_cath_domains(iterable):
+    cath_re = re.compile(r'[1-4]\.')
+    for dom in iterable:
+        if dom.id.startswith('PF') or cath_re.match(dom.id) is not None:
+            yield dom
+
+
 class DescriptionManager(object):
     def __init__(self, db, entry_path, buffer_path):
         self.db = db
@@ -739,8 +746,7 @@ class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
 class HogConverter(object):
     def __init__(self, entry_tab):
         self.fam_re = re.compile(r'HOG:(?P<fam_nr>\d+)')
-        self.hogs = numpy.chararray(shape=(len(entry_tab) + 1,), itemsize=255)
-        self.hogs[:] = ''
+        self.hogs = numpy.zeros(shape=(len(entry_tab) + 1,), dtype=entry_tab.cols.OmaHOG.dtype)
         self.entry_tab = entry_tab
 
     def attach_newick_taxonomy(self, tree):
@@ -1001,9 +1007,11 @@ def main(name="OmaServer.h5"):
     x.add_proteins()
     x.add_hogs()
     x.add_xrefs()
-    x.add_domain_info(iter_domains('ftp://ftp.biochem.ucl.ac.uk/pub/gene3d_data/CURRENT_RELEASE/mdas.csv.gz'))
-    x.add_domainname_info(itertools.chain(CathDomainNameParser('ftp://ftp.biochem.ucl.ac.uk/pub/cath/latest_release/CathNames').parse(),
-                                          PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
+    x.add_domain_info(only_pfam_or_cath_domains(
+        iter_domains('ftp://ftp.biochem.ucl.ac.uk/pub/gene3d_data/CURRENT_RELEASE/mdas.csv.gz')))
+    x.add_domainname_info(itertools.chain(
+        CathDomainNameParser('ftp://ftp.biochem.ucl.ac.uk/pub/cath/latest_release/CathNames').parse(),
+        PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
     x.add_canonical_id()
     x.close()
 

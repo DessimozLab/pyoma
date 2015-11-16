@@ -214,7 +214,7 @@ def load_tsv_to_numpy(args):
     if swap:
         reversed_cols = tuple(augData.dtype.names[z] for z in (1, 0, 2, 3, 4, 5))
         augData.dtype.names = reversed_cols
-    full_table = numpy.empty(len(augData), dtype=tables.dtype_from_descr(PairwiseRelationTable))
+    full_table = numpy.empty(augData.size, dtype=tables.dtype_from_descr(PairwiseRelationTable))
     full_table[0:] = augData
     for col_not_in_tsv in set(full_table.dtype.names) - set(augData.dtype.names):
         full_table[col_not_in_tsv] = -1

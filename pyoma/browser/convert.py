@@ -695,7 +695,7 @@ class DescriptionManager(object):
                                      numpy.arange(1,len(self.entry_tab)+1))):
             raise RuntimeError('entry table is not sorted')
 
-        root, name = self.buffer_path.rsplit('/', 1)
+        root, name = os.path.split(self.buffer_path)
         self.desc_buf = self.db.create_earray(root, name,
             tables.StringAtom(1), (0,), 'concatenated protein descriptions',
             expectedrows=len(self.entry_tab)*100)

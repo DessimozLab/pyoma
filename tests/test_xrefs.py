@@ -1,10 +1,8 @@
 import unittest
+import unittest.mock
 
-try:
-    import io
-except ImportError:
-    import stringIO as io
-from .. import convert as pyoma
+import io
+from pyoma.browser import convert as pyoma
 
 
 class XRefParsingTest(unittest.TestCase):
@@ -14,16 +12,14 @@ class XRefParsingTest(unittest.TestCase):
             <E><ID>BLA22; BLABLA22.Rep22</ID><AC>BLA22.1</AC><EntrezGene>32244</EntrezGene><PMP>P21122; Q24S32</PMP><GO>GO:0006270@[[IDA,{'PMID:2167836'}],[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]; GO:0006275@[[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]</GO></E>
             <E><UniProt/TrEMBL>L8ECQ9_BACSU</UniProt/TrEMBL><SwissProt_AC>Q6CI62</SwissProt_AC><SwissProt>ASF1_YARLI</SwissProt><ID>FBgn0218776</ID><AC>FBpp0245919; FBtr0247427</AC><DE>β-hemoglobin</DE><GO></GO></E>""")
         self.db_parser = pyoma.IndexedServerParser(data)
-        self.importer = pyoma.XRefImporter(self.db_parser, None, None)
-
+        self.desc_manager = unittest.mock.Mock()
+        self.importer = pyoma.XRefImporter(self.db_parser, None, None, self.desc_manager)
 
     def test_standard_handler(self):
         self.db_parser.parse_entrytags()
         enum = pyoma.XRefTable.columns.get('XRefSource').enum
         self.assertIn((1, enum.GI, b'125233342',), self.importer.xrefs)
-        self.assertIn((1, enum.Description, b'hypotetical protein',), self.importer.xrefs)
         self.assertIn((3, enum['UniProtKB/SwissProt'], b'ASF1_YARLI',), self.importer.xrefs)
-
 
     def test_multi_handler(self):
         self.db_parser.parse_entrytags()
@@ -60,8 +56,8 @@ class XRefParsingTest(unittest.TestCase):
         self.assertIn((1, enum['Ensembl Protein'], b'ENSP00000366061'), self.importer.xrefs)
         self.assertIn((1, enum['Ensembl Transcript'], b'ENST00000376865'), self.importer.xrefs)
 
-    def test_unicode_encoding(self):
+    def test_descriptions_passed_to_description_manager(self):
         self.db_parser.parse_entrytags()
-        enum = pyoma.XRefTable.columns.get('XRefSource').enum
-        self.assertIn((3, enum.Description, 'β-hemoglobin'.encode('utf-8')), self.importer.xrefs)
+        self.assertEqual(len(self.desc_manager.add_description.call_args_list), 2)
+        self.assertEqual((3,u'β-hemoglobin'), self.desc_manager.add_description.call_args[0])
 

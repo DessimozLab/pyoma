@@ -1,8 +1,8 @@
 import os
 
 import unittest
-from pyoma.tabledef import BestMatchesFmt, GenomeFmt
-import pyoma.db
+from pyoma.inference.tabledef import BestMatchesFmt, GenomeFmt
+import pyoma.inference.db
 import tables
 import numpy as np
 import tempfile
@@ -25,27 +25,27 @@ class RelationsOfEntryTest(unittest.TestCase):
         self.indata = data[np.where(data['EntryNr1'] == 1)]
 
     def test_contains(self):
-        all_pairs = pyoma.db.RelationsOfEntry(self.indata)
+        all_pairs = pyoma.inference.db.RelationsOfEntry(self.indata)
         self.assertFalse(4 in all_pairs)
         for en2 in (1, 5, 6):
             self.assertTrue(en2 in all_pairs, str(en2) + ' is not in all_pairs')
 
-        spairs = pyoma.db.StablePairsOfEntry(self.indata)
+        spairs = pyoma.inference.db.StablePairsOfEntry(self.indata)
         self.assertFalse(6 in spairs)
         for en2 in (1, 5):
             self.assertTrue(en2 in spairs)
 
-        vpairs = pyoma.db.VPairsOfEntry(self.indata)
+        vpairs = pyoma.inference.db.VPairsOfEntry(self.indata)
         for en2 in (2, 1, 6):
             self.assertFalse(en2 in vpairs)
         self.assertTrue(5 in vpairs)
 
     def test_iterator(self):
-        spairs = pyoma.db.StablePairsOfEntry(self.indata)
+        spairs = pyoma.inference.db.StablePairsOfEntry(self.indata)
         self.assertEqual([x['EntryNr2'] for x in spairs], [1, 5], 'Unexpected members in SPairs')
 
     def test_matches(self):
-        vpairs = pyoma.db.VPairsOfEntry(self.indata)
+        vpairs = pyoma.inference.db.VPairsOfEntry(self.indata)
         self.assertEqual(1, len(vpairs.relations()), "Unexpected number of VPs returned")
 
 
@@ -53,7 +53,7 @@ class GenomePairTest(unittest.TestCase):
     def setUp(self):
         matches, itab = get_test_data()
         itab = np.array([0, 3, 3, 5, 5, 5, 5, 5, 5, 6]).reshape(5, 2)
-        self.genome_pair = pyoma.db.GenomePair(matches, itab)
+        self.genome_pair = pyoma.inference.db.GenomePair(matches, itab)
 
     def test_get_entry(self):
         prot1_matches = [(m['EntryNr1'], m['EntryNr2']) for m in self.genome_pair[1]['ALL']]
@@ -104,9 +104,8 @@ class OmaDBTest(unittest.TestCase):
         except IOError:
             pass
 
-
     def test_without_write_sps(self):
-        db = pyoma.db.OmaDB(self.db_filename, mode='a')
+        db = pyoma.inference.db.OmaDB(self.db_filename, mode='a')
         pair = db.matches('SE001', 'SE002')
         sp = [z['EntryNr2'] for z in pair[1]['SP']]
         sp.append(6)
@@ -116,14 +115,14 @@ class OmaDBTest(unittest.TestCase):
         db.close()
 
     def test_write_vps(self):
-        db = pyoma.db.OmaDB(self.db_filename, mode='a')
+        db = pyoma.inference.db.OmaDB(self.db_filename, mode='a')
         vp = [z['EntryNr2'] for z in db.matches('SE001', 'SE002')[1]['VP']]
         vp.append(6)
         db.matches('SE001', 'SE002')[1]['VP'] = vp
         db.matches('SE001', 'SE002').flush()
         db.close()
 
-        db = pyoma.db.OmaDB(self.db_filename, mode='r')
+        db = pyoma.inference.db.OmaDB(self.db_filename, mode='r')
         vp = [z['EntryNr2'] for z in db.matches('SE001', 'SE002')[1]['VP']]
         self.assertIn(6, vp)
         db.close()

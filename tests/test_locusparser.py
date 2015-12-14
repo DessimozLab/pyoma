@@ -1,5 +1,5 @@
 import unittest
-from .. import locus_parser as lp
+from pyoma.browser import locus_parser as lp
 
 class LocusParserTest(unittest.TestCase):
     

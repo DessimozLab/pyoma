@@ -24,7 +24,7 @@ import gzip
 import hashlib
 import itertools
 
-from . import common
+from .. import common
 from . import locus_parser
 with hooks():
     import urllib.request
@@ -727,7 +727,7 @@ class DescriptionManager(object):
 
     def _store_description(self):
         buf = "; ".join(self.cur_desc).encode('utf-8')
-        buf = buf[0:2**16-1]  #limit to max value of buffer length field
+        buf = buf[0:2**16-1]  # limit to max value of buffer length field
         len_buf = len(buf)
         idx = self.cur_eNr - 1
         self.buf_index[idx]['DescriptionOffset'] = len(self.desc_buf)

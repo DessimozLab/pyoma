@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import pyoma.convert
+import pyoma.browser.convert
 import argparse
 import os
 import sys
@@ -17,7 +17,7 @@ def main(args):
         os.environ['DARWIN_BROWSERDATA_PATH'] = options.release
     print(options.out)
 
-    pyoma.convert.main(options.out)
+    pyoma.browser.convert.main(options.out)
 
 if __name__ == '__main__':
     main(sys.argv[1:])

@@ -7,7 +7,7 @@ import json
 import numpy
 from hashlib import md5
 
-from ..convert import callDarwinExport, DarwinExporter
+from pyoma.browser.convert import callDarwinExport, DarwinExporter
 
 def store_in_json(data, fn):
     os.mkdir(os.path.dirname(fn))

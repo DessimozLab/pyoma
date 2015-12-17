@@ -7,7 +7,6 @@ import itertools
 import tables
 import numpy
 import numpy.lib.recfunctions
-import django.conf
 import re
 import json
 import os
@@ -29,21 +28,18 @@ def count_elements(iterable):
 
 
 class Database(object):
-    """This is the main interface to the oma database. Queries 
+    """This is the main interface to the oma database. Queries
     will typically be issued by methods of this object. Typically
     the result of queries will be :py:class:`numpy.recarray` objects."""
     EXPECTED_DB_SCHEMA = "2.0"
 
-    def __init__(self, db=None):
-        if db is None:
-            db = django.conf.settings.HDF5DB['PATH']
-
+    def __init__(self, db):
         if isinstance(db, str):
             self.db = tables.open_file(db, 'r')
         elif isinstance(db, tables.File):
             self.db = db
         else:
-            raise ValueError(str(db)+' is not a valid database type')
+            raise ValueError(str(db) + ' is not a valid database type')
 
         try:
             db_version = self.db.get_node_attr('/', 'db_schema_version')
@@ -101,7 +97,7 @@ class Database(object):
     def _get_vptab(self, entry_nr):
         genome = self.id_mapper['OMA'].genome_of_entry_nr(entry_nr)['UniProtSpeciesCode'].decode()
         return self.db.get_node('/PairwiseRelation/{}/VPairs'.format(genome))
-    
+
     def count_vpairs(self, entry_nr):
         vptab = self._get_vptab(entry_nr)
         try:
@@ -129,10 +125,10 @@ class Database(object):
         """Returns neighbor genes around a query gene.
 
         This method returns a tuple containing a numpy recarray with
-        gene entries located around the query gene, and an index 
-        pointing to the query gene. The genes are sorted according to 
-        their position on the chromosome. 
-        
+        gene entries located around the query gene, and an index
+        pointing to the query gene. The genes are sorted according to
+        their position on the chromosome.
+
         The *windows* parameter specifies the number of genes up- and
         downstream of the query gene that should be reported. Note
         that the actual number can be smaller if the query gene is close
@@ -181,7 +177,7 @@ class Database(object):
         """
         return self.db.root.HogLevel.read_where(
                 '(Fam=={})'.format(fam_nr))['Level']
-    
+
     def hog_members(self, entry_nr, level):
         """get hog members with respect to a given taxonomic level.
 
@@ -219,10 +215,10 @@ class Database(object):
             raise ValueError('cannot retrieve orthoxml for {}'.format(fam))
         idx = idx[0]
         return self.db.root.OrthoXML.Buffer[idx['HogBufferOffset']:idx['HogBufferOffset']+idx['HogBufferLength']].tostring()
-        
+
     def _hog_lex_range(self, hog):
-        """return the lexographic range of a hog. 
-        
+        """return the lexographic range of a hog.
+
         This can be used to search of sub-hogs which are nested in
         the query hog. The semantics is such that
         _hog_lex_range[0] <= hog < _hog_lex_range[1].
@@ -294,8 +290,8 @@ class OmaIdMapper(object):
         return genome
 
     def omaid_to_entry_nr(self, omaid):
-        """returns the internal numeric entrynr from a 
-        UniProtSpeciesCode+nr id. this is the inverse 
+        """returns the internal numeric entrynr from a
+        UniProtSpeciesCode+nr id. this is the inverse
         function of 'map_entry_nr'."""
         match = self._omaid_re.match(omaid)
         if match is None:
@@ -308,7 +304,7 @@ class OmaIdMapper(object):
 
     def genome_range(self, query):
         """returns the internal range of EntryNr associated with
-        'query'. 'query' can be either a numeric id of a protein 
+        'query'. 'query' can be either a numeric id of a protein
         or a UniProtSpeciesCode of a genome. If 'query' is unknown
         by the database, an InvalidOmaId exception is raised"""
         if isinstance(query, (int, numpy.integer)):
@@ -318,9 +314,9 @@ class OmaIdMapper(object):
                 raise InvalidOmaId(query)
         else:
             genome_row = self.genome_from_UniProtCode(query)
-        return (genome_row['EntryOff']+1, 
+        return (genome_row['EntryOff']+1,
                 genome_row['EntryOff']+genome_row['TotEntries'],)
-        
+
 
 class IDResolver(object):
     def __init__(self, db):
@@ -351,7 +347,7 @@ class IDResolver(object):
         try:
             nr = self._from_numeric(e_id)
         except ValueError:
-            try: 
+            try:
                 nr = self._from_omaid(e_id)
             except (InvalidOmaId, UnknownSpecies) as e:
                 nr = self.search_xrefs(e_id)
@@ -359,8 +355,8 @@ class IDResolver(object):
 
 
 class Taxonomy(object):
-    """Taxonomy provides an interface to navigate the taxonomy data. 
-    
+    """Taxonomy provides an interface to navigate the taxonomy data.
+
     For performance reasons, it will load at instantiation the data
     into memory. Hence, it should only be instantiated once."""
 
@@ -394,7 +390,7 @@ class Taxonomy(object):
         return self.tax_table[idx]
 
     def get_parent_taxa(self, query):
-        """Get array of taxonomy entries leading towards the 
+        """Get array of taxonomy entries leading towards the
         root of the taxonomy.
 
         :param query: the starting taxonomy level"""
@@ -407,7 +403,7 @@ class Taxonomy(object):
             tmp = self.tax_table[i]['ParentTaxonId']
             if tmp == parent:
                 raise InvalidTaxonId(u"{0:d} has itself as parent".format(tmp))
-            parent = tmp 
+            parent = tmp
             count += 1
             if count > 100:
                 raise InvalidTaxonId(u"{0:d} exceeds max depth of 100. Infinite recursion?".format(query))
@@ -461,7 +457,7 @@ class IdMapperFactory(object):
                 self.mappers[idtype] = mapper
             except KeyError:
                 raise UnknownIdType('{} is unknown'.format(str(idtype)))
-        return mapper 
+        return mapper
 
 
 class XrefIdMapper(object):
@@ -543,11 +539,11 @@ class XrefIdMapper(object):
                 xrefdict[row['EntryNr']][typ] = {'id': row['XRefId']}
         return xrefdict
 
-        
+
 class UniProtIdMapper(XrefIdMapper):
     def __init__(self, db):
         super(UniProtIdMapper, self).__init__(db)
-        self.idtype = frozenset([self.xrefEnum[z] 
+        self.idtype = frozenset([self.xrefEnum[z]
             for z in ['UniProtKB/SwissProt', 'UniProtKB/TrEMBL']])
 
 
@@ -594,33 +590,3 @@ class DomainNameIdMapper(object):
         return {'name': info['Description'].decode(), 'source': info['Source'].decode(),
                 'domainid': domain_id.decode()}
 
-
-class Gene3dDomainsJson(object):
-    def __init__(self, seqlen, domains):
-        self.json = self.getJson(seqlen, domains)
-
-    def getJson(self, seqlen, domains):
-        # Input: protein sequence length and list of domains
-        # This function is a reordering of that by Ed ..., Summer 2015
-        regions = []
-        if len(domains) == 0:
-            return {'length': seqlen,
-                    'regions': [{'name': 'n/a', 'source': 'n/a',
-                                 'location': "{}:{}".format(int(seqlen*.1), int(seqlen*.9))}]}
-
-        for dom in domains:
-            try:
-                region = domain_source.get_info_dict_from_domainid(dom['DomainId'])
-                region['location'] = dom['Coords'].decode()
-                regions.append(region)
-            except KeyError as e:
-                logger.info('ignoring domain annotation: {}'.format(e))
-
-        return {'length': seqlen, 'regions': regions}
-
-
-db = Database()
-id_resolver = db.id_resolver
-id_mapper = db.id_mapper
-tax = db.tax
-domain_source = DomainNameIdMapper(db)

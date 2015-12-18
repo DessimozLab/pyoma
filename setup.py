@@ -4,7 +4,7 @@ name = 'pyoma'
 
 setup(
     name=name,
-    version='0.1.0',
+    version='0.2.0',
     author='Adrian Altenhoff',
     author_email='adrian.altenhoff@inf.ethz.ch',
     description='todoc',
@@ -19,6 +19,7 @@ setup(
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
     ],
     data_files=[('pyoma', ['pyoma/convert.drw'])],
     install_requires=['numpy', 'tables>=3.2', 'future'],

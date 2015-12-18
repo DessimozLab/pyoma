@@ -45,9 +45,9 @@ class DatabaseTests(unittest.TestCase):
         entry = numpy.zeros(1, dtype=tables.dtype_from_descr(tablefmt.ProteinTable))
         entry['OmaHOG'] = b""
         with self.assertRaises(Singleton):
-            self.db.hog_family(entry)
-        entry['OmaHOG'] = b"HOG:000523"
-        self.assertEqual(523, self.db.hog_family(entry))
+            self.db.hog_family(entry[0])
+        entry['OmaHOG'] = b"HOG:0000523"
+        self.assertEqual(523, self.db.hog_family(entry[0]))
 
     def test_orthoxml(self):
         xml = self.db.get_orthoxml(33).decode()

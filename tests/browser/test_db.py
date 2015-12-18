@@ -61,3 +61,11 @@ class DatabaseTests(unittest.TestCase):
         for hog, rng in cases:
             self.assertEqual(rng, self.db._hog_lex_range(hog))
 
+    def test_hog_members(self):
+        cases = [('Eukaryota', 5), ('Fungi', 3), ('Taphrinomycotina',0)]
+        for level, exp_member_cnt in cases:
+            if exp_member_cnt == 0:
+                with self.assertRaises(ValueError):
+                    self.db.hog_members(12, level)
+            else:
+                self.assertEqual(len(self.db.hog_members(12, level)), exp_member_cnt)

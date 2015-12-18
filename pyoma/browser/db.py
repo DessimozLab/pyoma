@@ -204,6 +204,8 @@ class Database(object):
         # last, we need to filter the proteins to the tax range of interest
         members = [x for x in members if level.encode('ascii') in self.tax.get_parent_taxa(
             self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
+        if query not in members:
+            raise ValueError(u"Level '{0:s}' undefined for query gene".format(level))
         return members
 
     def get_orthoxml(self, fam):

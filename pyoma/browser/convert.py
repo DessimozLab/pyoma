@@ -26,110 +26,9 @@ import itertools
 
 from .. import common
 from . import locus_parser
+from . import tablefmt
 with hooks():
     import urllib.request
-
-
-# definitions of the pytables formats
-
-class HOGsTable(tables.IsDescription):
-    Fam = tables.Int32Col(pos=1)
-    ID = tables.StringCol(255, pos=2)
-    Level = tables.StringCol(255, pos=3)
-
-
-class OrthoXmlHogTable(tables.IsDescription):
-    Fam = tables.UInt32Col(pos=0)
-    HogBufferOffset = tables.UInt32Col(pos=1)
-    HogBufferLength = tables.UInt32Col(pos=2)
-
-
-class ProteinTable(tables.IsDescription):
-    EntryNr = tables.UInt32Col(pos=1)
-    SeqBufferOffset = tables.UInt32Col(pos=2)
-    SeqBufferLength = tables.UInt32Col(pos=3)
-    OmaGroup = tables.UInt32Col(pos=4, dflt=0)
-    OmaHOG = tables.StringCol(255, pos=5, dflt=b"")
-    Chromosome = tables.StringCol(255, pos=6)
-    LocusStart = tables.UInt32Col(pos=7)
-    LocusEnd = tables.UInt32Col(pos=8)
-    LocusStrand = tables.Int8Col(pos=9, dflt=1)
-    AltSpliceVariant = tables.Int32Col(pos=10, dflt=0)
-    CanonicalId = tables.StringCol(20, pos=11, dflt=b"")
-    CDNABufferOffset = tables.UInt32Col(pos=12)
-    CDNABufferLength = tables.UInt32Col(pos=13)
-    MD5ProteinHash = tables.StringCol(32, pos=14)
-    DescriptionOffset = tables.UInt32Col(pos=15)
-    DescriptionLength = tables.UInt16Col(pos=16)
-    SubGenome = tables.StringCol(1, pos=17, dflt=b"")
-
-
-class LocusTable(tables.IsDescription):
-    EntryNr = tables.UInt32Col(pos=1)
-    Start = tables.UInt32Col(pos=2)
-    End = tables.UInt32Col(pos=3)
-    Strand = tables.Int8Col(pos=4)
-
-
-class PairwiseRelationTable(tables.IsDescription):
-    EntryNr1 = tables.UInt32Col(pos=0)
-    EntryNr2 = tables.UInt32Col(pos=1)
-    RelType = tables.EnumCol(
-        tables.Enum({'1:1': 0, '1:n': 1, 'm:1': 2, 'm:n': 3,
-                     'close paralog': 4, 'homeolog': 5, 'n/a': 6}),
-        'n/a', base='uint8', pos=2)
-    Score = tables.Float32Col(pos=3, dflt=-1)
-    Distance = tables.Float32Col(pos=4, dflt=-1)
-    AlignmentOverlap = tables.Float16Col(pos=5, dflt=-1)
-    SyntenyConservationLocal = tables.Float16Col(pos=6, dflt=-1)
-    SyntenyConservationChromosome = tables.Float16Col(pos=7, dflt=-1)
-
-
-class XRefTable(tables.IsDescription):
-    EntryNr = tables.UInt32Col(pos=1)
-    XRefSource = tables.EnumCol(
-        tables.Enum(['UniProtKB/SwissProt', 'UniProtKB/TrEMBL', 'n/a', 'EMBL',
-                     'Ensembl Gene', 'Ensembl Transcript', 'Ensembl Protein',
-                     'RefSeq', 'EntrezGene', 'GI', 'WikiGene', 'IPI',
-                     'SourceID', 'SourceAC', 'PMP', 'NCBI', 'FlyBase']),
-        'n/a', base='uint8', pos=2)
-    XRefId = tables.StringCol(50, pos=3)
-
-
-class GeneOntologyTable(tables.IsDescription):
-    EntryNr = tables.UInt32Col(pos=1)
-    TermNr = tables.UInt32Col(pos=2)
-    Evidence = tables.StringCol(3, pos=3)
-    Reference = tables.StringCol(255, pos=4)
-
-
-class GenomeTable(tables.IsDescription):
-    NCBITaxonId = tables.UInt32Col(pos=0)
-    UniProtSpeciesCode = tables.StringCol(5, pos=1)
-    TotEntries = tables.UInt32Col(pos=2)
-    TotAA = tables.UInt32Col(pos=3)
-    EntryOff = tables.UInt32Col(pos=4)
-    SciName = tables.StringCol(255, pos=5)
-    Release = tables.StringCol(255, pos=6)
-    IsPolyploid = tables.BoolCol(pos=7)
-
-
-class TaxonomyTable(tables.IsDescription):
-    NCBITaxonId = tables.UInt32Col(pos=0)
-    ParentTaxonId = tables.UInt32Col(pos=1)
-    Name = tables.StringCol(255, pos=2)
-
-
-class DomainTable(tables.IsDescription):
-    EntryNr = tables.UInt32Col(pos=0)
-    DomainId = tables.StringCol(20, pos=1)
-    Coords = tables.StringCol(255, pos=2)
-
-
-class DomainDescriptionTable(tables.IsDescription):
-    DomainId = tables.StringCol(20, pos=0)
-    Source = tables.StringCol(11, pos=1)
-    Description = tables.StringCol(150, pos=2)
 
 
 class DarwinException(Exception):
@@ -185,7 +84,7 @@ def silentremove(filename):
 
 def load_tsv_to_numpy(args):
     fn, off1, off2, swap = args
-    relEnum = PairwiseRelationTable.columns['RelType'].enum._names
+    relEnum = tablefmt.PairwiseRelationTable.columns['RelType'].enum._names
     relEnum['n:1'] = relEnum['m:1']
     relEnum['1:m'] = relEnum['1:n']
     relEnum['n:m'] = relEnum['m:n']
@@ -214,7 +113,7 @@ def load_tsv_to_numpy(args):
     if swap:
         reversed_cols = tuple(augData.dtype.names[z] for z in (1, 0, 2, 3, 4, 5))
         augData.dtype.names = reversed_cols
-    full_table = numpy.empty(augData.size, dtype=tables.dtype_from_descr(PairwiseRelationTable))
+    full_table = numpy.empty(augData.size, dtype=tables.dtype_from_descr(tablefmt.PairwiseRelationTable))
     full_table[0:] = augData
     for col_not_in_tsv in set(full_table.dtype.names) - set(augData.dtype.names):
         full_table[col_not_in_tsv] = -1
@@ -302,14 +201,14 @@ class DarwinExporter(object):
                 data = json.load(fd)
         else:
             data = callDarwinExport('GetGenomeData();')
-        gstab = self.h5.create_table('/', 'Genome', GenomeTable,
+        gstab = self.h5.create_table('/', 'Genome', tablefmt.GenomeTable,
                                      expectedrows=len(data['GS']))
         self._write_to_table(gstab, data['GS'])
         gstab.cols.NCBITaxonId.create_csindex(filters=self._compr)
         gstab.cols.UniProtSpeciesCode.create_csindex(filters=self._compr)
         gstab.cols.EntryOff.create_csindex(filters=self._compr)
 
-        taxtab = self.h5.create_table('/', 'Taxonomy', TaxonomyTable,
+        taxtab = self.h5.create_table('/', 'Taxonomy', tablefmt.TaxonomyTable,
                                       expectedrows=len(data['Tax']))
         self._write_to_table(taxtab, data['Tax'])
         taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
@@ -361,7 +260,7 @@ class DarwinExporter(object):
                     # fallback to read from VPsDB
                     data = callDarwinExport('GetVPsForGenome({})'.format(genome))
 
-                vp_tab = self.h5.create_table(rel_node_for_genome, 'VPairs', PairwiseRelationTable,
+                vp_tab = self.h5.create_table(rel_node_for_genome, 'VPairs', tablefmt.PairwiseRelationTable,
                                               expectedrows=len(data))
                 if isinstance(data, list):
                     data = self._convert_to_numpyarray(data, vp_tab)
@@ -383,7 +282,7 @@ class DarwinExporter(object):
                     # fallback to read from VPsDB
                     data = callDarwinExport('GetSameSpeciesRelations({})'.format(genome))
 
-                ss_tab = self.h5.create_table(rel_node_for_genome, 'within', PairwiseRelationTable,
+                ss_tab = self.h5.create_table(rel_node_for_genome, 'within', tablefmt.PairwiseRelationTable,
                                               expectedrows=len(data))
                 if isinstance(data, list):
                     data = self._convert_to_numpyarray(data, ss_tab)
@@ -413,7 +312,7 @@ class DarwinExporter(object):
             protGrp = self.h5.get_node('/Protein')
         except tables.NoSuchNodeError:
             protGrp = self.h5.create_group('/', 'Protein')
-        protTab = self.h5.create_table(protGrp, 'Entries', ProteinTable,
+        protTab = self.h5.create_table(protGrp, 'Entries', tablefmt.ProteinTable,
                                        expectedrows=nrProt)
         seqArr = self.h5.create_earray(protGrp, 'SequenceBuffer',
                                        tables.StringAtom(1), (0,), 'concatenated protein sequences',
@@ -439,7 +338,7 @@ class DarwinExporter(object):
                                         len(data['seqs']), gs['TotEntries'], genome))
 
             locTab = self.h5.create_table('/Protein/Locus',
-                                          genome, LocusTable, createparents=True,
+                                          genome, tablefmt.LocusTable, createparents=True,
                                           expectedrows=gs['TotEntries'] * 4)
 
             for nr in range(gs['TotEntries']):
@@ -490,12 +389,12 @@ class DarwinExporter(object):
             'speciestree.nwk')
         hog_converter = HogConverter(entryTab)
         hog_converter.attach_newick_taxonomy(tree_filename)
-        hogTab = self.h5.create_table('/', 'HogLevel', HOGsTable,
+        hogTab = self.h5.create_table('/', 'HogLevel', tablefmt.HOGsTable,
                                       'nesting structure for each HOG', expectedrows=1e8)
         self.orthoxml_buffer = self.h5.create_earray('/OrthoXML', 'Buffer',
                                                      tables.StringAtom(1), (0,), 'concatenated orthoxml files',
                                                      expectedrows=1e9, createparents=True)
-        self.orthoxml_index = self.h5.create_table('/OrthoXML', 'Index', OrthoXmlHogTable,
+        self.orthoxml_index = self.h5.create_table('/OrthoXML', 'Index', tablefmt.OrthoXmlHogTable,
                                                    'Range index per HOG into OrthoXML Buffer', expectedrows=5e6)
         for root, dirs, filenames in os.walk(hog_path):
             for fn in filenames:
@@ -532,10 +431,10 @@ class DarwinExporter(object):
     def add_xrefs(self):
         self.logger.info('start parsing ServerIndexed to extract XRefs and GO annotations')
         db_parser = IndexedServerParser()
-        xref_tab = self.h5.create_table('/', 'XRef', XRefTable,
+        xref_tab = self.h5.create_table('/', 'XRef', tablefmt.XRefTable,
                                         'Cross-references of proteins to external ids / descriptions',
                                         expectedrows=1e8)
-        go_tab = self.h5.create_table('/', 'GeneOntology', GeneOntologyTable,
+        go_tab = self.h5.create_table('/', 'GeneOntology', tablefmt.GeneOntologyTable,
                                       'Gene Ontology annotations', expectedrows=1e8)
         with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
             xref_importer = XRefImporter(db_parser, xref_tab, go_tab, de_man)
@@ -615,7 +514,7 @@ class DarwinExporter(object):
 
     def add_domain_info(self, domains):
         self.logger.info('adding domain information...')
-        domtab = self.h5.create_table('/Annotations', 'Domains', DomainTable, createparents=True, expectedrows=1e7)
+        domtab = self.h5.create_table('/Annotations', 'Domains', tablefmt.DomainTable, createparents=True, expectedrows=1e7)
         entrytab = self.h5.get_node('/Protein/Entries')
         md5_to_enr = collections.defaultdict(list)
         for e in entrytab:
@@ -636,7 +535,7 @@ class DarwinExporter(object):
 
     def add_domainname_info(self, domainname_infos):
         self.logger.info('adding domain name information...')
-        dom_name_tab = self.h5.create_table('/Annotations', 'DomainDescription', DomainDescriptionTable,
+        dom_name_tab = self.h5.create_table('/Annotations', 'DomainDescription', tablefmt.DomainDescriptionTable,
                                             createparents=True, expectedrows=2e5)
         buffer = []
         for i, dom_info in enumerate(domainname_infos):
@@ -786,7 +685,7 @@ class XRefImporter(object):
         self.go_tab = go_tab
         self.desc_manager = desc_manager
 
-        xrefEnum = XRefTable.columns.get('XRefSource').enum
+        xrefEnum = tablefmt.XRefTable.columns.get('XRefSource').enum
         for tag in ['GI', 'EntrezGene', 'WikiGene', 'IPI']:
             db_parser.add_tag_handler(
                 tag,
@@ -960,7 +859,7 @@ class IndexedServerParser(object):
             self.doc.close()
 
 
-DomainDescription = collections.namedtuple('DomainDescription', tables.dtype_from_descr(DomainDescriptionTable).names)
+DomainDescription = collections.namedtuple('DomainDescription', tables.dtype_from_descr(tablefmt.DomainDescriptionTable).names)
 class CathDomainNameParser(object):
     re_pattern = re.compile(r'(?P<id>[0-9.]*)\s{3,}\w{7}\s{3,}:\s*(?P<desc>.*)')
     source = b'CATH/Gene3D'

@@ -171,7 +171,7 @@ class Database(object):
         The family coresponds to the toplevel numeric id of a HOG,
         i.e. for HOG:002421 the fam_nr should be 2421. If a HOG
         covers a certain level more than once, it will be returned
-        only once.
+        several times.
 
         :param fam_nr: the numeric id of the family (== Toplevel HOG)
         """
@@ -202,7 +202,7 @@ class Database(object):
         members = self.db.root.Protein.Entries.read_where(
                 '({!r} <= OmaHOG) & (OmaHOG < {!r})'.format(*hog_range))
         # last, we need to filter the proteins to the tax range of interest
-        members = [x for x in members if level.encode('ascii') in tax.get_parent_taxa(
+        members = [x for x in members if level.encode('ascii') in self.tax.get_parent_taxa(
             self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
         return members
 

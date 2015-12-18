@@ -19,13 +19,13 @@ class XRefParsingTest(unittest.TestCase):
 
     def test_standard_handler(self):
         self.db_parser.parse_entrytags()
-        enum = pyoma.XRefTable.columns.get('XRefSource').enum
+        enum = pyoma.tablefmt.XRefTable.columns.get('XRefSource').enum
         self.assertIn((1, enum.GI, b'125233342',), self.importer.xrefs)
         self.assertIn((3, enum['UniProtKB/SwissProt'], b'ASF1_YARLI',), self.importer.xrefs)
 
     def test_multi_handler(self):
         self.db_parser.parse_entrytags()
-        enum = pyoma.XRefTable.columns.get('XRefSource').enum
+        enum = pyoma.tablefmt.XRefTable.columns.get('XRefSource').enum
         self.assertIn((2, enum.PMP, b'P21122',), self.importer.xrefs)
         self.assertIn((2, enum.PMP, b'Q24S32',), self.importer.xrefs)
 
@@ -36,7 +36,7 @@ class XRefParsingTest(unittest.TestCase):
 
     def test_uniprot_ids(self):
         self.db_parser.parse_entrytags()
-        enum = pyoma.XRefTable.columns.get('XRefSource').enum
+        enum = pyoma.tablefmt.XRefTable.columns.get('XRefSource').enum
         self.assertIn((3, enum['UniProtKB/TrEMBL'], b'L8ECQ9',), self.importer.xrefs)
         self.assertIn((3, enum['UniProtKB/TrEMBL'], b'Q6CI62',), self.importer.xrefs)
 
@@ -47,7 +47,7 @@ class XRefParsingTest(unittest.TestCase):
 
     def test_disambiguate(self):
         self.db_parser.parse_entrytags()
-        enum = pyoma.XRefTable.columns.get('XRefSource').enum
+        enum = pyoma.tablefmt.XRefTable.columns.get('XRefSource').enum
         self.assertIn((3, enum['FlyBase'], b'FBgn0218776'), self.importer.xrefs)
         self.assertIn((3, enum['FlyBase'], b'FBtr0247427'), self.importer.xrefs)
         self.assertIn((3, enum['SourceAC'], b'FBtr0247427'), self.importer.xrefs)
@@ -69,9 +69,9 @@ class DescriptionManagerTest(unittest.TestCase):
         h5file = tables.open_file("test.h5", "w", driver="H5FD_CORE",
                                   driver_core_backing_store=0)
         nr_rows = 3
-        data = numpy.zeros(nr_rows, dtype=tables.dtype_from_descr(pyoma.ProteinTable))
+        data = numpy.zeros(nr_rows, dtype=tables.dtype_from_descr(pyoma.tablefmt.ProteinTable))
         data['EntryNr'] = numpy.arange(1,nr_rows + 1)
-        h5file.create_table('/', 'Entries', pyoma.ProteinTable, obj=data)
+        h5file.create_table('/', 'Entries', pyoma.tablefmt.ProteinTable, obj=data)
         self.h5 = h5file
 
     def tearDown(self):

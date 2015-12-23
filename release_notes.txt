@@ -1,0 +1,15 @@
+
+============================================
+ Release notes for OMA Standalone 0.x series
+============================================
+
+ :Author: Oma Developers
+ :Contact: contact@omabrowser.org
+
+
+Summary of Changes from 0.2.0 to 0.2.1
+======================================
+
+- added initial documentation of the library
+
+- added essential code to generate hog visualization data

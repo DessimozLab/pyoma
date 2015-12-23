@@ -52,7 +52,7 @@ class Database(object):
 
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
-        self.tax = Taxonomy(self)
+        self.tax = Taxonomy(self.db.root.Taxonomy.read())
 
         self._re_fam = re.compile(r'HOG:(?P<fam>\d{7,})')
 
@@ -178,7 +178,48 @@ class Database(object):
         return self.db.root.HogLevel.read_where(
                 '(Fam=={})'.format(fam_nr))['Level']
 
-    def hog_members(self, entry_nr, level):
+    def get_subhogids_at_level(self, fam_nr, level):
+        """get all the hog ids within a given family at a given taxonomic
+        level of interest.
+
+        After a duplication in an ancestor lineage, there exists multiple
+        sub-hogs for any taxonomic level after the duplication. This method
+        allows to get the list of hogids at the requested taxonomic level.
+
+        E.g. assume in family 1 (HOG:0000001) there has been a duplication
+        between Eukaryota and Metazoa. this method would return for
+        get_subhogids_at_level(1, 'Eukaryota') --> ['HOG:0000001']
+        and for
+        get_subhogids_at_level(1, 'Metazoa') --> ['HOG:0000001.1a', 'HOG:0000001.1b']
+
+        :param fam_nr: the numeric family id
+        :param level: the taxonomic level of interest"""
+        lev = level if isinstance(level, bytes) else level.encode('ascii')
+        return self.db.root.HogLevel.read_where(
+            '(Fam=={}) & (Level=={!r})'.format(fam_nr, lev))['ID']
+
+    def member_of_hog_id(self, hog_id):
+        """return an array of protein entries which belong to a given hog_id.
+
+        E.g. if hog_id = 'HOG122.1a', the method returns all the proteins that
+        have either exactly this hog id or an inparalogous id such a HOG122.1a.4b.2a
+
+        :param hog_id str: the requested hog_id.
+        :return a numpy.array with the protein entries belonging to the requested hog."""
+        hog_range = self._hog_lex_range(hog_id)
+        # get the proteins which have that HOG number
+        memb = self.db.root.Protein.Entries.read_where(
+                '({!r} <= OmaHOG) & (OmaHOG < {!r})'.format(*hog_range))
+        return memb
+
+    def member_of_fam(self, fam):
+        """returns an array of protein entries which belong to a given fam"""
+        if not isinstance(fam, (int, numpy.number)):
+            raise ValueError('expect a numeric family id')
+        return self.member_of_hog_id('HOG:{:07d}'.format(fam))
+
+
+    def hog_members(self, entry, level):
         """get hog members with respect to a given taxonomic level.
 
         The method will return a list of protein entries that are all
@@ -187,7 +228,7 @@ class Database(object):
 
         :param entry: an entry or entry_nr of a query protein
         :param level: the taxonomic level of interest"""
-        query = self.entry_by_entry_nr(entry_nr)
+        query = self.ensure_entry(entry)
         queryFam = self.hog_family(query)
         hoglev = None
         for hog_candidate in self.db.root.HogLevel.where(
@@ -197,10 +238,8 @@ class Database(object):
                 break
         if hoglev is None:
             raise ValueError(u'Level "{0:s}" undefined for query gene'.format(level))
-        hog_range = self._hog_lex_range(hoglev['ID'])
-        # get the proteins which have that HOG number
-        members = self.db.root.Protein.Entries.read_where(
-                '({!r} <= OmaHOG) & (OmaHOG < {!r})'.format(*hog_range))
+        # get the entries which have this hogid (or a sub-hog)
+        members = self.member_of_hog_id(hoglev['ID'])
         # last, we need to filter the proteins to the tax range of interest
         members = [x for x in members if level.encode('ascii') in self.tax.get_parent_taxa(
             self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
@@ -226,9 +265,10 @@ class Database(object):
         _hog_lex_range[0] <= hog < _hog_lex_range[1].
         This is equivalent to say that a sub-hog starts with the
         query hog."""
-        hog_str = hog.decode()
-        return hog, (hog_str[0:-1]+chr(1+ord(hog_str[-1]))).encode('ascii')
+        hog_str = hog.decode() if isinstance(hog, bytes) else hog
+        return hog_str.encode('ascii'), (hog_str[0:-1]+chr(1+ord(hog_str[-1]))).encode('ascii')
 
+            
     def get_sequence(self, entry):
         """get the protein sequence of a given entry as a string
 
@@ -316,8 +356,8 @@ class OmaIdMapper(object):
                 raise InvalidOmaId(query)
         else:
             genome_row = self.genome_from_UniProtCode(query)
-        return (genome_row['EntryOff']+1,
-                genome_row['EntryOff']+genome_row['TotEntries'],)
+        return (genome_row['EntryOff'] + 1,
+                genome_row['EntryOff'] + genome_row['TotEntries'],)
 
 
 class IDResolver(object):
@@ -359,24 +399,27 @@ class IDResolver(object):
 class Taxonomy(object):
     """Taxonomy provides an interface to navigate the taxonomy data.
 
-    For performance reasons, it will load at instantiation the data
-    into memory. Hence, it should only be instantiated once."""
+    The input data is the same as what is stored in the Database in 
+    table "/Taxonomy"."""
 
-    def __init__(self, db):
-        self.tax_table = db.get_hdf5_handle().root.Taxonomy.read()
+    def __init__(self, data):
+        if not isinstance(data, numpy.ndarray):
+            raise ValueError('Taxonomy expects a numpy table.')
+        self.tax_table = data
         self.taxid_key = self.tax_table.argsort(order=('NCBITaxonId'))
+        self.parent_key = self.tax_table.argsort(order=('ParentTaxonId'))
         self._load_valid_taxlevels()
 
     def _load_valid_taxlevels(self):
         forbidden_chars = re.compile(r'[^A-Za-z. -]')
         try:
             with open(os.environ['DARWIN_BROWSERDATA_PATH'] + '/TaxLevels.drw') as f:
-                tax_str = f.read()
-            tax_json = json.loads(("[" + tax_str[14:-3] + "]").replace("'", '"'))
-            self.all_hog_levels = frozenset([t for t in tax_json
-                                             if forbidden_chars.search(t) is None])
-        except Exception:
-            self.all_hog_levels = frozenset([l.decode() for l in self.tax_table['Name']
+                taxStr = f.read()
+            tax_json = json.loads(("[" + taxStr[14:-3] + "]").replace("'", '"'))
+            self.all_hog_levels = frozenset([t.encode('ascii') for t in
+                                             tax_json if forbidden_chars.search(t) is None])
+        except (IOError, KeyError):
+            self.all_hog_levels = frozenset([l for l in self.tax_table['Name']
                                              if forbidden_chars.search(l.decode()) is None])
 
     def _table_idx_from_numeric(self, tid):
@@ -387,9 +430,25 @@ class Taxonomy(object):
             raise InvalidTaxonId(u"{0:d} is an invalid/unknown taxonomy id".format(tid))
         return idx
 
-    def _taxon_from_numeric(self, tid):
+    def _get_root_taxon(self):
+        i = self.tax_table['ParentTaxonId'].searchsorted(0, sorter=self.parent_key)
+        res = self.tax_table[self.parent_key[i]]
+        if res['ParentTaxonId'] != 0:
+            raise DBConsistencyError('Not a single root in Taxonomy: {}'
+                                     .format(self.tax_table[self.parent_key[i]]))
+        return res
+
+    def _taxon_from_numeric(self,tid):
         idx = self._table_idx_from_numeric(tid)
         return self.tax_table[idx]
+
+    def _direct_children_taxa(self, tid):
+        i = self.tax_table['ParentTaxonId'].searchsorted(tid, sorter=self.parent_key)
+        idx = []
+        while i < len(self.parent_key) and self.tax_table[self.parent_key[i]]['ParentTaxonId'] == tid:
+            idx.append(self.parent_key[i])
+            i += 1
+        return self.tax_table.take(idx)
 
     def get_parent_taxa(self, query):
         """Get array of taxonomy entries leading towards the
@@ -411,12 +470,118 @@ class Taxonomy(object):
                 raise InvalidTaxonId(u"{0:d} exceeds max depth of 100. Infinite recursion?".format(query))
         return self.tax_table.take(idx)
 
+    def _get_taxids_from_any(self, it, skip_missing=True):
+        if not isinstance(it, numpy.ndarray):
+            try:
+                it = numpy.fromiter(it, dtype='i4')
+            except ValueError:
+                it = numpy.fromiter(it, dtype='S255')
+        if it.dtype.type is numpy.string_:
+            try:
+                ns = self.name_key
+            except AttributeError:
+                ns = self.name_key = self.tax_table.argsort(order='Name')
+            idxs = self.tax_table['Name'].searchsorted(it, sorter=ns)
+            taxs = self.tax_table[ns[idxs]]
+            keep = taxs['Name'] == it
+            if not skip_missing and not keep.all():
+                raise KeyError('not all taxonomy names could be found')
+            res = taxs['NCBITaxonId'][keep]
+        else:
+            res = it
+        return res
+
+    def get_induced_taxonomy(self, members, collapse=True):
+        """Extract the taxonomy induced by a given set of `members`.
+
+        This method allows to extract the part which is induced bay a
+        given set of levels and leaves that should be part of the
+        new taxonomy. `members` must be an iterable, the levels
+        must be either numeric taxids or scientific names.
+
+        :param iterable members: an iterable containing the levels
+            and leaves that should remain in the new taxonomy. can be
+            either axonomic ids or scientific names.
+        :param bool collapse: whether or not levels with only one child
+            should be skipped or not."""
+        taxids_to_keep = numpy.sort(self._get_taxids_from_any(members))
+        idxs = numpy.searchsorted(self.tax_table['NCBITaxonId'], taxids_to_keep, sorter=self.taxid_key)
+        subtaxdata = self.tax_table[self.taxid_key[idxs]]
+        if not numpy.alltrue(subtaxdata['NCBITaxonId'] == taxids_to_keep):
+            raise KeyError('not all levels in members exists in this taxonomy')
+
+        updated_parent = numpy.zeros(len(subtaxdata), 'bool')
+        for i, cur_tax in enumerate(taxids_to_keep):
+            if updated_parent[i]:
+                continue
+            # get all the parents and check which ones we keep in the new taxonomy.
+            parents = self.get_parent_taxa(cur_tax)['NCBITaxonId']
+            mask = numpy.in1d(parents, taxids_to_keep)
+            # find the position of them in subtaxdata (note: subtaxdata and
+            # taxids_to_keep have the same ordering).
+            new_idx = taxids_to_keep.searchsorted(parents[mask])
+            taxids = taxids_to_keep[new_idx]
+            # parent taxid are ncbitaxonids shifted by one position!
+            parents = numpy.roll(taxids, -1)
+            parents[-1] = 0
+            subtaxdata['ParentTaxonId'][new_idx] = parents
+            updated_parent[new_idx] = True
+
+        if collapse:
+            nr_children = collections.defaultdict(int)
+            for p in subtaxdata['ParentTaxonId']:
+                nr_children[p] += 1
+            rem = [p for (p, cnt) in nr_children.items() if cnt == 1 and p != 0]
+            if len(rem) > 0:
+                idx = taxids_to_keep.searchsorted(rem)
+                return self.get_induced_taxonomy(numpy.delete(taxids_to_keep, idx))
+        return Taxonomy(subtaxdata)
+
+    def newick(self):
+        """Get a Newick representation of the Taxonomy
+
+        Note: as many newick parsers do not support quoted labels,
+        the method instead replaces spaces with underscores."""
+
+        def _rec_newick(node):
+            children = []
+            for child in self._direct_children_taxa(node['NCBITaxonId']):
+                children.append(_rec_newick(child))
+
+            if len(children) == 0:
+                return node['Name'].decode().replace(' ', '_')
+            else:
+                t = ",".join(children)
+                return '(' + t + ')' + node['Name'].decode().replace(' ', '_')
+
+        return _rec_newick(self._get_root_taxon())
+
+    def as_dict(self):
+        """Encode the Taxonomy as a nested dict.
+
+         This representation can for example be used to serialize
+         a Taxonomy in json format."""
+        def _rec_phylogeny(node):
+            res = {'name': node['Name'].decode(), 'id': int(node['NCBITaxonId'])}
+            children = []
+            for child in self._direct_children_taxa(node['NCBITaxonId']):
+                children.append(_rec_phylogeny(child))
+            if len(children) > 0:
+                res['children'] = children
+            return res
+
+        return _rec_phylogeny(self._get_root_taxon())
+
+
+class InvalidTaxonId(Exception):
+    pass
+
 
 class DBVersionError(Exception):
     pass
 
 
-class InvalidTaxonId(Exception):
+class DBConsistencyError(Exception):
     pass
 
 

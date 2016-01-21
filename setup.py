@@ -21,6 +21,6 @@ setup(
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
     ],
-    data_files=[('pyoma', ['pyoma/convert.drw'])],
+    data_files=[('pyoma', ['pyoma/browser/convert.drw'])],
     install_requires=['numpy', 'tables>=3.2', 'future'],
 )

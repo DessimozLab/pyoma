@@ -483,6 +483,7 @@ class Taxonomy(object):
             except AttributeError:
                 ns = self.name_key = self.tax_table.argsort(order='Name')
             idxs = self.tax_table['Name'].searchsorted(it, sorter=ns)
+            idxs = numpy.clip(idxs, 0, len(ns) - 1)
             taxs = self.tax_table[ns[idxs]]
             keep = taxs['Name'] == it
             if not skip_missing and not keep.all():

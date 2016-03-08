@@ -293,7 +293,7 @@ class Database(object):
         return desc.tostring()
 
     def get_release_name(self):
-        return self.db.get_node_attr('/', 'oma_version').decode()
+        return str(self.db.get_node_attr('/', 'oma_version'))
 
     def get_domains(self, entry_nr):
         try:

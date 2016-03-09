@@ -461,11 +461,15 @@ class Taxonomy(object):
         return idx
 
     def _get_root_taxon(self):
-        i = self.tax_table['ParentTaxonId'].searchsorted(0, sorter=self.parent_key)
-        res = self.tax_table[self.parent_key[i]]
-        if res['ParentTaxonId'] != 0:
+        i1 = self.tax_table['ParentTaxonId'].searchsorted(0, sorter=self.parent_key)
+        i2 = self.tax_table['ParentTaxonId'].searchsorted(0, sorter=self.parent_key, side='right')
+        if i2 - i1 == 0:
             raise DBConsistencyError('Not a single root in Taxonomy: {}'
-                                     .format(self.tax_table[self.parent_key[i]]))
+                                     .format(self.tax_table[self.parent_key[i1]]))
+        elif i2 - i1 == 1:
+            res = self.tax_table[self.parent_key[i1]]
+        else:
+            res = numpy.array([(0, -1, b'LUCA')], dtype=self.tax_table.dtype)[0]
         return res
 
     def _taxon_from_numeric(self,tid):
@@ -537,6 +541,7 @@ class Taxonomy(object):
             should be skipped or not."""
         taxids_to_keep = numpy.sort(self._get_taxids_from_any(members))
         idxs = numpy.searchsorted(self.tax_table['NCBITaxonId'], taxids_to_keep, sorter=self.taxid_key)
+        idxs = numpy.clip(idxs, 0, len(self.taxid_key) - 1)
         subtaxdata = self.tax_table[self.taxid_key[idxs]]
         if not numpy.alltrue(subtaxdata['NCBITaxonId'] == taxids_to_keep):
             raise KeyError('not all levels in members exists in this taxonomy')

@@ -95,8 +95,11 @@ class Database(object):
         return entry
 
     def _get_vptab(self, entry_nr):
+        return self._get_pw_tab(entry_nr, 'VPairs')
+
+    def _get_pw_tab(self, entry_nr, subtab):
         genome = self.id_mapper['OMA'].genome_of_entry_nr(entry_nr)['UniProtSpeciesCode'].decode()
-        return self.db.get_node('/PairwiseRelation/{}/VPairs'.format(genome))
+        return self.db.get_node('/PairwiseRelation/{}/{}'.format(genome, subtab))
 
     def count_vpairs(self, entry_nr):
         vptab = self._get_vptab(entry_nr)
@@ -106,20 +109,46 @@ class Database(object):
             cnt = 0
         return cnt
 
+    def _get_pw_data(self, entry_nr, tab):
+        dat = tab.read_where('(EntryNr1=={:d})'.format(entry_nr))
+        typ = tab.get_enum('RelType')
+        res = numpy.lib.recfunctions.append_fields(
+                dat[['EntryNr1', 'EntryNr2', 'Score', 'Distance']],
+                names='RelType',
+                data=[typ(x) for x in dat['RelType']],
+                usemask=False)
+        return res
+
     def get_vpairs(self, entry_nr):
-        """returns a :class:`numpy.recarray` of the verified pairs of
-         an entry.
+        """returns the verified pairs of a query protein.
+
+        This method returns an instance of a :class:`numpy.recarray` class
+        containing the verified pairs of a query protein entry.
+        The returned array contains columns with EntryNr1 and EntryNr2 to
+        identify the pair together with RelType (indicating the subtype of
+        orthology), the alignment score and the distance. The score and
+        distance will be set to -1 if unknown.
 
         :param int entry_nr: the numeric entry_nr of the query protein."""
         vp_tab = self._get_vptab(entry_nr)
-        dat = vp_tab.read_where('(EntryNr1=={:d})'.format(entry_nr))
-        e = vp_tab.get_enum('RelType')
-        res = numpy.lib.recfunctions.append_fields(
-                dat[['EntryNr1', 'EntryNr2']],
-                names='RelType',
-                data=[e(x) for x in dat['RelType']],
-                usemask=False)
-        return res
+        return self._get_pw_data(entry_nr, vp_tab)
+
+    def get_within_species_paralogs(self, entry_nr):
+        """returns the within species paralogs of a given entry
+
+        This method returns a :class:`numpy.recarray` instance
+        containing the close paralogs. Close paralogs are within
+        species paralogs that are inparalogs to at least one
+        ortholog of the query gene in OMA.
+
+        The returned array contains columns with EntryNr1 and EntryNr2 to
+        identify the pair together with RelType (indicating the subtype of
+        paralogy), the alignment score and the distance. The score and
+        distance will be set to -1 if unknown.
+
+        :param int entry_nr: the numeric entry_id of the query protein"""
+        within_species_paralogs = self._get_pw_tab(entry_nr, 'within')
+        return self._get_pw_data(entry_nr, within_species_paralogs)
 
     def neighbour_genes(self, entry_nr, window=1):
         """Returns neighbor genes around a query gene.

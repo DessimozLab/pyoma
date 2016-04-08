@@ -84,11 +84,11 @@ class Database(object):
 
         :param int entry_nr: a numeric identifier for the protein
             entry"""
-        entry = self.db.root.Protein.Entries[entry_nr-1]
+        entry = self.db.root.Protein.Entries[entry_nr - 1]
         if entry['EntryNr'] != entry_nr:
-            logger.warning('EntryNr {} not at position {}. Using index instead'.format(entry_nr, entry_nr-1))
+            logger.warning('EntryNr {} not at position {}. Using index instead'.format(entry_nr, entry_nr - 1))
             entry = self.db.root.Protein.Entries.read_where(
-                   'EntryNr == {:d}'.format(entry_nr))
+                    'EntryNr == {:d}'.format(entry_nr))
             if len(entry) != 1:
                 raise ValueError("there are {} entries with entry_nr {}".format(len(entry), entry_nr))
             entry = entry[0]
@@ -178,9 +178,9 @@ class Database(object):
                 '(Chromosome == {!r}) & '
                 '((AltSpliceVariant == 0) |'
                 ' (AltSpliceVariant == EntryNr))'.format(
-                   max(genome_range[0], entry_nr - f * window),
-                   min(genome_range[1], entry_nr + f * window),
-                   target_chr))
+                        max(genome_range[0], entry_nr - f * window),
+                        min(genome_range[1], entry_nr + f * window),
+                        target_chr))
         data.sort(order=['EntryNr'])
         idx = data['EntryNr'].searchsorted(entry_nr)
         res = data[max(0, idx - window):min(len(data), idx + window + 1)]
@@ -225,7 +225,7 @@ class Database(object):
         :param level: the taxonomic level of interest"""
         lev = level if isinstance(level, bytes) else level.encode('ascii')
         return self.db.root.HogLevel.read_where(
-            '(Fam=={}) & (Level=={!r})'.format(fam_nr, lev))['ID']
+                '(Fam=={}) & (Level=={!r})'.format(fam_nr, lev))['ID']
 
     def member_of_hog_id(self, hog_id):
         """return an array of protein entries which belong to a given hog_id.
@@ -246,7 +246,6 @@ class Database(object):
         if not isinstance(fam, (int, numpy.number)):
             raise ValueError('expect a numeric family id')
         return self.member_of_hog_id('HOG:{:07d}'.format(fam))
-
 
     def hog_members(self, entry, level):
         """get hog members with respect to a given taxonomic level.
@@ -272,7 +271,7 @@ class Database(object):
         if level != 'LUCA':
             # last, we need to filter the proteins to the tax range of interest
             members = [x for x in members if level.encode('ascii') in self.tax.get_parent_taxa(
-                self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
+                    self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
             if query not in members:
                 raise ValueError(u"Level '{0:s}' undefined for query gene".format(level))
         return members
@@ -285,7 +284,8 @@ class Database(object):
         if len(idx) < 1:
             raise ValueError('cannot retrieve orthoxml for {}'.format(fam))
         idx = idx[0]
-        return self.db.root.OrthoXML.Buffer[idx['HogBufferOffset']:idx['HogBufferOffset']+idx['HogBufferLength']].tostring()
+        return self.db.root.OrthoXML.Buffer[
+               idx['HogBufferOffset']:idx['HogBufferOffset'] + idx['HogBufferLength']].tostring()
 
     def _hog_lex_range(self, hog):
         """return the lexographic range of a hog.
@@ -296,29 +296,28 @@ class Database(object):
         This is equivalent to say that a sub-hog starts with the
         query hog."""
         hog_str = hog.decode() if isinstance(hog, bytes) else hog
-        return hog_str.encode('ascii'), (hog_str[0:-1]+chr(1+ord(hog_str[-1]))).encode('ascii')
+        return hog_str.encode('ascii'), (hog_str[0:-1] + chr(1 + ord(hog_str[-1]))).encode('ascii')
 
-            
     def get_sequence(self, entry):
         """get the protein sequence of a given entry as a string
 
         :param entry: the entry or entry_nr for which the sequence is requested"""
         entry = self.ensure_entry(entry)
         seqArr = self.db.get_node('/Protein/SequenceBuffer')
-        seq = seqArr[entry['SeqBufferOffset']:entry['SeqBufferOffset']+entry['SeqBufferLength']-1]
+        seq = seqArr[entry['SeqBufferOffset']:entry['SeqBufferOffset'] + entry['SeqBufferLength'] - 1]
         return seq.tostring()
 
     def get_cdna(self, entry):
         """get the protein sequence of a given entry as a string"""
         entry = self.ensure_entry(entry)
         seqArr = self.db.get_node('/Protein/CDNABuffer')
-        seq = seqArr[entry['CDNABufferOffset']:entry['CDNABufferOffset']+entry['CDNABufferLength']-1]
+        seq = seqArr[entry['CDNABufferOffset']:entry['CDNABufferOffset'] + entry['CDNABufferLength'] - 1]
         return seq.tostring()
 
     def get_description(self, entry):
         entry = self.ensure_entry(entry)
         descArr = self.db.get_node('/Protein/DescriptionBuffer')
-        desc = descArr[entry['DescriptionOffset']:entry['DescriptionOffset']+entry['DescriptionLength']]
+        desc = descArr[entry['DescriptionOffset']:entry['DescriptionOffset'] + entry['DescriptionLength']]
         return desc.tostring()
 
     def get_release_name(self):
@@ -343,7 +342,7 @@ class OmaIdMapper(object):
     def genome_of_entry_nr(self, e_nr):
         """returns the genome code belonging to a given entry_nr"""
         idx = self.genome_table['EntryOff'].searchsorted(
-                e_nr - 1, side='right', 
+                e_nr - 1, side='right',
                 sorter=self._entry_off_keys)
         return self.genome_table[self._entry_off_keys[idx - 1]]
 
@@ -372,7 +371,7 @@ class OmaIdMapper(object):
         genome = self.genome_from_UniProtCode(code)
         if nr <= 0 or nr > genome['TotEntries']:
             raise InvalidOmaId(omaid)
-        return genome['EntryOff']+int(match.group('nr'))
+        return genome['EntryOff'] + int(match.group('nr'))
 
     def genome_range(self, query):
         """returns the internal range of EntryNr associated with
@@ -472,7 +471,7 @@ class Taxonomy(object):
             res = numpy.array([(0, -1, b'LUCA')], dtype=self.tax_table.dtype)[0]
         return res
 
-    def _taxon_from_numeric(self,tid):
+    def _taxon_from_numeric(self, tid):
         idx = self._table_idx_from_numeric(tid)
         return self.tax_table[idx]
 
@@ -597,6 +596,7 @@ class Taxonomy(object):
 
          This representation can for example be used to serialize
          a Taxonomy in json format."""
+
         def _rec_phylogeny(node):
             res = {'name': node['Name'].decode(), 'id': int(node['NCBITaxonId'])}
             children = []
@@ -656,7 +656,7 @@ class IdMapperFactory(object):
             mapper = self.mappers[idtype]
         except KeyError:
             try:
-                mapper = globals()[str(idtype).title()+'IdMapper'](self.db)
+                mapper = globals()[str(idtype).title() + 'IdMapper'](self.db)
                 self.mappers[idtype] = mapper
             except KeyError:
                 raise UnknownIdType('{} is unknown'.format(str(idtype)))
@@ -681,7 +681,7 @@ class XrefIdMapper(object):
 
         :param entry_nr: the numeric id of the query protein."""
         res = set([row for row in self.xref_tab.where('EntryNr=={:d}'.format(entry_nr))
-                  if row['XRefSource'] in self.idtype])
+                   if row['XRefSource'] in self.idtype])
         return res
 
     def _combine_query_values(self, field, values):
@@ -701,7 +701,7 @@ class XrefIdMapper(object):
         for start in range(0, len(entry_nrs), junk_size):
             condition = "({}) & ({})".format(
                     self._combine_query_values('EntryNr',
-                        entry_nrs[start:start+junk_size]),
+                                               entry_nrs[start:start + junk_size]),
                     source_condition)
             mapped_junks.append(self.xref_tab.read_where(condition))
         return numpy.lib.recfunctions.stack_arrays(
@@ -747,15 +747,15 @@ class UniProtIdMapper(XrefIdMapper):
     def __init__(self, db):
         super(UniProtIdMapper, self).__init__(db)
         self.idtype = frozenset([self.xrefEnum[z]
-            for z in ['UniProtKB/SwissProt', 'UniProtKB/TrEMBL']])
+                                 for z in ['UniProtKB/SwissProt', 'UniProtKB/TrEMBL']])
 
 
 class LinkoutIdMapper(XrefIdMapper):
     def __init__(self, db):
         super(LinkoutIdMapper, self).__init__(db)
         self.idtype = frozenset([self.xrefEnum[z]
-            for z in ['UniProtKB/SwissProt', 'UniProtKB/TrEMBL',
-                      'Ensembl Protein', 'EntrezGene']])
+                                 for z in ['UniProtKB/SwissProt', 'UniProtKB/TrEMBL',
+                                           'Ensembl Protein', 'EntrezGene']])
 
     def url(self, typ, id_):
         # TODO: improve url generator in external module with all xrefs
@@ -792,4 +792,3 @@ class DomainNameIdMapper(object):
         info = self._get_dominfo(domain_id)
         return {'name': info['Description'].decode(), 'source': info['Source'].decode(),
                 'domainid': domain_id.decode()}
-

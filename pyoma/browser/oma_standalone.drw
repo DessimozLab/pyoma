@@ -1,8 +1,8 @@
 if not assigned(root_dir) then
     exit(1);
 fi:
-
-ReadProgram(root_dir.'/lib/GenomeSummary');
+libdir := root_dir.'/lib/';
+ReadProgram(root_dir.'/lib/darwinit');
 ReadProgram(root_dir.'/parameters.drw');
 G := TimedCallSystem('find -L '.root_dir.'/DB -name "*.fa" -print')[2];
 G := sort(SearchDelim('\n',G));
@@ -157,6 +157,7 @@ TransformDataToCache := proc(cache_dir)
         else
             g1 := genomes[Y], g2 := genomes[X]; off1 = Goff[Y]; off2 := Goff[X]; VPs := VPairs[Y,X]: rev := true;
         fi:
+    od od:
 
 end:
 
@@ -196,14 +197,12 @@ StoreProteinsForGenome := proc(g, grps, fname)
     tab:= table():
     gNr := SearchArray(g, genomes);
     DB := DBs[g];
-    tab['seqs'] := [seq(Sequence(Entry(i),i=1..GS[g,TotEntries])]:
-    DB := DnaDb;
+    tab['seqs'] := [seq(Sequence(Entry(i)),i=1..GS[g,TotEntries])]:
     tab['cdna'] := [seq(CreateString(length(z)*3, 'X'), z=tab['seqs'])]:
     tab['off'] := Goff[gNr]:
-    IndDb := ReadDb(ddir.'/ServerIndexed.db');
     tab['ogs'] := grps[Goff[gNr]+1..Goff[gNr+1]];
-    tab['chrs'] := [seq(SearchTag('CHR',Entry(Goff[gNr]+i)), i=1..GS[g,TotEntries])];
-    tab['locs'] := [seq(SearchTag('LOC',Entry(Goff[gNr]+i)), i=1..GS[g,TotEntries])];
+    tab['chrs'] := [seq(SearchTag('CHR',Entry(i)), i=1..GS[g,TotEntries])];
+    tab['locs'] := [seq(SearchTag('LOC',Entry(i)), i=1..GS[g,TotEntries])];
     if SubGenome[g]<>0 then
         tab['subgenome'] := [seq(SubGenome[g,i], i=1..GS[g,TotEntries])]
     else

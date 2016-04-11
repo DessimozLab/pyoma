@@ -7,10 +7,11 @@ ReadProgram(root_dir.'/parameters.drw');
 G := TimedCallSystem('find -L '.root_dir.'/DB -name "*.fa" -print')[2];
 G := sort(SearchDelim('\n',G));
 _next_new_taxid := -100;
-genomes := []: DBs := table(): GS := table(): TaxonIDs := table():
+genomes := []: DBs := table(): GS := table(): TaxonIDs := table(): isContig := []:
 for g in G do
     off := SearchAllString('/', g);
     gname := g[off[-1]+1..-1];
+    isContig := append(isContig, evalb(SearchString('contig', gname) > -1));
     off := SearchString('.',gname);
     gname := gname[1..off];
     genomes := append(genomes, gname):
@@ -27,6 +28,8 @@ od:
 NS := length(genomes);
 Goff := CreateArray(1..NS+1):
 for i to NS do Goff[i+1] := Goff[i]+GS[genomes[i],TotEntries] od:
+Lengths := [seq(GS[g, EntryLengths], g=genomes)]:
+ns := [seq(GS[g, TotEntries], g=genomes)]:
 SubGenome := table(0);
 
 
@@ -132,9 +135,31 @@ GetGenomeData := proc()
     StoreResults(json(tab));
 end:
 
-RefinedMatches := proc(ms)
-    global Homologs, Orthologs;
-
+WriteRelationsToTSV := proc(gNr1, gNr2, matches, cache_dir)
+    buf_homolog := buf_vp := buf_sp := [];
+    for x1 to length(matches) do if matches[x1]<>[] then
+        for m in decompress(matches[x1]) do
+            fmt := sprintf('%d\t%d\t%.3f\t%%s\t%.7g\t%.10g',
+                    Goff[gNr1]+ x1, Goff[gNr2]+ m['Entry'], m['Score100']/100,
+                    m['SumLengths']/(Lengths[gNr1,x1] + Lengths[gNr2,m['Entry']]),
+                    m['PamDist10000']/10000);
+            buf_homolog := append(buf_homolog, sprintf(fmt, 'homolog'));
+            if gNr1<>gNr2 and member(m['Entry'], StablePairs[gNr1, gNr2, x1]) then
+                buf_sp := append(buf_sp, sprintf(fmt, 'n/a'));
+            fi:
+            if gNr1<>gNr2 and member(m['Entry'], VPairs[gNr1, gNr2, x1]) then
+                nr2 := If(length(VPairs[gNr1, gNr2, x1])>1,'n','1'):
+                nr1 := If(length(VPairs[gNr2, gNr1, m['Entry']])>1, 'm', '1');
+                buf_vp := append(buf_vp, sprintf(fmt, nr1.':'.nr2));
+            fi:
+        od:
+    fi od:
+    OpenAppending(cache_dir.'/homologs/'.genomes[gNr1].'.txt');
+    prints(ConcatStrings(buf_homolog, '\n'));
+    OpenAppending(previous);
+    OpenAppending(cache_dir.'/vps/'.genomes[gNr1].'.txt');
+    prints(ConcatStrings(buf_vp, '\n'));
+    OpenAppending(previous);
 end:
 
 TransformDataToCache := proc(cache_dir)
@@ -147,18 +172,89 @@ TransformDataToCache := proc(cache_dir)
     fi od od:
     CallSystem('mkdir -p '.cache_dir.'/{vps,prots,homologs}');
     for g in genomes do
-        StoreProteinsForGenome(g, Prot2Grp, cache_dir.'/vps/'.GS[g,'5LETTERNAME'].'.json');
+        StoreProteinsForGenome(g, Prot2Grp, cache_dir.'/prots/'.GS[g,'5LETTERNAME'].'.json');
     od:
 
-    for X to NS do for Y to NS do
-        if GS[genomes[X],TotEntries] < GS[genomes[Y],TotEntries] or
-           GS[genomes[X],TotEntries] = GS[genomes[Y],TotEntries] and genomes[X]<genomes[Y] then
-            g1 := genomes[X], g2 := genomes[Y]; off1 = Goff[X]; off2 := Goff[Y]; VPs := VPairs[X,Y]: rev := false;
-        else
-            g1 := genomes[Y], g2 := genomes[X]; off1 = Goff[Y]; off2 := Goff[X]; VPs := VPairs[Y,X]: rev := true;
-        fi:
+    matches := LoadAllAll();
+    for gNr1 to NS do for gNr2 to NS do
+        WriteRelationsToTSV(gNr1, gNr2, matches[gNr1, gNr2], cache_dir);
     od od:
+end:
 
+NumberOfAlignments := proc(name1:string,name2:string)
+    if name1=name2 then
+        nrAlignments := GS[name1,TotEntries]*(GS[name1,TotEntries]-1)/2;
+    else
+        nrAlignments := GS[name1,TotEntries]*GS[name2,TotEntries];
+    fi:
+    return(nrAlignments);
+end:
+
+NumberOfChunks := proc(name1, name2)
+    return(ceil(NumberOfAlignments(name1, name2)/AlignBatchSize));
+end:
+
+LoadAllAll := proc()
+    global BestMatch1, BestMatch2, t1,t2,t3,t4,t5,t6,t7, Exclude1, Exclude2, g1, g2, db1, db2;
+    t1 := Counter('RefinedMatches structures read'):
+    t2 := Counter('Matches read'):
+    t3 := Counter('files read'):
+    t4 := Counter('Matches of genomes against themselves'):
+    t5 := Counter('Matches above parameters');
+    t6 := Counter('empty all-all'):
+    t7 := Counter('Number of matches discarded below MinSeqLen');
+
+    # Read the BestMatch from all x all files #
+    BestMatch := CreateArray(1..NS,1..NS):
+    for i to NS do for j from i to NS do
+        BestMatch[i,j] := CreateArray(1..ns[i],[]);
+        if j>i then BestMatch[j,i] := CreateArray(1..ns[j],[]) fi;
+        if ns[i] < ns[j] or ns[i]=ns[j] and genomes[i] < genomes[j] then
+            g1 := i;  g2 := j else g2 := i;  g1 := j fi;
+        BestMatch1 := BestMatch[g1,g2];  BestMatch2 := BestMatch[g2,g1];
+        t3+1;
+        Exclude1 := Exclude2 := {}:
+        db1 := DBs[genomes[g1]]; db2 := DBs[genomes[g2]]:
+        # if there exist a 1-chunk archive, process it with higher priority
+        fn1chunk := sprintf('%s/Cache/AllAll/%s/%s.gz', root_dir, genomes[g1],genomes[g2]);
+        if FileExists(fn1chunk) then
+            fnSepHash := sprintf('%s/Cache/AllAll/%s/%s.sha2.gz', root_dir, genomes[g1], genomes[g2]);
+            if FileExists(fnSepHash) then ReadProgram(fnSepHash) fi:
+            ReadProgram(fn1chunk);
+        else
+            nrChunks := NumberOfChunks(genomes[g1],genomes[g2]);
+            for part to nrChunks do
+                fn := sprintf('%s/Cache/AllAll/%s/%s/part_%d-%d', root_dir, genomes[g1],genomes[g2],
+                    part, nrChunks);
+                stat := ReadProgram( fn );
+                if stat=lasterror then
+                    warning(stat);
+                    warning(sprintf('Cannot read file allall file "%s". Please remove it and restart', fn));
+                    exit(1);
+                fi;
+            od:
+        fi;
+        # no Pairs should be cut for being below the Scoretol, as those
+        # may serve to break a stable pair
+        sij := sum(length(BestMatch[i,j,k]), k=1..length(BestMatch[i,j]));
+        sji := sum(length(BestMatch[j,i,k]), k=1..length(BestMatch[j,i]));
+        t5+max(sij,sji);
+        if sij=0 or sji=0 then
+            t6+1;
+            # relax in case of mitochondion genome or synthetic evolution
+            warning('empty all-all for '.genomes[g1].' '. genomes[g2] )
+        fi;
+        for k to length(BestMatch[i,j]) do
+            if BestMatch[i,j,k] <> [] then
+            BestMatch[i,j,k] := compress(BestMatch[i,j,k]) fi od;
+        for k to length(BestMatch[j,i]) do
+            if BestMatch[j,i,k] <> [] then
+            BestMatch[j,i,k] := compress(BestMatch[j,i,k]) fi od;
+        printf( '# %s vs %s done, (%d/%d)\n', genomes[g1],genomes[g2],
+            sij, sji );
+    od od:
+    printf('# Matches loaded. Mem: %.3fGB\n', Set(BytesAlloc)/2^30);
+    return( BestMatch );
 end:
 
 GetVPsForGenome := proc(g)
@@ -208,10 +304,10 @@ StoreProteinsForGenome := proc(g, grps, fname)
     else
         tab['subgenome'] := [seq('', GS[g,TotEntries])]
     fi:
-    sp := Splicings[g]:
     alt := CreateArray(1..GS[g,TotEntries]):
-    if sp<>0 then
-        VPsDB := ReadDb(ddir.'/ServerVPs.db');
+
+    # TODO: fix splicing variants
+    if GS[g, 'SPLICEMAP'] = 'ksfls' then
         hasO := [seq(evalb(SearchTag('VP',Entry(Goff[gNr]+i))<>'[]'),
                      i=1..GS[g,TotEntries])]:
         for i to GS[g,TotEntries] do

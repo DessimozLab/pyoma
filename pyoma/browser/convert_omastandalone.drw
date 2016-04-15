@@ -1,5 +1,5 @@
 if not assigned(root_dir) then
-    exit(1);
+    root_dir := getenv('DARWIN_BROWSERDATA_PATH');
 fi:
 libdir := root_dir.'/lib/';
 ReadProgram(root_dir.'/lib/darwinit');
@@ -154,12 +154,16 @@ WriteRelationsToTSV := proc(gNr1, gNr2, matches, cache_dir)
             fi:
         od:
     fi od:
-    OpenAppending(cache_dir.'/homologs/'.genomes[gNr1].'.txt');
-    prints(ConcatStrings(buf_homolog, '\n'));
-    OpenAppending(previous);
-    OpenAppending(cache_dir.'/vps/'.genomes[gNr1].'.txt');
-    prints(ConcatStrings(buf_vp, '\n'));
-    OpenAppending(previous);
+    if length(buf_homolog)>0 then
+        OpenAppending(cache_dir.'/homologs/'.GS[genomes[gNr1],'5LETTERNAME'].'.txt');
+        prints(ConcatStrings(buf_homolog, '\n'));
+        OpenAppending(previous);
+    fi:
+    if length(buf_vp)>0 then
+        OpenAppending(cache_dir.'/vps/'.GS[genomes[gNr1],'5LETTERNAME'].'.txt');
+        prints(ConcatStrings(buf_vp, '\n'));
+        OpenAppending(previous);
+    fi:
 end:
 
 TransformDataToCache := proc(cache_dir)
@@ -175,10 +179,18 @@ TransformDataToCache := proc(cache_dir)
         StoreProteinsForGenome(g, Prot2Grp, cache_dir.'/prots/'.GS[g,'5LETTERNAME'].'.json');
     od:
 
-    matches := LoadAllAll();
-    for gNr1 to NS do for gNr2 to NS do
-        WriteRelationsToTSV(gNr1, gNr2, matches[gNr1, gNr2], cache_dir);
-    od od:
+    InitAllAll();
+    for gNr1 to NS do
+        for gNr2 from gNr1 to NS do
+            matches := LoadAllAll(gNr1, gNr2);
+            WriteRelationsToTSV(gNr1, gNr2, matches[1], cache_dir);
+            if gNr1<>gNr2 then
+                WriteRelationsToTSV(gNr2, gNr1, matches[2], cache_dir);
+            fi:
+        od:
+        CallSystem('gzip -6 '.cache_dir.'/{vps,homologs}/'.GS[genomes[gNr1],'5LETTERNAME'].'.txt');
+    od:
+    StoreResults(json('success'));
 end:
 
 NumberOfAlignments := proc(name1:string,name2:string)
@@ -194,8 +206,8 @@ NumberOfChunks := proc(name1, name2)
     return(ceil(NumberOfAlignments(name1, name2)/AlignBatchSize));
 end:
 
-LoadAllAll := proc()
-    global BestMatch1, BestMatch2, t1,t2,t3,t4,t5,t6,t7, Exclude1, Exclude2, g1, g2, db1, db2;
+InitAllAll := proc()
+    global t1,t2,t3,t4,t5,t6,t7, Exclude1, Exclude2;
     t1 := Counter('RefinedMatches structures read'):
     t2 := Counter('Matches read'):
     t3 := Counter('files read'):
@@ -203,58 +215,47 @@ LoadAllAll := proc()
     t5 := Counter('Matches above parameters');
     t6 := Counter('empty all-all'):
     t7 := Counter('Number of matches discarded below MinSeqLen');
+    Exclude1 := Exclude2 := {}:
+end:
 
-    # Read the BestMatch from all x all files #
-    BestMatch := CreateArray(1..NS,1..NS):
-    for i to NS do for j from i to NS do
-        BestMatch[i,j] := CreateArray(1..ns[i],[]);
-        if j>i then BestMatch[j,i] := CreateArray(1..ns[j],[]) fi;
-        if ns[i] < ns[j] or ns[i]=ns[j] and genomes[i] < genomes[j] then
-            g1 := i;  g2 := j else g2 := i;  g1 := j fi;
-        BestMatch1 := BestMatch[g1,g2];  BestMatch2 := BestMatch[g2,g1];
-        t3+1;
-        Exclude1 := Exclude2 := {}:
-        db1 := DBs[genomes[g1]]; db2 := DBs[genomes[g2]]:
-        # if there exist a 1-chunk archive, process it with higher priority
-        fn1chunk := sprintf('%s/Cache/AllAll/%s/%s.gz', root_dir, genomes[g1],genomes[g2]);
-        if FileExists(fn1chunk) then
-            fnSepHash := sprintf('%s/Cache/AllAll/%s/%s.sha2.gz', root_dir, genomes[g1], genomes[g2]);
-            if FileExists(fnSepHash) then ReadProgram(fnSepHash) fi:
-            ReadProgram(fn1chunk);
-        else
-            nrChunks := NumberOfChunks(genomes[g1],genomes[g2]);
-            for part to nrChunks do
-                fn := sprintf('%s/Cache/AllAll/%s/%s/part_%d-%d', root_dir, genomes[g1],genomes[g2],
-                    part, nrChunks);
-                stat := ReadProgram( fn );
-                if stat=lasterror then
-                    warning(stat);
-                    warning(sprintf('Cannot read file allall file "%s". Please remove it and restart', fn));
-                    exit(1);
-                fi;
-            od:
-        fi;
-        # no Pairs should be cut for being below the Scoretol, as those
-        # may serve to break a stable pair
-        sij := sum(length(BestMatch[i,j,k]), k=1..length(BestMatch[i,j]));
-        sji := sum(length(BestMatch[j,i,k]), k=1..length(BestMatch[j,i]));
-        t5+max(sij,sji);
-        if sij=0 or sji=0 then
-            t6+1;
-            # relax in case of mitochondion genome or synthetic evolution
-            warning('empty all-all for '.genomes[g1].' '. genomes[g2] )
-        fi;
-        for k to length(BestMatch[i,j]) do
-            if BestMatch[i,j,k] <> [] then
-            BestMatch[i,j,k] := compress(BestMatch[i,j,k]) fi od;
-        for k to length(BestMatch[j,i]) do
-            if BestMatch[j,i,k] <> [] then
-            BestMatch[j,i,k] := compress(BestMatch[j,i,k]) fi od;
-        printf( '# %s vs %s done, (%d/%d)\n', genomes[g1],genomes[g2],
-            sij, sji );
-    od od:
+LoadAllAll := proc(i, j)
+    global BestMatch1, BestMatch2, t1,t2,t3,t4,t5,t6,t7, g1, g2, db1, db2;
+
+    BestMatch1 := BestMatch2 := CreateArray(1..ns[i],[]);
+    if j>i then BestMatch2 := CreateArray(1..ns[j],[]) fi;
+    if ns[i] < ns[j] or ns[i]=ns[j] and genomes[i] < genomes[j] then
+        g1 := i;  g2 := j; swap := false; else g2 := i;  g1 := j; swap := true; fi;
+    if swap then t := BestMatch1; BestMatch1 := BestMatch2: BestMatch2 := t fi:
+    t3+1;
+    db1 := DBs[genomes[g1]]; db2 := DBs[genomes[g2]]:
+    # if there exist a 1-chunk archive, process it with higher priority
+    fn1chunk := sprintf('%s/Cache/AllAll/%s/%s.gz', root_dir, genomes[g1],genomes[g2]);
+    if FileExists(fn1chunk) then
+        fnSepHash := sprintf('%s/Cache/AllAll/%s/%s.sha2.gz', root_dir, genomes[g1], genomes[g2]);
+        if FileExists(fnSepHash) then ReadProgram(fnSepHash) fi:
+        ReadProgram(fn1chunk);
+    else
+        nrChunks := NumberOfChunks(genomes[g1],genomes[g2]);
+        for part to nrChunks do
+            fn := sprintf('%s/Cache/AllAll/%s/%s/part_%d-%d', root_dir, genomes[g1],genomes[g2],
+                part, nrChunks);
+            stat := ReadProgram( fn );
+            if stat=lasterror then
+                warning(stat);
+                warning(sprintf('Cannot read file allall file "%s". Please remove it and restart', fn));
+                exit(1);
+            fi;
+        od:
+    fi;
+    # no Pairs should be cut for being below the Scoretol, as those
+    # may serve to break a stable pair
+    for mach in [BestMatch1, BestMatch2] do
+        for k to length(mach) do
+            if mach[k] <> [] then mach[k] := compress(mach[k]) fi od;
+    od:
     printf('# Matches loaded. Mem: %.3fGB\n', Set(BytesAlloc)/2^30);
-    return( BestMatch );
+    if swap then t := BestMatch1; BestMatch1 := BestMatch2; BestMatch2 := t fi:
+    return( [BestMatch1, BestMatch2] );
 end:
 
 GetVPsForGenome := proc(g)

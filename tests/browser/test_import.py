@@ -34,15 +34,21 @@ class ImportIntegrationBase(unittest.TestCase):
             else:
                 os.environ[var] = val
 
+    def setUp(self):
+        fname = tempfile.mktemp(".h5", "OmaServer-", self.tmpdir)
+        self.darwin_exporter = DarwinExporter(fname)
+
+    def tearDown(self):
+        fn = self.darwin_exporter.h5.filename
+        self.darwin_exporter.close()
+        os.remove(fn)
 
 
 class GenomeDirectImport_Test(ImportIntegrationBase):
 
     def compare_genomes_tab(self, data):
-        fname = tempfile.mktemp(".h5", "OmaServer-", self.tmpdir)
-        darwin_exporter = DarwinExporter(fname)
-        darwin_exporter.add_species_data()
-        gstab = darwin_exporter.h5.get_node('/Genome')
+        self.darwin_exporter.add_species_data()
+        gstab = self.darwin_exporter.h5.get_node('/Genome')
         self.assertEqual(len(gstab), len(data['GS']), 'unexpected number of genomes')
         for genome in data['GS']:
             gs = gstab.read_where('UniProtSpeciesCode == {}'.format(genome[1].encode('utf-8')))
@@ -52,21 +58,20 @@ class GenomeDirectImport_Test(ImportIntegrationBase):
                     expected = expected.encode('utf-8')
                 self.assertEqual(gs[key[1]], expected, "data doesn't match for {}: {} vs {}"
                                  .format(key[0], gs[key[1]], expected))
-        taxtab = darwin_exporter.h5.get_node('/Taxonomy')
+        taxtab = self.darwin_exporter.h5.get_node('/Taxonomy')
         all_taxlevels = taxtab[:]
         self.assertFalse(numpy.where(all_taxlevels['NCBITaxonId'] == all_taxlevels['ParentTaxonId'])[0].any(),
                          'must not have taxlevel pointing to itself')
-        darwin_exporter.close()
 
     def test_load_species_from_json(self):
-        data = callDarwinExport('GetGenomeData();')
+        data = self.darwin_exporter.call_darwin_export('GetGenomeData();')
         json_fname = os.path.join(self.tmpdir, "pyoma", "gs.json")
         store_in_json(data, json_fname)
         self.compare_genomes_tab(data)
         os.remove(json_fname)
 
     def test_load_species_from_darwin(self):
-        data = callDarwinExport('GetGenomeData();')
+        data = self.darwin_exporter.call_darwin_export('GetGenomeData();')
         self.compare_genomes_tab(data)
 
 
@@ -78,10 +83,6 @@ class ProteinImportViaJson(ImportIntegrationBase):
         data = callDarwinExport('GetGenomeData();')
         json_fname = os.path.join(cls.tmpdir, "pyoma", "gs.json")
         store_in_json(data, json_fname)
-
-    def setUp(self):
-        fname = tempfile.mktemp(".h5", "OmaServer-", self.tmpdir)
-        self.darwin_exporter = DarwinExporter(fname)
 
     def test_add_proteins(self):
         self.darwin_exporter.add_species_data()

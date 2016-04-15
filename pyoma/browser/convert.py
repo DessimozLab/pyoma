@@ -35,7 +35,7 @@ class DarwinException(Exception):
     pass
 
 
-def callDarwinExport(func):
+def callDarwinExport(func, drwfile=None):
     """Function starts a darwin session, loads convert.drw file
     and calls the darwin function passed as argument. The output
     is expected to be written by darwin in json format into the
@@ -43,17 +43,20 @@ def callDarwinExport(func):
     This function returns the parsed json datastructure"""
 
     tmpfile = "/tmp/darwinExporter_{:d}.dat".format(os.getpid())
-    drwCodeFn = os.path.abspath(
-        os.path.splitext(__file__)[0] + '.drw')
+    if drwfile is None:
+        drwfile = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
     try:
         with open(os.devnull, 'w') as DEVNULL:
-            resource.setrlimit(resource.RLIMIT_STACK, (65532000, 65532000))
+            stacksize = resource.getrlimit(resource.RLIMIT_STACK)
+            common.package_logger.info('current stacklimit: {}'.format(stacksize))
+            common.package_logger.info('setting stacklimit: {}'.format((max(stacksize)-1, stacksize[1])))
+            resource.setrlimit(resource.RLIMIT_STACK, (min(stacksize), stacksize[1]))
             p = subprocess.Popen(['darwin', '-q', '-E', '-B'], stdin=subprocess.PIPE,
                                  stderr=subprocess.PIPE, stdout=DEVNULL)
-            drwCmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
-                tmpfile, drwCodeFn, func).encode('utf-8')
+            drw_cmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
+                tmpfile, drwfile, func).encode('utf-8')
             common.package_logger.debug('calling darwin function: {}'.format(func))
-            p.communicate(input=drwCmd)
+            p.communicate(input=drw_cmd)
             if p.returncode > 0:
                 raise DarwinException(p.stderr.read())
 
@@ -67,14 +70,18 @@ def callDarwinExport(func):
 
 
 def uniq(seq):
-    """return uniq elements of a list, preserving order"""
+    """return uniq elements of a list, preserving order
+
+    :param seq: an iterable to be analyzed
+    """
     seen = set()
     return [x for x in seq if not (x in seen or seen.add(x))]
 
 
 def silentremove(filename):
     """Function to remove a given file. No exception is raised if the
-    file does not exist. Other errors are passed to the user."""
+    file does not exist. Other errors are passed to the user.
+    :param filename: the path of the file to be removed"""
     try:
         os.remove(filename)
     except OSError as e:
@@ -100,7 +107,9 @@ def load_tsv_to_numpy(args):
                                            usecols=(0, 1, 2, 3, 4, 5),
                                            converters={'EntryNr1': lambda nr: int(nr) + off1,
                                                        'EntryNr2': lambda nr: int(nr) + off2,
-                                                       'RelType': lambda rel: relEnum[rel[::read_dir].decode()],
+                                                       'RelType': lambda rel: (relEnum[rel[::read_dir].decode()]
+                                                                               if len(rel) <= 3
+                                                                               else relEnum[rel.decode()]),
                                                        'Score': lambda score: float(score)/100})
                 break
         except OSError as e:
@@ -148,6 +157,7 @@ class DataImportError(Exception):
 
 class DarwinExporter(object):
     DB_SCHEMA_VERSION = '2.0'
+    DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
 
     def __init__(self, path, logger=None):
         self.logger = logger if logger is not None else common.package_logger
@@ -161,6 +171,9 @@ class DarwinExporter(object):
             fn, mode, str(self._compr)))
         if mode == 'write':
             self.h5.root._f_setattr('convertion_start', time.strftime("%c"))
+
+    def call_darwin_export(self, func):
+        return callDarwinExport(func, self.DRW_CONVERT_FILE)
 
     def _get_or_create_node(self, path, desc=None):
         try:
@@ -200,7 +213,7 @@ class DarwinExporter(object):
             with open(cache_file, 'r') as fd:
                 data = json.load(fd)
         else:
-            data = callDarwinExport('GetGenomeData();')
+            data = self.call_darwin_export('GetGenomeData();')
         gstab = self.h5.create_table('/', 'Genome', tablefmt.GenomeTable,
                                      expectedrows=len(data['GS']))
         self._write_to_table(gstab, data['GS'])
@@ -258,7 +271,7 @@ class DarwinExporter(object):
                                              genome.encode('utf-8'))
                 else:
                     # fallback to read from VPsDB
-                    data = callDarwinExport('GetVPsForGenome({})'.format(genome))
+                    data = self.call_darwin_export('GetVPsForGenome({})'.format(genome))
 
                 vp_tab = self.h5.create_table(rel_node_for_genome, 'VPairs', tablefmt.PairwiseRelationTable,
                                               expectedrows=len(data))
@@ -280,7 +293,7 @@ class DarwinExporter(object):
                         data = json.load(fd)
                 else:
                     # fallback to read from VPsDB
-                    data = callDarwinExport('GetSameSpeciesRelations({})'.format(genome))
+                    data = self.call_darwin_export('GetSameSpeciesRelations({})'.format(genome))
 
                 ss_tab = self.h5.create_table(rel_node_for_genome, 'within', tablefmt.PairwiseRelationTable,
                                               expectedrows=len(data))
@@ -330,7 +343,7 @@ class DarwinExporter(object):
                 with open(cache_file, 'r') as fd:
                     data = json.load(fd)
             else:
-                data = callDarwinExport('GetProteinsForGenome({})'.format(genome))
+                data = self.call_darwin_export('GetProteinsForGenome({})'.format(genome))
 
             if len(data['seqs']) != gs['TotEntries']:
                 raise DataImportError('number of entries ({:d}) does '

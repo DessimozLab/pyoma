@@ -159,12 +159,13 @@ class DarwinExporter(object):
     DB_SCHEMA_VERSION = '2.0'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
 
-    def __init__(self, path, logger=None):
+    def __init__(self, path, logger=None, mode=None):
         self.logger = logger if logger is not None else common.package_logger
         fn = os.path.normpath(os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'],
             path))
-        mode = 'append' if os.path.exists(fn) else 'write'
+        if mode is None:
+            mode = 'append' if os.path.exists(fn) else 'write'
         self._compr = tables.Filters(complevel=6, complib='zlib', fletcher32=True)
         self.h5 = tables.open_file(fn, mode=mode[0], filters=self._compr)
         self.logger.info("opened {} in {} mode, options {}".format(
@@ -425,7 +426,8 @@ class DarwinExporter(object):
     def add_orthoxml(self, orthoxml_path, fam_nrs):
         """append orthoxml file content to orthoxml_buffer array and add index for the HOG family"""
         if len(fam_nrs) > 1:
-            self.logger.warning('expected only one family per HOG, but found {}: {}\n'.format(len(fam_nrs), fam_nrs))
+            self.logger.warning('expected only one family per HOG file, but found {}: {}'.format(len(fam_nrs), fam_nrs))
+            self.logger.warning(' --> the orthoxml files per family will be not correct, i.e. they will contain all families of this file.')
         with open(orthoxml_path, 'r') as fh:
             orthoxml = fh.read().encode('utf-8')
             offset = len(self.orthoxml_buffer)
@@ -666,8 +668,10 @@ class HogConverter(object):
 
     def convert_file(self, fn):
         p = familyanalyzer.OrthoXMLParser(fn)
-        if self.taxonomy:
+        if hasattr(self, 'taxonomy'):
             p.augmentTaxonomyInfo(self.taxonomy)
+        else:
+            p.augmentTaxonomyInfo(familyanalyzer.TaxonomyFactory.newTaxonomy(p))
         GroupAnnotatorInclGeneRefs(p).annotateDoc()
 
         levs = []
@@ -675,7 +679,7 @@ class HogConverter(object):
             m = self.fam_re.match(fam.get('og'))
             fam_nr = int(m.group('fam_nr'))
             levs.extend([(fam_nr, n.getparent().get('og'), n.get('value'),)
-                         for n in p._findSubNodes('property')
+                         for n in p._findSubNodes('property', root=fam)
                          if n.get('name') == "TaxRange"])
 
         geneNodes = p.root.findall('.//{{{ns0}}}geneRef'.

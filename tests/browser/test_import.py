@@ -9,11 +9,11 @@ from hashlib import md5
 
 from pyoma.browser.convert import callDarwinExport, DarwinExporter
 
+
 def store_in_json(data, fn):
     os.mkdir(os.path.dirname(fn))
     with open(fn, 'w') as fd:
         json.dump(data, fd)
-
 
 
 class ImportIntegrationBase(unittest.TestCase):

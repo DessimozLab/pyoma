@@ -53,14 +53,51 @@ class StandaloneExporter(DarwinExporter):
                 self._write_to_table(vp_tab, data)
                 vp_tab.cols.EntryNr1.create_csindex()
 
+    def add_hogs(self):
+        hog_path = os.path.join(
+            os.environ['DARWIN_BROWSERDATA_PATH'],'Output')
+        entryTab = self.h5.get_node('/Protein/Entries')
+        tree_filename = os.path.join(
+            os.environ['DARWIN_BROWSERDATA_PATH'],
+            'EstimatedSpeciesTree.nwk')
+        hog_converter = StandaloneHogConverter(entryTab)
+        if os.path.exists(tree_filename):
+            hog_converter.attach_newick_taxonomy(tree_filename)
+        hogTab = self.h5.create_table('/', 'HogLevel', tablefmt.HOGsTable,
+                                      'nesting structure for each HOG', expectedrows=1e8)
+        self.orthoxml_buffer = self.h5.create_earray('/OrthoXML', 'Buffer',
+                                                     tables.StringAtom(1), (0,), 'concatenated orthoxml files',
+                                                     expectedrows=1e9, createparents=True)
+        self.orthoxml_index = self.h5.create_table('/OrthoXML', 'Index', tablefmt.OrthoXmlHogTable,
+                                                   'Range index per HOG into OrthoXML Buffer', expectedrows=5e6)
+        fn = 'HierarchicalGroups.orthoxml'
+        try:
+            levels = hog_converter.convert_file(os.path.join(hog_path, fn))
+            hogTab.append(levels)
+            fam_nrs = set([z[0] for z in levels])
+            self.add_orthoxml(os.path.join(hog_path, fn), fam_nrs)
+        except Exception as e:
+            self.logger.error('an error occured while processing ' + fn + ':')
+            self.logger.exception(e)
+
+        hog_converter.write_hogs()
+
+
+class StandaloneHogConverter(HogConverter):
+    def __init__(self, entry_tab):
+        super(StandaloneHogConverter, self).__init__(entry_tab)
+        self.fam_re = re.compile(r'(?P<fam_nr>\d+)')
+
 
 def import_oma_run(path, outfile):
     log = getDebugLogger()
-    x = StandaloneExporter(path, outfile, logger=log)
+    x = StandaloneExporter(path, outfile, logger=log, mode='write')
     x.add_version()
     x.add_species_data()
     x.add_orthologs()
     x.add_proteins()
+    x.add_hogs()
+    x.close()
 
 
 if __name__ == "__main__":

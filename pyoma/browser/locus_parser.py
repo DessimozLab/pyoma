@@ -23,7 +23,7 @@ def parse(omaEntryNr, s):
             res = join(res)
         return res
     except Exception:
-        raise ValueError('cannot parse "' + transinput + '" for entry ' + str(eNr))
+        raise ValueError('LocusParser: cannot parse "' + transinput + '" for entry ' + str(eNr))
 
 
 def join(*args):
@@ -36,7 +36,7 @@ def join(*args):
         elif len(op) == 3:
             tab[i] = (eNr, op[0], op[1], op[2])
         else:
-            raise ValueError('unexpected length for ' + op)
+            raise ValueError('LocusParser: unexpected length for ' + op)
     return tab
 
 
@@ -45,7 +45,7 @@ def complement(op):
         op['Strand'] *= -1
         return op
     elif len(op) != 2:
-        raise ValueError('unexpected input for complement')
+        raise ValueError('LocusParser: unexpected input for complement')
     return op[0], op[1], -1
 
 

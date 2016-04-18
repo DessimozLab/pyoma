@@ -82,6 +82,12 @@ class StandaloneExporter(DarwinExporter):
 
         hog_converter.write_hogs()
 
+    def _get_genome_database_paths(self):
+        return self.call_darwin_export('GetGenomeFileNames();')
+
+    def xref_databases(self):
+        return self._get_genome_database_paths()
+
 
 class StandaloneHogConverter(HogConverter):
     def __init__(self, entry_tab):
@@ -89,7 +95,7 @@ class StandaloneHogConverter(HogConverter):
         self.fam_re = re.compile(r'(?P<fam_nr>\d+)')
 
 
-def import_oma_run(path, outfile):
+def import_oma_run(path, outfile, add_domains=True):
     log = getDebugLogger()
     x = StandaloneExporter(path, outfile, logger=log, mode='write')
     x.add_version()
@@ -97,6 +103,19 @@ def import_oma_run(path, outfile):
     x.add_orthologs()
     x.add_proteins()
     x.add_hogs()
+    x.add_xrefs()
+    domain_url = 'ftp://ftp.biochem.ucl.ac.uk/pub/gene3d_data/CURRENT_RELEASE/mdas.csv.gz'
+    if not add_domains:
+        domain_url = 'file:///dev/null'
+    x.add_domain_info(only_pfam_or_cath_domains(iter_domains(domain_url)))
+    x.add_domainname_info(itertools.chain(
+        CathDomainNameParser('ftp://ftp.biochem.ucl.ac.uk/pub/cath/latest_release/CathNames').parse(),
+        PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
+    x.add_canonical_id()
+    x.close()
+
+    x = StandaloneExporter(path, outfile, logger=log)
+    x.create_indexes()
     x.close()
 
 

@@ -105,6 +105,10 @@ getTaxid := proc(lin)
     return(tax);
 end:
 
+GetGenomeFileNames := proc()
+    StoreResults(json([seq(GS[g,'FileName'], g=genomes)]));
+end:
+
 GetGenomeData := proc()
     global _parents;
     gs := [];

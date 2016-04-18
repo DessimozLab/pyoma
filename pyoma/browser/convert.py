@@ -23,6 +23,8 @@ import collections
 import gzip
 import hashlib
 import itertools
+import fileinput
+
 
 from .. import common
 from . import locus_parser
@@ -443,18 +445,22 @@ class DarwinExporter(object):
                 offset += length
                 row.append()
 
+    def xref_databases(self):
+        return os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), '/ServerIndexed.db')
+
     def add_xrefs(self):
-        self.logger.info('start parsing ServerIndexed to extract XRefs and GO annotations')
-        db_parser = IndexedServerParser()
-        xref_tab = self.h5.create_table('/', 'XRef', tablefmt.XRefTable,
-                                        'Cross-references of proteins to external ids / descriptions',
-                                        expectedrows=1e8)
-        go_tab = self.h5.create_table('/', 'GeneOntology', tablefmt.GeneOntologyTable,
-                                      'Gene Ontology annotations', expectedrows=1e8)
-        with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
-            xref_importer = XRefImporter(db_parser, xref_tab, go_tab, de_man)
-            db_parser.parse_entrytags()
-            xref_importer.flush_buffers()
+        self.logger.info('start extracting XRefs and GO annotations')
+        with fileinput.input(files=self.xref_databases()) as dbfh:
+            db_parser = DarwinDbEntryParser(dbfh)
+            xref_tab = self.h5.create_table('/', 'XRef', tablefmt.XRefTable,
+                                            'Cross-references of proteins to external ids / descriptions',
+                                            expectedrows=1e8)
+            go_tab = self.h5.create_table('/', 'GeneOntology', tablefmt.GeneOntologyTable,
+                                          'Gene Ontology annotations', expectedrows=1e8)
+            with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
+                xref_importer = XRefImporter(db_parser, xref_tab, go_tab, de_man)
+                db_parser.parse_entrytags()
+                xref_importer.flush_buffers()
 
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("%c"))
@@ -566,8 +572,11 @@ class DarwinExporter(object):
 
 
 def download_url_if_not_present(url):
-    fname = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH', '/tmp'), "Browser", "xref",
-                         url.split('/')[-1])
+    tmpfolder = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH','/tmp'), "Browser", "xref")
+    basename = url.split('/')[-1]
+    fname = os.path.join(tmpfolder, basename)
+    if not os.path.exists(tmpfolder):
+        os.makedirs(tmpfolder)
     if not os.path.exists(fname):
         try:
             urllib.request.urlretrieve(url, fname)
@@ -827,28 +836,22 @@ class XRefImporter(object):
                 self._add_to_xrefs(eNr, enum_nr, key)
 
 
-class IndexedServerParser(object):
+class DarwinDbEntryParser:
     def __init__(self, fh=None):
-        """Initializes a Parser for SGML formatted IndexedServer file
+        """Initializes a Parser for SGML formatted darwin database file
 
-        :param fh: file handle of the IndexServer file. If not provided,
-                   the file ServerIndexed.db in DARWIN_BROWSERDATA_PATH is
-                   used instead.
-        """
-        self.do_close_at_end = False
-        if fh is None:
-            fh = open(os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'ServerIndexed.db'), 'r')
-            self.do_close_at_end = True
-        self.doc = fh
+        :param fh: an already opened file handle to the darwin database
+                   file to be parsed."""
         self.tag_handlers = collections.defaultdict(list)
+        self.doc = fh
 
     def add_tag_handler(self, tag, handler):
         self.tag_handlers[tag].append(handler)
         common.package_logger.debug('# handlers for {}: {}'.format(tag, len(self.tag_handlers[tag])))
 
     def parse_entrytags(self):
-        """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym, 
-        ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ, 
+        """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,
+        ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ,
         SwissProt, SwissProt_AC, UniProt/TrEMBL, WikiGene, flybase_transcript_id
         """
         eNr = 0
@@ -872,8 +875,6 @@ class IndexedServerParser(object):
                         handler(value, eNr)
                         # common.package_logger.debug('called handler {} with ({},{})'.format(
                         #    handler, value.encode('utf-8'), eNr))
-        if self.do_close_at_end:
-            self.doc.close()
 
 
 DomainDescription = collections.namedtuple('DomainDescription', tables.dtype_from_descr(tablefmt.DomainDescriptionTable).names)

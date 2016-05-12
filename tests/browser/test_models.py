@@ -1,6 +1,7 @@
 from pyoma.browser import models, db
 from future.utils import with_metaclass
 import sys
+import os
 import unittest
 
 
@@ -35,6 +36,10 @@ class ProteinEntryTests(unittest.TestCase):
             self.assertRegex("{!r}".format(protein_entry), r"<ProteinEntry\(12,.*\)")
         else:
             self.assertRegexpMatches("{!r}".format(protein_entry), r"<ProteinEntry\(12,.*\)")
+
+    def test_len_of_entry(self):
+        protein_entry = models.ProteinEntry.from_entry_nr(self.db, 12)
+        self.assertEqual(len(protein_entry), len(protein_entry.sequence))
 
 
 class SingletonTests(unittest.TestCase):

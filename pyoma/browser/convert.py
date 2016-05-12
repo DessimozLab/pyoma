@@ -442,7 +442,6 @@ class DarwinExporter(object):
             orthoxml = fh.read().encode('utf-8')
             offset = len(self.orthoxml_buffer)
             length = len(orthoxml)
-
             self.orthoxml_buffer.append(numpy.ndarray((length,),
                 buffer=orthoxml, dtype=tables.StringAtom(1)))
             for fam in fam_nrs:

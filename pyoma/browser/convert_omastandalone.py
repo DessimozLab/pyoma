@@ -57,11 +57,15 @@ class StandaloneExporter(DarwinExporter):
     def add_hogs(self):
         hog_path = os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'],'Output')
+
         entryTab = self.h5.get_node('/Protein/Entries')
+
         tree_filename = os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'],
             'EstimatedSpeciesTree.nwk')
+
         hog_converter = StandaloneHogConverter(entryTab)
+
         if os.path.exists(tree_filename):
             hog_converter.attach_newick_taxonomy(tree_filename)
 
@@ -83,6 +87,7 @@ class StandaloneExporter(DarwinExporter):
                                                      expectedrows=1e9, createparents=True)
         self.orthoxml_index = self.h5.create_table('/OrthoXML', 'Index', tablefmt.OrthoXmlHogTable,
                                                    'Range index per HOG into OrthoXML Buffer', expectedrows=5e6)
+
         try:
             levels = hog_converter.convert_file(os.path.join(hog_path, fn))
             hogTab.append(levels)
@@ -95,6 +100,8 @@ class StandaloneExporter(DarwinExporter):
             self.logger.exception(e)
 
         hog_converter.write_hogs()
+
+
 
     def _get_genome_database_paths(self):
         return self.call_darwin_export('GetGenomeFileNames();')

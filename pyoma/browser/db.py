@@ -680,7 +680,7 @@ class XrefIdMapper(object):
         will change this set.
 
         :param entry_nr: the numeric id of the query protein."""
-        res = set([row for row in self.xref_tab.where('EntryNr=={:d}'.format(entry_nr))
+        res = set([row[:] for row in self.xref_tab.where('EntryNr=={:d}'.format(entry_nr))
                    if row['XRefSource'] in self.idtype])
         return res
 

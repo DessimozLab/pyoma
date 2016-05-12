@@ -1,6 +1,5 @@
 import unittest
 import numpy
-import tables
 from pyoma.browser.db import *
 from pyoma.browser import tablefmt
 
@@ -30,7 +29,7 @@ class DatabaseTests(unittest.TestCase):
             vps = self.db.get_vpairs(entry_nr)
             self.assertTrue(isinstance(vps, numpy.ndarray))
             self.assertEqual(exp_vps_cnt, len(vps))
-            self.assertEqual(['EntryNr1', 'EntryNr2', 'RelType'],
+            self.assertEqual(sorted(['EntryNr1', 'EntryNr2', 'RelType','Distance','Score']),
                              sorted(vps.dtype.fields.keys()))
 
     def test_neighborhood_close_to_boundary(self):
@@ -85,6 +84,37 @@ class DatabaseTests(unittest.TestCase):
             levels = self.db.get_subhogids_at_level(*args)
             self.assertTrue(numpy.array_equal(expected, levels),
                             'test of tes_hogids_at_level failed for {}: {}'.format(args, levels))
+
+class XRefDatabaseMock(Database):
+    def __init__(self):
+        f = tables.open_file("xref.h5", "w", driver="H5FD_CORE",
+                             driver_core_backing_store=0)
+        xref = numpy.zeros(10, tables.dtype_from_descr(tablefmt.XRefTable))
+        xref['EntryNr'] = numpy.arange(1, 6, 0.5).astype(numpy.int32)
+        xref['XRefSource'] = numpy.arange(10) % 5
+        xref['XRefId'] = ['XA{:03}g1.4'.format(i) for i in range(10)]
+        f.create_table('/', 'XRef', tablefmt.XRefTable, obj=xref)
+        self.db = f
+
+
+class XRefIdMapperTest(unittest.TestCase):
+
+    @classmethod
+    def setUp(self):
+        patch_db = XRefDatabaseMock()
+        self.xrefmapper = XrefIdMapper(patch_db)
+
+    def tearDown(self):
+        self.xrefmapper._db.db.close()
+
+    def test_multiple_xrefs_per_entry(self):
+        xref_e1 = self.xrefmapper.map_entry_nr(1)
+        self.assertEqual(len(xref_e1), 2)
+
+    def test_map_many_entries(self):
+        all_mapped = self.xrefmapper.map_many_entry_nrs(numpy.arange(1,4))
+        self.assertEqual(all_mapped.shape, (6,))
+        self.assertEqual(all_mapped.dtype, self.xrefmapper.xref_tab.dtype)
 
 
 class TaxonomyTest(unittest.TestCase):

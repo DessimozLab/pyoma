@@ -17,7 +17,7 @@ class DatabaseTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        path = "/pub/projects/cbrg-oma-browser/Test.Jul2014/data/OmaServer.h5"
+        path = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
         cls.db = Database(path)
 
     @classmethod
@@ -129,7 +129,8 @@ class TaxonomyTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h5 = tables.open_file('/pub/projects/cbrg-oma-browser/Test.Jul2014/data/OmaServer.h5')
+        path = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        h5 = tables.open_file(path)
         cls.tax_input = h5.root.Taxonomy.read()
         h5.close()
 

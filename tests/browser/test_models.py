@@ -10,7 +10,8 @@ class ProteinEntryTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.db = db.Database('/pub/projects/cbrg-oma-browser/Test.Jul2014/data/OmaServer.h5')
+        fn = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        cls.db = db.Database(fn)
 
     @classmethod
     def tearDownClass(cls):

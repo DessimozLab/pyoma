@@ -85,6 +85,12 @@ class DatabaseTests(unittest.TestCase):
             self.assertTrue(numpy.array_equal(expected, levels),
                             'test of tes_hogids_at_level failed for {}: {}'.format(args, levels))
 
+    def test_sorted_genomes(self):
+        for root in ('YEAST', 'ASHGO'):
+            order = self.db.id_mapper['OMA'].species_ordering(root)
+            self.assertEqual(order[root], 0, '{} should be first genome, but comes at {}'.format(root, order[root]))
+
+
 class XRefDatabaseMock(Database):
     def __init__(self):
         f = tables.open_file("xref.h5", "w", driver="H5FD_CORE",

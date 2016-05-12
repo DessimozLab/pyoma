@@ -18,7 +18,7 @@ class StandaloneExporter(DarwinExporter):
                 pass
 
     def get_version(self):
-        #TODO: obtain real version
+        # TODO: obtain real version
         return "OmaStandalone; 1.0.x"
 
     def assert_cached_results(self):

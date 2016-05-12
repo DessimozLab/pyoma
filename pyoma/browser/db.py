@@ -381,12 +381,40 @@ class OmaIdMapper(object):
         if isinstance(query, (int, numpy.integer)):
             genome_row = self.genome_of_entry_nr(query)
             if (query <= 0 or query > genome_row['EntryOff'] +
-                    genome_row['TotEntries']):
+                genome_row['TotEntries']):
                 raise InvalidOmaId(query)
         else:
             genome_row = self.genome_from_UniProtCode(query)
         return (genome_row['EntryOff'] + 1,
                 genome_row['EntryOff'] + genome_row['TotEntries'],)
+
+    def species_ordering(self, root=None):
+        """get ordering of the genomes with respect to taxonomy.
+
+        This method returns a linear ordering of all the genomes with
+        respect to their lineage, i.e. genomes that are evolutionary
+        "close" to each other appear close in the ordering.
+        Optionally, one can give a root genome, that will be the species
+        the ordering is going to start with.
+
+        :param root: UniProtSpeciesCode of the root genome.
+        :returns: a list of species codes in the correct order."""
+        if root is None:
+            root = self.genome_table[0]['UniProtSpeciesCode']
+        root_genome = self.genome_from_UniProtCode(root)
+        lins = {g['UniProtSpeciesCode']: [lev['Name']
+                    for lev in self._db.tax.get_parent_taxa(g['NCBITaxonId'])][::-1]
+                for g in self.genome_table}
+        root_lin = lins[root_genome['UniProtSpeciesCode']]
+        sort_key = {}
+        for g, lin_g in lins.items():
+            for k in range(min(len(root_lin), len(lin_g))):
+                if root_lin[k] != lin_g[k]:
+                    k -= 1
+                    break
+            sort_key[g] = (-k, lin_g)
+        sorted_genomes = sorted(list(sort_key.keys()), key=lambda g: sort_key[g])
+        return {g.decode(): v for v, g in enumerate(sorted_genomes)}
 
 
 class IDResolver(object):

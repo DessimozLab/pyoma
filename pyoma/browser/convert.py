@@ -45,6 +45,7 @@ def callDarwinExport(func):
     tmpfile = "/tmp/darwinExporter_{:d}.dat".format(os.getpid())
     drwCodeFn = os.path.abspath(
         os.path.splitext(__file__)[0] + '.drw')
+
     try:
         with open(os.devnull, 'w') as DEVNULL:
             resource.setrlimit(resource.RLIMIT_STACK, (65532000, 65532000))

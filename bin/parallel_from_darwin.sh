@@ -8,7 +8,7 @@ for i in $(eval echo {1..${NProc}}) ; do
     NR_PROCESSES := $NProc;
     THIS_PROC_NR := $i;
     ReadProgram('$DARWIN_OMA_REPO_PATH/lib/Platforms');
-    ReadProgram('pyoma/convert.drw');
+    ReadProgram('pyoma/browser/convert.drw');
     pInf := DetectParallelInfo();
     if pInf['ProcNr']=1 then
         outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/gs.json';

@@ -227,18 +227,40 @@ class Database(object):
         return self.db.root.HogLevel.read_where(
                 '(Fam=={}) & (Level=={!r})'.format(fam_nr, lev))['ID']
 
-    def member_of_hog_id(self, hog_id):
+    def member_of_hog_id(self, hog_id, level=None):
         """return an array of protein entries which belong to a given hog_id.
 
         E.g. if hog_id = 'HOG122.1a', the method returns all the proteins that
         have either exactly this hog id or an inparalogous id such a HOG122.1a.4b.2a
 
-        :param hog_id str: the requested hog_id.
-        :return a numpy.array with the protein entries belonging to the requested hog."""
+        If you are only interested in the members of a specific lineage (identified
+        through its taxonomic range), you can pass the taxonomic range as an
+        additional argument. Only the proteins of genomes belonging to this clade
+        will be returned. Otherwise, all proteins with having this specific hog_id
+        will be returned.
+
+        :param str hog_id: the requested hog_id.
+        :param level: the taxonomic level of interest
+        :type level: str or None
+
+        :return: a numpy.array with the protein entries belonging to the requested hog.
+        :rtype: :class:`numpy.ndarray`
+
+        :Note: Even if you obtained a certain hog_id using
+               :py:meth:`get_subhogids_at_level`
+               using a certain level, if you do not specify the level in
+               :meth:`member_of_hog_id` again, you will likely get proteins from other
+               clades. Only if it happens that the deepest level of the hog_id
+               coincides with the taxonomic range of interest, the two will be identical.
+        """
         hog_range = self._hog_lex_range(hog_id)
         # get the proteins which have that HOG number
         memb = self.db.root.Protein.Entries.read_where(
                 '({!r} <= OmaHOG) & (OmaHOG < {!r})'.format(*hog_range))
+        if level is not None:
+            memb = [x for x in memb if level.encode('ascii') in self.tax.get_parent_taxa(
+                self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
+
         return memb
 
     def member_of_fam(self, fam):
@@ -561,11 +583,11 @@ class Taxonomy(object):
         new taxonomy. `members` must be an iterable, the levels
         must be either numeric taxids or scientific names.
 
-        :param iterable members: an iterable containing the levels
+        :param iter members: an iterable containing the levels
             and leaves that should remain in the new taxonomy. can be
             either axonomic ids or scientific names.
         :param bool collapse: whether or not levels with only one child
-            should be skipped or not."""
+            should be skipped or not. This defaults to True"""
         taxids_to_keep = numpy.sort(self._get_taxids_from_any(members))
         idxs = numpy.searchsorted(self.tax_table['NCBITaxonId'], taxids_to_keep, sorter=self.taxid_key)
         idxs = numpy.clip(idxs, 0, len(self.taxid_key) - 1)

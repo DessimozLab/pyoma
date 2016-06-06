@@ -85,6 +85,15 @@ class DatabaseTests(unittest.TestCase):
             self.assertTrue(numpy.array_equal(expected, levels),
                             'test of tes_hogids_at_level failed for {}: {}'.format(args, levels))
 
+    def test_member_of_hog_id(self):
+        cases = [[('HOG:0000082.1b', None), 2],
+                 [('HOG:0000082.1b', 'Saccharomycetaceae'), 2],
+                 [('HOG:0000082.1b', 'Saccharomyces cerevisiae (strain ATCC 204508 / S288c)'), 1],
+                 [('HOG:0000082.1a', 'Mammalia'), 0]]
+        for args, expected_len in cases:
+            members = self.db.member_of_hog_id(*args)
+            self.assertEqual(len(members), expected_len)
+
     def test_sorted_genomes(self):
         for root in ('YEAST', 'ASHGO'):
             order = self.db.id_mapper['OMA'].species_ordering(root)

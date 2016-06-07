@@ -10,6 +10,7 @@ from collections import Counter
 from functools import reduce
 import re
 import os
+import json
 
 import tables
 from scipy import stats
@@ -293,7 +294,48 @@ def get_protein_coding_genes(gff_records,gene_id_re,lvl):
                 if gene_id not in prot_coding_gene:
                     prot_coding_gene.append(gene_id)
     return prot_coding_gene
-                    
+
+class OMASpeciesDB(object):
+
+    def __init__(self):
+        """Constructor"""
+        self.db = os.path.join(os.environ['DARWIN_GENOMES_PATH'],'inhouse_specs.json')
+        self.specs_data = self.get_species_info()
+        self.species = self.get_species()
+        
+    def get_species_info(self):
+        """get species records"""
+        with open(self.db) as spec_db:
+            specs_info = json.load(spec_db)
+        return specs_info
+
+    def get_species(self):
+        return([ spec_rec['species'] for spec_rec in self.specs_data])
+
+    def add_species(self,spec,sci_name,aa,nt,gff,nr_recs):
+        """add a species record (Be aware of duplicate records)
+        :param spec: five code represents a species to add
+        :param sci_name: scientific name for this species
+        :param aa: path to protein sequence file
+        :param nt: path to nucleotide sequence file
+        :param gff: path to GFF file
+        :nr_recs: the number of protein records in this release
+        """
+        if spec not in self.species:
+            with open(self.db, 'w') as spec_db:
+                specs_ins = {}
+                specs_ins['species'] = spec
+                specs_ins['sci_name'] = sci_name
+                specs_ins['aa'] = aa
+                specs_ins['nt'] = nt
+                specs_ins['gff'] = gff
+                specs_ins['nr_recs'] = nr_recs
+                self.specs_data.append(specs_ins)
+                json.dump(self.specs_data, spec_db, sort_keys = True, indent=4)
+        else:
+            raise ValueError('Genome resource of {} is available in the current db'\
+                             .format(spec))
+        
 if __name__ == "__main__":
     oma_ins = 'dev'
     rels = get_sorted_rels(oma_ins)

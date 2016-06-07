@@ -23,6 +23,8 @@ import collections
 import gzip
 import hashlib
 import itertools
+import fileinput
+
 
 from .. import common
 from . import locus_parser
@@ -35,7 +37,7 @@ class DarwinException(Exception):
     pass
 
 
-def callDarwinExport(func):
+def callDarwinExport(func, drwfile=None):
     """Function starts a darwin session, loads convert.drw file
     and calls the darwin function passed as argument. The output
     is expected to be written by darwin in json format into the
@@ -43,18 +45,20 @@ def callDarwinExport(func):
     This function returns the parsed json datastructure"""
 
     tmpfile = "/tmp/darwinExporter_{:d}.dat".format(os.getpid())
-    drwCodeFn = os.path.abspath(
-        os.path.splitext(__file__)[0] + '.drw')
-
+    if drwfile is None:
+        drwfile = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
     try:
         with open(os.devnull, 'w') as DEVNULL:
-            resource.setrlimit(resource.RLIMIT_STACK, (65532000, 65532000))
+            stacksize = resource.getrlimit(resource.RLIMIT_STACK)
+            common.package_logger.info('current stacklimit: {}'.format(stacksize))
+            common.package_logger.info('setting stacklimit: {}'.format((max(stacksize)-1, stacksize[1])))
+            resource.setrlimit(resource.RLIMIT_STACK, (min(stacksize), stacksize[1]))
             p = subprocess.Popen(['darwin', '-q', '-E', '-B'], stdin=subprocess.PIPE,
                                  stderr=subprocess.PIPE, stdout=DEVNULL)
-            drwCmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
-                tmpfile, drwCodeFn, func).encode('utf-8')
+            drw_cmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
+                tmpfile, drwfile, func).encode('utf-8')
             common.package_logger.debug('calling darwin function: {}'.format(func))
-            p.communicate(input=drwCmd)
+            p.communicate(input=drw_cmd)
             if p.returncode > 0:
                 raise DarwinException(p.stderr.read())
 
@@ -68,14 +72,18 @@ def callDarwinExport(func):
 
 
 def uniq(seq):
-    """return uniq elements of a list, preserving order"""
+    """return uniq elements of a list, preserving order
+
+    :param seq: an iterable to be analyzed
+    """
     seen = set()
     return [x for x in seq if not (x in seen or seen.add(x))]
 
 
 def silentremove(filename):
     """Function to remove a given file. No exception is raised if the
-    file does not exist. Other errors are passed to the user."""
+    file does not exist. Other errors are passed to the user.
+    :param filename: the path of the file to be removed"""
     try:
         os.remove(filename)
     except OSError as e:
@@ -101,7 +109,9 @@ def load_tsv_to_numpy(args):
                                            usecols=(0, 1, 2, 3, 4, 5),
                                            converters={'EntryNr1': lambda nr: int(nr) + off1,
                                                        'EntryNr2': lambda nr: int(nr) + off2,
-                                                       'RelType': lambda rel: relEnum[rel[::read_dir].decode()],
+                                                       'RelType': lambda rel: (relEnum[rel[::read_dir].decode()]
+                                                                               if len(rel) <= 3
+                                                                               else relEnum[rel.decode()]),
                                                        'Score': lambda score: float(score)/100})
                 break
         except OSError as e:
@@ -149,19 +159,24 @@ class DataImportError(Exception):
 
 class DarwinExporter(object):
     DB_SCHEMA_VERSION = '2.0'
+    DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
 
-    def __init__(self, path, logger=None):
+    def __init__(self, path, logger=None, mode=None):
         self.logger = logger if logger is not None else common.package_logger
         fn = os.path.normpath(os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'],
             path))
-        mode = 'append' if os.path.exists(fn) else 'write'
+        if mode is None:
+            mode = 'append' if os.path.exists(fn) else 'write'
         self._compr = tables.Filters(complevel=6, complib='zlib', fletcher32=True)
         self.h5 = tables.open_file(fn, mode=mode[0], filters=self._compr)
         self.logger.info("opened {} in {} mode, options {}".format(
             fn, mode, str(self._compr)))
         if mode == 'write':
             self.h5.root._f_setattr('convertion_start', time.strftime("%c"))
+
+    def call_darwin_export(self, func):
+        return callDarwinExport(func, self.DRW_CONVERT_FILE)
 
     def _get_or_create_node(self, path, desc=None):
         try:
@@ -201,7 +216,7 @@ class DarwinExporter(object):
             with open(cache_file, 'r') as fd:
                 data = json.load(fd)
         else:
-            data = callDarwinExport('GetGenomeData();')
+            data = self.call_darwin_export('GetGenomeData();')
         gstab = self.h5.create_table('/', 'Genome', tablefmt.GenomeTable,
                                      expectedrows=len(data['GS']))
         self._write_to_table(gstab, data['GS'])
@@ -259,7 +274,7 @@ class DarwinExporter(object):
                                              genome.encode('utf-8'))
                 else:
                     # fallback to read from VPsDB
-                    data = callDarwinExport('GetVPsForGenome({})'.format(genome))
+                    data = self.call_darwin_export('GetVPsForGenome({})'.format(genome))
 
                 vp_tab = self.h5.create_table(rel_node_for_genome, 'VPairs', tablefmt.PairwiseRelationTable,
                                               expectedrows=len(data))
@@ -281,7 +296,7 @@ class DarwinExporter(object):
                         data = json.load(fd)
                 else:
                     # fallback to read from VPsDB
-                    data = callDarwinExport('GetSameSpeciesRelations({})'.format(genome))
+                    data = self.call_darwin_export('GetSameSpeciesRelations({})'.format(genome))
 
                 ss_tab = self.h5.create_table(rel_node_for_genome, 'within', tablefmt.PairwiseRelationTable,
                                               expectedrows=len(data))
@@ -331,7 +346,7 @@ class DarwinExporter(object):
                 with open(cache_file, 'r') as fd:
                     data = json.load(fd)
             else:
-                data = callDarwinExport('GetProteinsForGenome({})'.format(genome))
+                data = self.call_darwin_export('GetProteinsForGenome({})'.format(genome))
 
             if len(data['seqs']) != gs['TotEntries']:
                 raise DataImportError('number of entries ({:d}) does '
@@ -413,7 +428,8 @@ class DarwinExporter(object):
     def add_orthoxml(self, orthoxml_path, fam_nrs):
         """append orthoxml file content to orthoxml_buffer array and add index for the HOG family"""
         if len(fam_nrs) > 1:
-            self.logger.warning('expected only one family per HOG, but found {}: {}\n'.format(len(fam_nrs), fam_nrs))
+            self.logger.warning('expected only one family per HOG file, but found {}: {}'.format(len(fam_nrs), fam_nrs))
+            self.logger.warning(' --> the orthoxml files per family will be not correct, i.e. they will contain all families of this file.')
         with open(orthoxml_path, 'r') as fh:
             orthoxml = fh.read().encode('utf-8')
             offset = len(self.orthoxml_buffer)
@@ -429,18 +445,22 @@ class DarwinExporter(object):
                 offset += length
                 row.append()
 
+    def xref_databases(self):
+        return os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), '/ServerIndexed.db')
+
     def add_xrefs(self):
-        self.logger.info('start parsing ServerIndexed to extract XRefs and GO annotations')
-        db_parser = IndexedServerParser()
-        xref_tab = self.h5.create_table('/', 'XRef', tablefmt.XRefTable,
-                                        'Cross-references of proteins to external ids / descriptions',
-                                        expectedrows=1e8)
-        go_tab = self.h5.create_table('/', 'GeneOntology', tablefmt.GeneOntologyTable,
-                                      'Gene Ontology annotations', expectedrows=1e8)
-        with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
-            xref_importer = XRefImporter(db_parser, xref_tab, go_tab, de_man)
-            db_parser.parse_entrytags()
-            xref_importer.flush_buffers()
+        self.logger.info('start extracting XRefs and GO annotations')
+        with fileinput.input(files=self.xref_databases()) as dbfh:
+            db_parser = DarwinDbEntryParser(dbfh)
+            xref_tab = self.h5.create_table('/', 'XRef', tablefmt.XRefTable,
+                                            'Cross-references of proteins to external ids / descriptions',
+                                            expectedrows=1e8)
+            go_tab = self.h5.create_table('/', 'GeneOntology', tablefmt.GeneOntologyTable,
+                                          'Gene Ontology annotations', expectedrows=1e8)
+            with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
+                xref_importer = XRefImporter(db_parser, xref_tab, go_tab, de_man)
+                db_parser.parse_entrytags()
+                xref_importer.flush_buffers()
 
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("%c"))
@@ -552,8 +572,11 @@ class DarwinExporter(object):
 
 
 def download_url_if_not_present(url):
-    fname = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH', '/tmp'), "Browser", "xref",
-                         url.split('/')[-1])
+    tmpfolder = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH','/tmp'), "Browser", "xref")
+    basename = url.split('/')[-1]
+    fname = os.path.join(tmpfolder, basename)
+    if not os.path.exists(tmpfolder):
+        os.makedirs(tmpfolder)
     if not os.path.exists(fname):
         try:
             urllib.request.urlretrieve(url, fname)
@@ -654,8 +677,10 @@ class HogConverter(object):
 
     def convert_file(self, fn):
         p = familyanalyzer.OrthoXMLParser(fn)
-        if self.taxonomy:
+        if hasattr(self, 'taxonomy'):
             p.augmentTaxonomyInfo(self.taxonomy)
+        else:
+            p.augmentTaxonomyInfo(familyanalyzer.TaxonomyFactory.newTaxonomy(p))
         GroupAnnotatorInclGeneRefs(p).annotateDoc()
 
         levs = []
@@ -663,7 +688,7 @@ class HogConverter(object):
             m = self.fam_re.match(fam.get('og'))
             fam_nr = int(m.group('fam_nr'))
             levs.extend([(fam_nr, n.getparent().get('og'), n.get('value'),)
-                         for n in p._findSubNodes('property')
+                         for n in p._findSubNodes('property', root=fam)
                          if n.get('name') == "TaxRange"])
 
         geneNodes = p.root.findall('.//{{{ns0}}}geneRef'.
@@ -811,28 +836,22 @@ class XRefImporter(object):
                 self._add_to_xrefs(eNr, enum_nr, key)
 
 
-class IndexedServerParser(object):
+class DarwinDbEntryParser:
     def __init__(self, fh=None):
-        """Initializes a Parser for SGML formatted IndexedServer file
+        """Initializes a Parser for SGML formatted darwin database file
 
-        :param fh: file handle of the IndexServer file. If not provided,
-                   the file ServerIndexed.db in DARWIN_BROWSERDATA_PATH is
-                   used instead.
-        """
-        self.do_close_at_end = False
-        if fh is None:
-            fh = open(os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'ServerIndexed.db'), 'r')
-            self.do_close_at_end = True
-        self.doc = fh
+        :param fh: an already opened file handle to the darwin database
+                   file to be parsed."""
         self.tag_handlers = collections.defaultdict(list)
+        self.doc = fh
 
     def add_tag_handler(self, tag, handler):
         self.tag_handlers[tag].append(handler)
         common.package_logger.debug('# handlers for {}: {}'.format(tag, len(self.tag_handlers[tag])))
 
     def parse_entrytags(self):
-        """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym, 
-        ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ, 
+        """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,
+        ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ,
         SwissProt, SwissProt_AC, UniProt/TrEMBL, WikiGene, flybase_transcript_id
         """
         eNr = 0
@@ -856,8 +875,6 @@ class IndexedServerParser(object):
                         handler(value, eNr)
                         # common.package_logger.debug('called handler {} with ({},{})'.format(
                         #    handler, value.encode('utf-8'), eNr))
-        if self.do_close_at_end:
-            self.doc.close()
 
 
 DomainDescription = collections.namedtuple('DomainDescription', tables.dtype_from_descr(tablefmt.DomainDescriptionTable).names)

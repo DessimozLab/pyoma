@@ -1,6 +1,6 @@
 
 ============================================
- Release notes for OMA Standalone 0.x series
+ Release notes for pyoma 0.x series
 ============================================
 
  :Author: Oma Developers

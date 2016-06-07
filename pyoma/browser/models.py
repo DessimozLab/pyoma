@@ -97,6 +97,10 @@ class ProteinEntry(object):
     def sequence(self):
         return self._db.get_sequence(self._entry).decode()
 
+    @property
+    def sequence_length(self):
+        return int(self._entry['SeqBufferLength']) - 1
+
     @LazyProperty
     def description(self):
         return self._db.get_description(self._entry).decode()
@@ -107,6 +111,9 @@ class ProteinEntry(object):
 
     def __repr__(self):
         return "<{}({}, {})>".format(self.__class__.__name__, self.entry_nr, self.omaid)
+
+    def __len__(self):
+        return self.sequence_length
 
 
 class Genome(object):

@@ -258,6 +258,7 @@ def consistency_check(aa_file, nt_file, gff_file, gene_id_re, lvl, output):
             out.write('{}\n'.format(rec))
         
     assert(aa_records == nt_records == gff_records),'records are not matched among genome resource files'
+    return gff_records
     
 def get_gene_id(record_header, gene_id_re=''):
     """get only gene identifier by trimming off sub string after first column, 
@@ -280,8 +281,7 @@ def get_gff_records(gff_file):
     with open(gff_file) as gff:
         for record in GFF.parse(gff):
             gff_records.append(record)
-            return gff_records
-
+    return gff_records
 def get_protein_coding_genes(gff_records,gene_id_re,lvl):
     """retrives only protein-coding genes identifiers from a GFF file
     :gff_records: gene records list 
@@ -311,21 +311,19 @@ class OMASpeciesDB(object):
 
     def get_species(self):
         return([ spec_rec['species'] for spec_rec in self.specs_data])
-
-    def add_species(self,spec,sci_name,aa,nt,gff,nr_recs):
+    
+    def add_species(self, spec, aa, nt, gff, nr_recs):
         """add a species record (Be aware of duplicate records)
         :param spec: five code represents a species to add
-        :param sci_name: scientific name for this species
         :param aa: path to protein sequence file
         :param nt: path to nucleotide sequence file
         :param gff: path to GFF file
         :nr_recs: the number of protein records in this release
         """
-        if spec not in self.species:
+        if spec_ not in self.species:
             with open(self.db, 'w') as spec_db:
                 specs_ins = {}
-                specs_ins['species'] = spec
-                specs_ins['sci_name'] = sci_name
+                specs_ins['species'] = spec_
                 specs_ins['aa'] = aa
                 specs_ins['nt'] = nt
                 specs_ins['gff'] = gff
@@ -335,13 +333,42 @@ class OMASpeciesDB(object):
         else:
             raise ValueError('Genome resource of {} is available in the current db'\
                              .format(spec))
+    
         
 if __name__ == "__main__":
-    oma_ins = 'dev'
-    rels = get_sorted_rels(oma_ins)
-    cur_rel = rels[0]
-    pre_rel = rels[1]
+    ####################################################################
+    #oma_ins = 'dev'
+    #rels = get_sorted_rels(oma_ins)
+    #cur_rel = rels[0]
+    #pre_rel = rels[1] 
+    #cur_rel_ss = SanitySession(oma_instance = oma_ins, release = cur_rel)
+    #pre_rel_ss = SanitySession(oma_instance = oma_ins, release = pre_rel)
+    #homoeolog_checks(rel1 = cur_rel_ss, rel2 = pre_rel_ss)
+    ####################################################################
+    newDB = OMASpeciesDB()
+    path = '/tools/bioinfo/app/OMA_pipeline-20140123/data/OMA/genomes_incoming_inhouse/'
+    #Genome resources of CAPAN(pepper) and WHEAT integrated into OMA are from public
+    #CAPAN public resource (checked)
+    #BRAJU genome assembly is littered with transposons (need to filter out transposons)
+    #BRANA adopted from PLAZA build Darmor jira: GUS-29869 (needs to fix)
+    #CUCSA 
+
+    inhouse_specs = [ {'five_letter':'BRANA', 'geneid_re':'', 'gene_lvl' 'mRNA',\
+                      {'five_letter':'GOSRA', 'geneid_re':},\
+                      {'five_letter':'BRAOA', 'trim_dna_id_re':'^[^:]+:', 'trim_protein_id_re':'^[^:]+:', 'geneid_re':'\.\d+$'},
+                      {'five_letter':'TRITU', 'trim_dna_id_re':['^[^:]+:'], 'trim_protein_id_re':['^[^:]+:', '/.+$'], 'trim_protein_desc_re':[".*"]},\
+                      {'five_letter':'CUCSA', 'geneid_re':'\.\d$'},\
+                      {'five_letter':'BRARP', 'trim_protein_id_re':['-P$'], 'geneid_re':'\.\d+$', 'gff_mrna_name':'ID','gff_mrna_id_re':'^transcript:'},\
+                      {'five_letter':'CITLA', 'gff_mrna_name':'ID'},\
+                      {'five_letter':'GOSHI', 'trim_protein_id_re':['-P$'], 'geneid_re':'^evm..U.', 'gff_mrna_name':'ID'},\
+                      {'five_letter':'CUCME', 'geneid_re':'T[0-9]+$', 'gff_mrna_name':'ID', 'mrna_feature':'transcript'}]
     
-    cur_rel_ss = SanitySession(oma_instance = oma_ins, release = cur_rel)
-    pre_rel_ss = SanitySession(oma_instance = oma_ins, release = pre_rel)
-    homoeolog_checks(rel1 = cur_rel_ss, rel2 = pre_rel_ss)
+    for spec in inhouse_species:
+        spec_aa_file, spec_nt_file, spec_gff_file = map(lambda x: os.path.join(path,spec,'data'),\
+                                        ['{}.aa.fasta'.format(spec['five_letter']),\
+                                         '{}.nt.fasta'.format(spec['five_letter']),\
+                                         '{}.gff3'.format(spec['five_letter'])])
+        gene_id_re = spec['geneid_re']
+        lvl = spec['gff_mrna_id_re'] #top level normally either gene or mRNA
+        nr_records = consistency_check(spec_aa_file, spec_nt_file, spec_gff_file, gene_id_re, lvl, output)
+        newDB.add_species(spec,spec_aa_file,spec_nt_file,spec_gff_file, nr_records)

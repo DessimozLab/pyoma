@@ -7,6 +7,19 @@
  :Contact: contact@omabrowser.org
 
 
+Summary of Changes from 0.2.1 to 0.3.0
+======================================
+
+- allow imports from oma standalone
+
+- extended testings, test data from git annex
+
+- sanity checks to track plausibility between releases.
+
+- various small bugfixes
+
+
+
 Summary of Changes from 0.2.0 to 0.2.1
 ======================================
 

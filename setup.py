@@ -4,7 +4,7 @@ name = 'pyoma'
 
 setup(
     name=name,
-    version='0.2.1',
+    version='0.3.0',
     author='Adrian Altenhoff',
     author_email='adrian.altenhoff@inf.ethz.ch',
     description='todoc',

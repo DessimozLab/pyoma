@@ -1,6 +1,5 @@
 import unittest
 import numpy
-import tables
 from pyoma.browser.db import *
 from pyoma.browser import tablefmt
 
@@ -18,7 +17,7 @@ class DatabaseTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        path = "/pub/projects/cbrg-oma-browser/Test.Jul2014/data/OmaServer.h5"
+        path = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
         cls.db = Database(path)
 
     @classmethod
@@ -30,7 +29,7 @@ class DatabaseTests(unittest.TestCase):
             vps = self.db.get_vpairs(entry_nr)
             self.assertTrue(isinstance(vps, numpy.ndarray))
             self.assertEqual(exp_vps_cnt, len(vps))
-            self.assertEqual(['EntryNr1', 'EntryNr2', 'RelType'],
+            self.assertEqual(sorted(['EntryNr1', 'EntryNr2', 'RelType','Distance','Score']),
                              sorted(vps.dtype.fields.keys()))
 
     def test_neighborhood_close_to_boundary(self):
@@ -86,6 +85,52 @@ class DatabaseTests(unittest.TestCase):
             self.assertTrue(numpy.array_equal(expected, levels),
                             'test of tes_hogids_at_level failed for {}: {}'.format(args, levels))
 
+    def test_member_of_hog_id(self):
+        cases = [[('HOG:0000082.1b', None), 2],
+                 [('HOG:0000082.1b', 'Saccharomycetaceae'), 2],
+                 [('HOG:0000082.1b', 'Saccharomyces cerevisiae (strain ATCC 204508 / S288c)'), 1],
+                 [('HOG:0000082.1a', 'Mammalia'), 0]]
+        for args, expected_len in cases:
+            members = self.db.member_of_hog_id(*args)
+            self.assertEqual(len(members), expected_len)
+
+    def test_sorted_genomes(self):
+        for root in ('YEAST', 'ASHGO'):
+            order = self.db.id_mapper['OMA'].species_ordering(root)
+            self.assertEqual(order[root], 0, '{} should be first genome, but comes at {}'.format(root, order[root]))
+
+
+class XRefDatabaseMock(Database):
+    def __init__(self):
+        f = tables.open_file("xref.h5", "w", driver="H5FD_CORE",
+                             driver_core_backing_store=0)
+        xref = numpy.zeros(10, tables.dtype_from_descr(tablefmt.XRefTable))
+        xref['EntryNr'] = numpy.arange(1, 6, 0.5).astype(numpy.int32)
+        xref['XRefSource'] = numpy.arange(10) % 5
+        xref['XRefId'] = ['XA{:03}g1.4'.format(i) for i in range(10)]
+        f.create_table('/', 'XRef', tablefmt.XRefTable, obj=xref)
+        self.db = f
+
+
+class XRefIdMapperTest(unittest.TestCase):
+
+    @classmethod
+    def setUp(self):
+        patch_db = XRefDatabaseMock()
+        self.xrefmapper = XrefIdMapper(patch_db)
+
+    def tearDown(self):
+        self.xrefmapper._db.db.close()
+
+    def test_multiple_xrefs_per_entry(self):
+        xref_e1 = self.xrefmapper.map_entry_nr(1)
+        self.assertEqual(len(xref_e1), 2)
+
+    def test_map_many_entries(self):
+        all_mapped = self.xrefmapper.map_many_entry_nrs(numpy.arange(1,4))
+        self.assertEqual(all_mapped.shape, (6,))
+        self.assertEqual(all_mapped.dtype, self.xrefmapper.xref_tab.dtype)
+
 
 class TaxonomyTest(unittest.TestCase):
     tax_input = None
@@ -93,7 +138,8 @@ class TaxonomyTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h5 = tables.open_file('/pub/projects/cbrg-oma-browser/Test.Jul2014/data/OmaServer.h5')
+        path = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        h5 = tables.open_file(path)
         cls.tax_input = h5.root.Taxonomy.read()
         h5.close()
 

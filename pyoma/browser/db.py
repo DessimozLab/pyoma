@@ -84,19 +84,22 @@ class Database(object):
 
         :param int entry_nr: a numeric identifier for the protein
             entry"""
-        entry = self.db.root.Protein.Entries[entry_nr-1]
+        entry = self.db.root.Protein.Entries[entry_nr - 1]
         if entry['EntryNr'] != entry_nr:
-            logger.warning('EntryNr {} not at position {}. Using index instead'.format(entry_nr, entry_nr-1))
+            logger.warning('EntryNr {} not at position {}. Using index instead'.format(entry_nr, entry_nr - 1))
             entry = self.db.root.Protein.Entries.read_where(
-                   'EntryNr == {:d}'.format(entry_nr))
+                    'EntryNr == {:d}'.format(entry_nr))
             if len(entry) != 1:
                 raise ValueError("there are {} entries with entry_nr {}".format(len(entry), entry_nr))
             entry = entry[0]
         return entry
 
     def _get_vptab(self, entry_nr):
+        return self._get_pw_tab(entry_nr, 'VPairs')
+
+    def _get_pw_tab(self, entry_nr, subtab):
         genome = self.id_mapper['OMA'].genome_of_entry_nr(entry_nr)['UniProtSpeciesCode'].decode()
-        return self.db.get_node('/PairwiseRelation/{}/VPairs'.format(genome))
+        return self.db.get_node('/PairwiseRelation/{}/{}'.format(genome, subtab))
 
     def count_vpairs(self, entry_nr):
         vptab = self._get_vptab(entry_nr)
@@ -106,20 +109,46 @@ class Database(object):
             cnt = 0
         return cnt
 
+    def _get_pw_data(self, entry_nr, tab):
+        dat = tab.read_where('(EntryNr1=={:d})'.format(entry_nr))
+        typ = tab.get_enum('RelType')
+        res = numpy.lib.recfunctions.append_fields(
+                dat[['EntryNr1', 'EntryNr2', 'Score', 'Distance']],
+                names='RelType',
+                data=[typ(x) for x in dat['RelType']],
+                usemask=False)
+        return res
+
     def get_vpairs(self, entry_nr):
-        """returns a :class:`numpy.recarray` of the verified pairs of
-         an entry.
+        """returns the verified pairs of a query protein.
+
+        This method returns an instance of a :class:`numpy.recarray` class
+        containing the verified pairs of a query protein entry.
+        The returned array contains columns with EntryNr1 and EntryNr2 to
+        identify the pair together with RelType (indicating the subtype of
+        orthology), the alignment score and the distance. The score and
+        distance will be set to -1 if unknown.
 
         :param int entry_nr: the numeric entry_nr of the query protein."""
         vp_tab = self._get_vptab(entry_nr)
-        dat = vp_tab.read_where('(EntryNr1=={:d})'.format(entry_nr))
-        e = vp_tab.get_enum('RelType')
-        res = numpy.lib.recfunctions.append_fields(
-                dat[['EntryNr1', 'EntryNr2']],
-                names='RelType',
-                data=[e(x) for x in dat['RelType']],
-                usemask=False)
-        return res
+        return self._get_pw_data(entry_nr, vp_tab)
+
+    def get_within_species_paralogs(self, entry_nr):
+        """returns the within species paralogs of a given entry
+
+        This method returns a :class:`numpy.recarray` instance
+        containing the close paralogs. Close paralogs are within
+        species paralogs that are inparalogs to at least one
+        ortholog of the query gene in OMA.
+
+        The returned array contains columns with EntryNr1 and EntryNr2 to
+        identify the pair together with RelType (indicating the subtype of
+        paralogy), the alignment score and the distance. The score and
+        distance will be set to -1 if unknown.
+
+        :param int entry_nr: the numeric entry_id of the query protein"""
+        within_species_paralogs = self._get_pw_tab(entry_nr, 'within')
+        return self._get_pw_data(entry_nr, within_species_paralogs)
 
     def neighbour_genes(self, entry_nr, window=1):
         """Returns neighbor genes around a query gene.
@@ -149,9 +178,9 @@ class Database(object):
                 '(Chromosome == {!r}) & '
                 '((AltSpliceVariant == 0) |'
                 ' (AltSpliceVariant == EntryNr))'.format(
-                   max(genome_range[0], entry_nr - f * window),
-                   min(genome_range[1], entry_nr + f * window),
-                   target_chr))
+                        max(genome_range[0], entry_nr - f * window),
+                        min(genome_range[1], entry_nr + f * window),
+                        target_chr))
         data.sort(order=['EntryNr'])
         idx = data['EntryNr'].searchsorted(entry_nr)
         res = data[max(0, idx - window):min(len(data), idx + window + 1)]
@@ -196,20 +225,42 @@ class Database(object):
         :param level: the taxonomic level of interest"""
         lev = level if isinstance(level, bytes) else level.encode('ascii')
         return self.db.root.HogLevel.read_where(
-            '(Fam=={}) & (Level=={!r})'.format(fam_nr, lev))['ID']
+                '(Fam=={}) & (Level=={!r})'.format(fam_nr, lev))['ID']
 
-    def member_of_hog_id(self, hog_id):
+    def member_of_hog_id(self, hog_id, level=None):
         """return an array of protein entries which belong to a given hog_id.
 
         E.g. if hog_id = 'HOG122.1a', the method returns all the proteins that
         have either exactly this hog id or an inparalogous id such a HOG122.1a.4b.2a
 
-        :param hog_id str: the requested hog_id.
-        :return a numpy.array with the protein entries belonging to the requested hog."""
+        If you are only interested in the members of a specific lineage (identified
+        through its taxonomic range), you can pass the taxonomic range as an
+        additional argument. Only the proteins of genomes belonging to this clade
+        will be returned. Otherwise, all proteins with having this specific hog_id
+        will be returned.
+
+        :param str hog_id: the requested hog_id.
+        :param level: the taxonomic level of interest
+        :type level: str or None
+
+        :return: a numpy.array with the protein entries belonging to the requested hog.
+        :rtype: :class:`numpy.ndarray`
+
+        :Note: Even if you obtained a certain hog_id using
+               :py:meth:`get_subhogids_at_level`
+               using a certain level, if you do not specify the level in
+               :meth:`member_of_hog_id` again, you will likely get proteins from other
+               clades. Only if it happens that the deepest level of the hog_id
+               coincides with the taxonomic range of interest, the two will be identical.
+        """
         hog_range = self._hog_lex_range(hog_id)
         # get the proteins which have that HOG number
         memb = self.db.root.Protein.Entries.read_where(
                 '({!r} <= OmaHOG) & (OmaHOG < {!r})'.format(*hog_range))
+        if level is not None:
+            memb = [x for x in memb if level.encode('ascii') in self.tax.get_parent_taxa(
+                self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
+
         return memb
 
     def member_of_fam(self, fam):
@@ -217,7 +268,6 @@ class Database(object):
         if not isinstance(fam, (int, numpy.number)):
             raise ValueError('expect a numeric family id')
         return self.member_of_hog_id('HOG:{:07d}'.format(fam))
-
 
     def hog_members(self, entry, level):
         """get hog members with respect to a given taxonomic level.
@@ -243,7 +293,7 @@ class Database(object):
         if level != 'LUCA':
             # last, we need to filter the proteins to the tax range of interest
             members = [x for x in members if level.encode('ascii') in self.tax.get_parent_taxa(
-                self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
+                    self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
             if query not in members:
                 raise ValueError(u"Level '{0:s}' undefined for query gene".format(level))
         return members
@@ -256,7 +306,8 @@ class Database(object):
         if len(idx) < 1:
             raise ValueError('cannot retrieve orthoxml for {}'.format(fam))
         idx = idx[0]
-        return self.db.root.OrthoXML.Buffer[idx['HogBufferOffset']:idx['HogBufferOffset']+idx['HogBufferLength']].tostring()
+        return self.db.root.OrthoXML.Buffer[
+               idx['HogBufferOffset']:idx['HogBufferOffset'] + idx['HogBufferLength']].tostring()
 
     def _hog_lex_range(self, hog):
         """return the lexographic range of a hog.
@@ -267,33 +318,32 @@ class Database(object):
         This is equivalent to say that a sub-hog starts with the
         query hog."""
         hog_str = hog.decode() if isinstance(hog, bytes) else hog
-        return hog_str.encode('ascii'), (hog_str[0:-1]+chr(1+ord(hog_str[-1]))).encode('ascii')
+        return hog_str.encode('ascii'), (hog_str[0:-1] + chr(1 + ord(hog_str[-1]))).encode('ascii')
 
-            
     def get_sequence(self, entry):
         """get the protein sequence of a given entry as a string
 
         :param entry: the entry or entry_nr for which the sequence is requested"""
         entry = self.ensure_entry(entry)
         seqArr = self.db.get_node('/Protein/SequenceBuffer')
-        seq = seqArr[entry['SeqBufferOffset']:entry['SeqBufferOffset']+entry['SeqBufferLength']-1]
+        seq = seqArr[entry['SeqBufferOffset']:entry['SeqBufferOffset'] + entry['SeqBufferLength'] - 1]
         return seq.tostring()
 
     def get_cdna(self, entry):
         """get the protein sequence of a given entry as a string"""
         entry = self.ensure_entry(entry)
         seqArr = self.db.get_node('/Protein/CDNABuffer')
-        seq = seqArr[entry['CDNABufferOffset']:entry['CDNABufferOffset']+entry['CDNABufferLength']-1]
+        seq = seqArr[entry['CDNABufferOffset']:entry['CDNABufferOffset'] + entry['CDNABufferLength'] - 1]
         return seq.tostring()
 
     def get_description(self, entry):
         entry = self.ensure_entry(entry)
         descArr = self.db.get_node('/Protein/DescriptionBuffer')
-        desc = descArr[entry['DescriptionOffset']:entry['DescriptionOffset']+entry['DescriptionLength']]
+        desc = descArr[entry['DescriptionOffset']:entry['DescriptionOffset'] + entry['DescriptionLength']]
         return desc.tostring()
 
     def get_release_name(self):
-        return self.db.get_node_attr('/', 'oma_version').decode()
+        return str(self.db.get_node_attr('/', 'oma_version'))
 
     def get_domains(self, entry_nr):
         try:
@@ -314,7 +364,7 @@ class OmaIdMapper(object):
     def genome_of_entry_nr(self, e_nr):
         """returns the genome code belonging to a given entry_nr"""
         idx = self.genome_table['EntryOff'].searchsorted(
-                e_nr - 1, side='right', 
+                e_nr - 1, side='right',
                 sorter=self._entry_off_keys)
         return self.genome_table[self._entry_off_keys[idx - 1]]
 
@@ -343,7 +393,7 @@ class OmaIdMapper(object):
         genome = self.genome_from_UniProtCode(code)
         if nr <= 0 or nr > genome['TotEntries']:
             raise InvalidOmaId(omaid)
-        return genome['EntryOff']+int(match.group('nr'))
+        return genome['EntryOff'] + int(match.group('nr'))
 
     def genome_range(self, query):
         """returns the internal range of EntryNr associated with
@@ -353,12 +403,40 @@ class OmaIdMapper(object):
         if isinstance(query, (int, numpy.integer)):
             genome_row = self.genome_of_entry_nr(query)
             if (query <= 0 or query > genome_row['EntryOff'] +
-                    genome_row['TotEntries']):
+                genome_row['TotEntries']):
                 raise InvalidOmaId(query)
         else:
             genome_row = self.genome_from_UniProtCode(query)
         return (genome_row['EntryOff'] + 1,
                 genome_row['EntryOff'] + genome_row['TotEntries'],)
+
+    def species_ordering(self, root=None):
+        """get ordering of the genomes with respect to taxonomy.
+
+        This method returns a linear ordering of all the genomes with
+        respect to their lineage, i.e. genomes that are evolutionary
+        "close" to each other appear close in the ordering.
+        Optionally, one can give a root genome, that will be the species
+        the ordering is going to start with.
+
+        :param root: UniProtSpeciesCode of the root genome.
+        :returns: a list of species codes in the correct order."""
+        if root is None:
+            root = self.genome_table[0]['UniProtSpeciesCode']
+        root_genome = self.genome_from_UniProtCode(root)
+        lins = {g['UniProtSpeciesCode']: [lev['Name']
+                    for lev in self._db.tax.get_parent_taxa(g['NCBITaxonId'])][::-1]
+                for g in self.genome_table}
+        root_lin = lins[root_genome['UniProtSpeciesCode']]
+        sort_key = {}
+        for g, lin_g in lins.items():
+            for k in range(min(len(root_lin), len(lin_g))):
+                if root_lin[k] != lin_g[k]:
+                    k -= 1
+                    break
+            sort_key[g] = (-k, lin_g)
+        sorted_genomes = sorted(list(sort_key.keys()), key=lambda g: sort_key[g])
+        return {g.decode(): v for v, g in enumerate(sorted_genomes)}
 
 
 class IDResolver(object):
@@ -432,14 +510,18 @@ class Taxonomy(object):
         return idx
 
     def _get_root_taxon(self):
-        i = self.tax_table['ParentTaxonId'].searchsorted(0, sorter=self.parent_key)
-        res = self.tax_table[self.parent_key[i]]
-        if res['ParentTaxonId'] != 0:
+        i1 = self.tax_table['ParentTaxonId'].searchsorted(0, sorter=self.parent_key)
+        i2 = self.tax_table['ParentTaxonId'].searchsorted(0, sorter=self.parent_key, side='right')
+        if i2 - i1 == 0:
             raise DBConsistencyError('Not a single root in Taxonomy: {}'
-                                     .format(self.tax_table[self.parent_key[i]]))
+                                     .format(self.tax_table[self.parent_key[i1]]))
+        elif i2 - i1 == 1:
+            res = self.tax_table[self.parent_key[i1]]
+        else:
+            res = numpy.array([(0, -1, b'LUCA')], dtype=self.tax_table.dtype)[0]
         return res
 
-    def _taxon_from_numeric(self,tid):
+    def _taxon_from_numeric(self, tid):
         idx = self._table_idx_from_numeric(tid)
         return self.tax_table[idx]
 
@@ -483,6 +565,7 @@ class Taxonomy(object):
             except AttributeError:
                 ns = self.name_key = self.tax_table.argsort(order='Name')
             idxs = self.tax_table['Name'].searchsorted(it, sorter=ns)
+            idxs = numpy.clip(idxs, 0, len(ns) - 1)
             taxs = self.tax_table[ns[idxs]]
             keep = taxs['Name'] == it
             if not skip_missing and not keep.all():
@@ -500,13 +583,14 @@ class Taxonomy(object):
         new taxonomy. `members` must be an iterable, the levels
         must be either numeric taxids or scientific names.
 
-        :param iterable members: an iterable containing the levels
+        :param iter members: an iterable containing the levels
             and leaves that should remain in the new taxonomy. can be
             either axonomic ids or scientific names.
         :param bool collapse: whether or not levels with only one child
-            should be skipped or not."""
+            should be skipped or not. This defaults to True"""
         taxids_to_keep = numpy.sort(self._get_taxids_from_any(members))
         idxs = numpy.searchsorted(self.tax_table['NCBITaxonId'], taxids_to_keep, sorter=self.taxid_key)
+        idxs = numpy.clip(idxs, 0, len(self.taxid_key) - 1)
         subtaxdata = self.tax_table[self.taxid_key[idxs]]
         if not numpy.alltrue(subtaxdata['NCBITaxonId'] == taxids_to_keep):
             raise KeyError('not all levels in members exists in this taxonomy')
@@ -562,6 +646,7 @@ class Taxonomy(object):
 
          This representation can for example be used to serialize
          a Taxonomy in json format."""
+
         def _rec_phylogeny(node):
             res = {'name': node['Name'].decode(), 'id': int(node['NCBITaxonId'])}
             children = []
@@ -621,7 +706,7 @@ class IdMapperFactory(object):
             mapper = self.mappers[idtype]
         except KeyError:
             try:
-                mapper = globals()[str(idtype).title()+'IdMapper'](self.db)
+                mapper = globals()[str(idtype).title() + 'IdMapper'](self.db)
                 self.mappers[idtype] = mapper
             except KeyError:
                 raise UnknownIdType('{} is unknown'.format(str(idtype)))
@@ -645,8 +730,8 @@ class XrefIdMapper(object):
         will change this set.
 
         :param entry_nr: the numeric id of the query protein."""
-        res = set([row for row in self.xref_tab.where('EntryNr=={:d}'.format(entry_nr))
-                  if row['XRefSource'] in self.idtype])
+        res = set([row[:] for row in self.xref_tab.where('EntryNr=={:d}'.format(entry_nr))
+                   if row['XRefSource'] in self.idtype])
         return res
 
     def _combine_query_values(self, field, values):
@@ -666,7 +751,7 @@ class XrefIdMapper(object):
         for start in range(0, len(entry_nrs), junk_size):
             condition = "({}) & ({})".format(
                     self._combine_query_values('EntryNr',
-                        entry_nrs[start:start+junk_size]),
+                                               entry_nrs[start:start + junk_size]),
                     source_condition)
             mapped_junks.append(self.xref_tab.read_where(condition))
         return numpy.lib.recfunctions.stack_arrays(
@@ -712,15 +797,15 @@ class UniProtIdMapper(XrefIdMapper):
     def __init__(self, db):
         super(UniProtIdMapper, self).__init__(db)
         self.idtype = frozenset([self.xrefEnum[z]
-            for z in ['UniProtKB/SwissProt', 'UniProtKB/TrEMBL']])
+                                 for z in ['UniProtKB/SwissProt', 'UniProtKB/TrEMBL']])
 
 
 class LinkoutIdMapper(XrefIdMapper):
     def __init__(self, db):
         super(LinkoutIdMapper, self).__init__(db)
         self.idtype = frozenset([self.xrefEnum[z]
-            for z in ['UniProtKB/SwissProt', 'UniProtKB/TrEMBL',
-                      'Ensembl Protein', 'EntrezGene']])
+                                 for z in ['UniProtKB/SwissProt', 'UniProtKB/TrEMBL',
+                                           'Ensembl Protein', 'EntrezGene']])
 
     def url(self, typ, id_):
         # TODO: improve url generator in external module with all xrefs
@@ -757,4 +842,3 @@ class DomainNameIdMapper(object):
         info = self._get_dominfo(domain_id)
         return {'name': info['Description'].decode(), 'source': info['Source'].decode(),
                 'domainid': domain_id.decode()}
-

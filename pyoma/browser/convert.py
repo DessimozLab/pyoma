@@ -446,21 +446,22 @@ class DarwinExporter(object):
                 row.append()
 
     def xref_databases(self):
-        return os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), '/ServerIndexed.db')
+        return os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'], 'ServerIndexed.db')
 
     def add_xrefs(self):
         self.logger.info('start extracting XRefs and GO annotations')
-        with fileinput.input(files=self.xref_databases()) as dbfh:
-            db_parser = DarwinDbEntryParser(dbfh)
-            xref_tab = self.h5.create_table('/', 'XRef', tablefmt.XRefTable,
-                                            'Cross-references of proteins to external ids / descriptions',
-                                            expectedrows=1e8)
-            go_tab = self.h5.create_table('/', 'GeneOntology', tablefmt.GeneOntologyTable,
-                                          'Gene Ontology annotations', expectedrows=1e8)
-            with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
-                xref_importer = XRefImporter(db_parser, xref_tab, go_tab, de_man)
-                db_parser.parse_entrytags()
-                xref_importer.flush_buffers()
+        db_parser = DarwinDbEntryParser()
+        xref_tab = self.h5.create_table('/', 'XRef', tablefmt.XRefTable,
+                                        'Cross-references of proteins to external ids / descriptions',
+                                        expectedrows=1e8)
+        go_tab = self.h5.create_table('/', 'GeneOntology', tablefmt.GeneOntologyTable,
+                                      'Gene Ontology annotations', expectedrows=1e8)
+        with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
+            xref_importer = XRefImporter(db_parser, xref_tab, go_tab, de_man)
+            files = self.xref_databases()
+            with fileinput.input(files=files) as dbfh:
+                db_parser.parse_entrytags(dbfh)
+            xref_importer.flush_buffers()
 
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("%c"))
@@ -837,25 +838,25 @@ class XRefImporter(object):
 
 
 class DarwinDbEntryParser:
-    def __init__(self, fh=None):
+    def __init__(self):
         """Initializes a Parser for SGML formatted darwin database file
-
-        :param fh: an already opened file handle to the darwin database
-                   file to be parsed."""
+        """
         self.tag_handlers = collections.defaultdict(list)
-        self.doc = fh
 
     def add_tag_handler(self, tag, handler):
+        """add a callback handler for a certain tag"""
         self.tag_handlers[tag].append(handler)
         common.package_logger.debug('# handlers for {}: {}'.format(tag, len(self.tag_handlers[tag])))
 
-    def parse_entrytags(self):
+    def parse_entrytags(self, fh):
         """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,
         ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ,
         SwissProt, SwissProt_AC, UniProt/TrEMBL, WikiGene, flybase_transcript_id
-        """
+        
+        :param fh: an already opened file handle to the darwin database
+                   file to be parsed."""
         eNr = 0
-        for line in self.doc:
+        for line in fh:
             line = line.strip()
             if not line.startswith('<E>'):
                 common.package_logger.debug('skipping line:' + line)

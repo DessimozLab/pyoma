@@ -476,7 +476,7 @@ class DarwinExporter(object):
         self.logger.info('closed {}'.format(self.h5.filename))
 
     def create_indexes(self):
-        self.logger.info('createing indexes for HOGs')
+        self.logger.info('creating indexes for HOGs')
         hogTab = self.h5.get_node('/HogLevel')
         hogTab.cols.Fam.create_index()
         hogTab.cols.ID.create_index()
@@ -484,6 +484,9 @@ class DarwinExporter(object):
         orthoxmlTab.cols.Fam.create_csindex()
         entryTab = self.h5.get_node('/Protein/Entries')
         entryTab.cols.OmaHOG.create_csindex()
+
+        self.logger.info('creating indexes for OMA Groups')
+        entryTab.cols.OmaGroup.create_csindex()
 
         self.logger.info('creating index for xrefs (EntryNr and XRefId)')
         xrefTab = self.h5.get_node('/XRef')

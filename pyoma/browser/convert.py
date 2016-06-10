@@ -157,6 +157,13 @@ class DataImportError(Exception):
     pass
 
 
+def _load_taxonomy_without_ref_to_itselfs(data):
+    dtype = tables.dtype_from_descr(tablefmt.TaxonomyTable)
+    arr = numpy.array([tuple(x) for x in data], dtype=dtype)
+    clean = arr[numpy.where(arr['NCBITaxonId'] != arr['ParentTaxonId'])]
+    return clean
+
+
 class DarwinExporter(object):
     DB_SCHEMA_VERSION = '2.0'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
@@ -226,7 +233,7 @@ class DarwinExporter(object):
 
         taxtab = self.h5.create_table('/', 'Taxonomy', tablefmt.TaxonomyTable,
                                       expectedrows=len(data['Tax']))
-        self._write_to_table(taxtab, data['Tax'])
+        self._write_to_table(taxtab, _load_taxonomy_without_ref_to_itselfs(data['Tax']))
         taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
 
     def _convert_to_numpyarray(self, data, tab):

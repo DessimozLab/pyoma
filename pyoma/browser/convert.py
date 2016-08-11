@@ -466,8 +466,8 @@ class DarwinExporter(object):
         with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
             xref_importer = XRefImporter(db_parser, xref_tab, go_tab, de_man)
             files = self.xref_databases()
-            with fileinput.input(files=files) as dbfh:
-                db_parser.parse_entrytags(dbfh)
+            dbs_iter = fileinput.input(files=files)
+            db_parser.parse_entrytags(dbs_iter)
             xref_importer.flush_buffers()
 
     def close(self):

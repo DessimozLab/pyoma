@@ -399,7 +399,11 @@ class OmaIdMapper(object):
         """returns the internal range of EntryNr associated with
         'query'. 'query' can be either a numeric id of a protein
         or a UniProtSpeciesCode of a genome. If 'query' is unknown
-        by the database, an InvalidOmaId exception is raised"""
+        by the database, an InvalidOmaId exception is raised.
+
+        The return range is a tuple of length two, and the numbers
+        indicated the *inclusive* boundaries, e.g. (1,5) indicates
+        that the entries 1,2,3,4 and 5 belong to the query species"""
         if isinstance(query, (int, numpy.integer)):
             genome_row = self.genome_of_entry_nr(query)
             if (query <= 0 or query > genome_row['EntryOff'] +

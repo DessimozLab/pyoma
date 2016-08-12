@@ -157,6 +157,13 @@ class DataImportError(Exception):
     pass
 
 
+def _load_taxonomy_without_ref_to_itselfs(data):
+    dtype = tables.dtype_from_descr(tablefmt.TaxonomyTable)
+    arr = numpy.array([tuple(x) for x in data], dtype=dtype)
+    clean = arr[numpy.where(arr['NCBITaxonId'] != arr['ParentTaxonId'])]
+    return clean
+
+
 class DarwinExporter(object):
     DB_SCHEMA_VERSION = '2.0'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
@@ -226,7 +233,7 @@ class DarwinExporter(object):
 
         taxtab = self.h5.create_table('/', 'Taxonomy', tablefmt.TaxonomyTable,
                                       expectedrows=len(data['Tax']))
-        self._write_to_table(taxtab, data['Tax'])
+        self._write_to_table(taxtab, _load_taxonomy_without_ref_to_itselfs(data['Tax']))
         taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
 
     def _convert_to_numpyarray(self, data, tab):
@@ -385,7 +392,8 @@ class DarwinExporter(object):
             protTab.flush()
             seqArr.flush()
             for n in (protTab, seqArr, locTab):
-                self.logger.info('worte %s: compression ratio %3f%%' %
+                if n.size_in_memory != 0:
+                    self.logger.info('worte %s: compression ratio %3f%%' %
                                  (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory))
         protTab.cols.EntryNr.create_csindex(filters=self._compr)
         protTab.cols.MD5ProteinHash.create_csindex(filters=self._compr)
@@ -459,8 +467,8 @@ class DarwinExporter(object):
         with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
             xref_importer = XRefImporter(db_parser, xref_tab, go_tab, de_man)
             files = self.xref_databases()
-            with fileinput.input(files=files) as dbfh:
-                db_parser.parse_entrytags(dbfh)
+            dbs_iter = fileinput.input(files=files)
+            db_parser.parse_entrytags(dbs_iter)
             xref_importer.flush_buffers()
 
     def close(self):
@@ -469,7 +477,7 @@ class DarwinExporter(object):
         self.logger.info('closed {}'.format(self.h5.filename))
 
     def create_indexes(self):
-        self.logger.info('createing indexes for HOGs')
+        self.logger.info('creating indexes for HOGs')
         hogTab = self.h5.get_node('/HogLevel')
         hogTab.cols.Fam.create_index()
         hogTab.cols.ID.create_index()
@@ -477,6 +485,9 @@ class DarwinExporter(object):
         orthoxmlTab.cols.Fam.create_csindex()
         entryTab = self.h5.get_node('/Protein/Entries')
         entryTab.cols.OmaHOG.create_csindex()
+
+        self.logger.info('creating indexes for OMA Groups')
+        entryTab.cols.OmaGroup.create_csindex()
 
         self.logger.info('creating index for xrefs (EntryNr and XRefId)')
         xrefTab = self.h5.get_node('/XRef')

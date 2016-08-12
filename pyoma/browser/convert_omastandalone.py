@@ -1,4 +1,5 @@
 from .convert import *
+from pyoma.browser import OrthoXMLSplitter
 
 
 class StandaloneExporter(DarwinExporter):
@@ -63,6 +64,18 @@ class StandaloneExporter(DarwinExporter):
         hog_converter = StandaloneHogConverter(entryTab)
         if os.path.exists(tree_filename):
             hog_converter.attach_newick_taxonomy(tree_filename)
+
+        fn = 'HierarchicalGroups.orthoxml'
+
+        # Set cache splitted hog folder
+        split_hog_path = os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'split_hog')
+
+        # Get orthoxml in OrthoXMLSplitter obj
+        ortho_splitter = OrthoXMLSplitter.OrthoXMLSplitter(os.path.join(hog_path, fn))
+
+        # Split each hog into single file in the splitted hog cache folder
+        ortho_splitter.split_each_hog_into_individual(split_hog_path)
+
         hogTab = self.h5.create_table('/', 'HogLevel', tablefmt.HOGsTable,
                                       'nesting structure for each HOG', expectedrows=1e8)
         self.orthoxml_buffer = self.h5.create_earray('/OrthoXML', 'Buffer',
@@ -70,12 +83,13 @@ class StandaloneExporter(DarwinExporter):
                                                      expectedrows=1e9, createparents=True)
         self.orthoxml_index = self.h5.create_table('/OrthoXML', 'Index', tablefmt.OrthoXmlHogTable,
                                                    'Range index per HOG into OrthoXML Buffer', expectedrows=5e6)
-        fn = 'HierarchicalGroups.orthoxml'
         try:
             levels = hog_converter.convert_file(os.path.join(hog_path, fn))
             hogTab.append(levels)
             fam_nrs = set([z[0] for z in levels])
-            self.add_orthoxml(os.path.join(hog_path, fn), fam_nrs)
+            for fam_nr in fam_nrs:
+                hog_fn = "HOG{:06d}.orthoxml".format(fam_nr)
+                self.add_orthoxml(os.path.join(split_hog_path, hog_fn), [fam_nr])
         except Exception as e:
             self.logger.error('an error occured while processing ' + fn + ':')
             self.logger.exception(e)

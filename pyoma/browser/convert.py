@@ -392,7 +392,8 @@ class DarwinExporter(object):
             protTab.flush()
             seqArr.flush()
             for n in (protTab, seqArr, locTab):
-                self.logger.info('worte %s: compression ratio %3f%%' %
+                if n.size_in_memory != 0:
+                    self.logger.info('worte %s: compression ratio %3f%%' %
                                  (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory))
         protTab.cols.EntryNr.create_csindex(filters=self._compr)
         protTab.cols.MD5ProteinHash.create_csindex(filters=self._compr)

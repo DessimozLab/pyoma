@@ -5,7 +5,7 @@ import shutil
 name = 'pyoma'
 
 # Create standalone2hdf
-shutil.copyfile('bin/importdata.py', 'bin/standalone2hdf')
+shutil.copyfile('bin/importdata.py', 'bin/oma2hdf')
 
 setup(
     name=name,
@@ -32,4 +32,4 @@ setup(
 )
 
 # Remove it
-os.remove('bin/standalone2hdf')
+os.remove('bin/oma2hdf')

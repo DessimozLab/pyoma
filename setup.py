@@ -27,7 +27,7 @@ setup(
         'Programming Language :: Python :: 3.5',
     ],
     scripts=['bin/oma2hdf'],
-    data_files=[('pyoma', ['pyoma/browser/convert.drw'])],
+    package_data={'pyoma': ['browser/*.drw']},
     install_requires=['numpy', 'tables>=3.2', 'future'],
 )
 

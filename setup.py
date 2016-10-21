@@ -4,7 +4,7 @@ import shutil
 
 name = 'pyoma'
 
-# Create standalone2hdf
+# Create oma2hdf to install
 shutil.copyfile('bin/importdata.py', 'bin/oma2hdf')
 
 setup(
@@ -31,5 +31,5 @@ setup(
     install_requires=['numpy', 'tables>=3.2', 'future'],
 )
 
-# Remove it
+# Remove local copy of oma2hdf (installed)
 os.remove('bin/oma2hdf')

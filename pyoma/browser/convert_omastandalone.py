@@ -1,12 +1,13 @@
 from .convert import *
 from pyoma.browser import OrthoXMLSplitter
+import os
 
 
 class StandaloneExporter(DarwinExporter):
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
 
     def __init__(self, root, name, **kwargs):
-        os.environ['DARWIN_BROWSERDATA_PATH'] = root
+        os.environ['DARWIN_BROWSERDATA_PATH'] = os.path.abspath(root)
         super(StandaloneExporter, self).__init__(name, **kwargs)
         self.transformed = False
 

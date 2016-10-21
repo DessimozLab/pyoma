@@ -5,6 +5,7 @@ from future.builtins import range
 from future.builtins import object
 from future.builtins import super
 from future.standard_library import hooks
+from tempfile import NamedTemporaryFile
 import csv
 import resource
 import tables
@@ -44,31 +45,27 @@ def callDarwinExport(func, drwfile=None):
     file specified by 'outfn'.
     This function returns the parsed json datastructure"""
 
-    tmpfile = "/tmp/darwinExporter_{:d}.dat".format(os.getpid())
-    if drwfile is None:
-        drwfile = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
-    try:
+    with NamedTemporaryFile(suffix='.dat') as tmpfile:
+        if drwfile is None:
+            drwfile = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
         with open(os.devnull, 'w') as DEVNULL:
             stacksize = resource.getrlimit(resource.RLIMIT_STACK)
             common.package_logger.info('current stacklimit: {}'.format(stacksize))
             common.package_logger.info('setting stacklimit: {}'.format((max(stacksize)-1, stacksize[1])))
             resource.setrlimit(resource.RLIMIT_STACK, (min(stacksize), stacksize[1]))
             p = subprocess.Popen(['darwin', '-q', '-E', '-B'], stdin=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, stdout=DEVNULL)
+                                stderr=subprocess.PIPE, stdout=DEVNULL)
             drw_cmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
-                tmpfile, drwfile, func).encode('utf-8')
+                tmpfile.name, drwfile, func).encode('utf-8')
             common.package_logger.debug('calling darwin function: {}'.format(func))
             p.communicate(input=drw_cmd)
             if p.returncode > 0:
                 raise DarwinException(p.stderr.read())
 
         trans_tab = "".join(str(chr(x)) for x in range(128)) + " " * 128
-        with open(tmpfile, 'r') as jsonData:
+        with open(tmpfile.name, 'r') as jsonData:
             rawdata = jsonData.read()
-            data = json.loads(rawdata.translate(trans_tab))
-    finally:
-        silentremove(tmpfile)
-    return data
+            return json.loads(rawdata.translate(trans_tab))
 
 
 def uniq(seq):
@@ -651,8 +648,8 @@ class DescriptionManager(object):
         self.entry_tab.flush()
 
     def add_description(self, eNr, desc):
-        """stages a description for addition. Note that the descriptions 
-        must be ordered according to the entryNr, i.e. all descriptions 
+        """stages a description for addition. Note that the descriptions
+        must be ordered according to the entryNr, i.e. all descriptions
         related to eNr X must be staged before changeing to another eNr."""
         if self.cur_eNr and self.cur_eNr != eNr:
             self._store_description()
@@ -789,7 +786,7 @@ class XRefImporter(object):
             self._add_to_xrefs(eNr, enum_nr, key)
 
     def assign_source_handler(self, multikey, eNr):
-        """handler that splits the multikey field at '; ' locations and 
+        """handler that splits the multikey field at '; ' locations and
         tries to guess for each part the id_type. If a type could be
         identified, it is added under with this id type, otherwise left out."""
         for key in multikey.split('; '):
@@ -863,7 +860,7 @@ class DarwinDbEntryParser:
         """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,
         ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ,
         SwissProt, SwissProt_AC, UniProt/TrEMBL, WikiGene, flybase_transcript_id
-        
+
         :param fh: an already opened file handle to the darwin database
                    file to be parsed."""
         eNr = 0

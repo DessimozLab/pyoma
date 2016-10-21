@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+from distutils.spawn import find_executable
 import pyoma.browser.convert
 import pyoma.browser.convert_omastandalone
 import argparse
@@ -8,6 +8,11 @@ import sys
 
 
 def main(args):
+    # Check that darwin is installed on the system.
+    if not find_executable('darwin'):
+        raise RuntimeError('oma2hdf requires darwin: can\'t find darwin on your system.')
+
+    # Argument parsing
     parser = argparse.ArgumentParser("Convert a OMA Browser release into hdf5 format.")
     parser.add_argument('-r', '--release',
                         help="path to release. If not set, DARWIN_BROWSERDATA_PATH "

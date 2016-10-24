@@ -248,8 +248,10 @@ LoadAllAll := proc(i, j)
     # if there exist a 1-chunk archive, process it with higher priority
     fn1chunk := sprintf('%s/Cache/AllAll/%s/%s.gz', root_dir, genomes[g1],genomes[g2]);
     if FileExists(fn1chunk) then
-        fnSepHash := sprintf('%s/Cache/AllAll/%s/%s.sha2.gz', root_dir, genomes[g1], genomes[g2]);
-        if FileExists(fnSepHash) then ReadProgram(fnSepHash) fi:
+        if force_allall<>true then
+            fnSepHash := sprintf('%s/Cache/AllAll/%s/%s.sha2.gz', root_dir, genomes[g1], genomes[g2]);
+            if FileExists(fnSepHash) then ReadProgram(fnSepHash) fi:
+        fi:
         ReadProgram(fn1chunk);
     else
         nrChunks := NumberOfChunks(genomes[g1],genomes[g2]);

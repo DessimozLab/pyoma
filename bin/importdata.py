@@ -36,7 +36,7 @@ def main(args):
             options.release,
             options.out,
             add_domains=options.no_domains,
-            force_allall=options.ignore_hash)
+            force_allall=options.force_allall)
     else:
         if options.release:
             os.environ['DARWIN_BROWSERDATA_PATH'] = options.release

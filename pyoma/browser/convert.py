@@ -48,19 +48,19 @@ def callDarwinExport(func, drwfile=None):
     with NamedTemporaryFile(suffix='.dat') as tmpfile:
         if drwfile is None:
             drwfile = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
-        with open(os.devnull, 'w') as DEVNULL:
-            stacksize = resource.getrlimit(resource.RLIMIT_STACK)
-            common.package_logger.info('current stacklimit: {}'.format(stacksize))
-            common.package_logger.info('setting stacklimit: {}'.format((max(stacksize)-1, stacksize[1])))
-            resource.setrlimit(resource.RLIMIT_STACK, (min(stacksize), stacksize[1]))
-            p = subprocess.Popen(['darwin', '-q', '-E', '-B'], stdin=subprocess.PIPE,
-                                stderr=subprocess.PIPE, stdout=DEVNULL)
-            drw_cmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
-                tmpfile.name, drwfile, func).encode('utf-8')
-            common.package_logger.debug('calling darwin function: {}'.format(func))
-            p.communicate(input=drw_cmd)
-            if p.returncode > 0:
-                raise DarwinException(p.stderr.read())
+        # with open(os.devnull, 'w') as DEVNULL:
+        stacksize = resource.getrlimit(resource.RLIMIT_STACK)
+        common.package_logger.info('current stacklimit: {}'.format(stacksize))
+        common.package_logger.info('setting stacklimit: {}'.format((max(stacksize)-1, stacksize[1])))
+        resource.setrlimit(resource.RLIMIT_STACK, (min(stacksize), stacksize[1]))
+        p = subprocess.Popen(['darwin', '-q', '-E', '-B'], stdin=subprocess.PIPE,
+                             stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+        drw_cmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
+            tmpfile.name, drwfile, func).encode('utf-8')
+        common.package_logger.debug('calling darwin function: {}'.format(func))
+        (stdout, stderr) = p.communicate(input=drw_cmd)
+        if p.returncode > 0:
+            raise DarwinException(p.stderr.read())
 
         trans_tab = "".join(str(chr(x)) for x in range(128)) + " " * 128
         with open(tmpfile.name, 'r') as jsonData:

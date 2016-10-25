@@ -68,14 +68,10 @@ class StandaloneExporter(DarwinExporter):
 
         fn = 'HierarchicalGroups.orthoxml'
 
-        # Set cache splitted hog folder
-        split_hog_path = os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'split_hog')
-
-        # Get orthoxml in OrthoXMLSplitter obj
+        # Split the OrthoXML up (puts in cache_dir/split_hog).
+        split_hog_path = os.path.join(cache_dir, 'split_hog')
         ortho_splitter = OrthoXMLSplitter.OrthoXMLSplitter(os.path.join(hog_path, fn))
-
-        # Split each hog into single file in the splitted hog cache folder
-        ortho_splitter.split_each_hog_into_individual(split_hog_path)
+        ortho_splitter(split_hog_path)
 
         hogTab = self.h5.create_table('/', 'HogLevel', tablefmt.HOGsTable,
                                       'nesting structure for each HOG', expectedrows=1e8)

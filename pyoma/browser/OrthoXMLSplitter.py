@@ -27,13 +27,16 @@ def indent(elem, level=0):
 
 class OrthoXMLSplitter(object):
 
-    def __init__(self, xml_file, dir_storage, list_hog = None):
+    def __init__(self, xml_file, list_hog = None):
         self.xml_file = xml_file
-        self.dir_storage = dir_storage # Use already made dir in order to create tmp one if needed for converter
+        self.cache_dir = None
         self.Etree_XML = etree.parse(self.xml_file)
         self.Etree_root = self.Etree_XML.getroot()
         self.Etree_OGs = fa.OrthoXMLQuery.getToplevelOrthologGroups(self.Etree_root)
         self.Etree_header_genes = fa.OrthoXMLQuery.getInputGenes(self.Etree_root)
+        
+    def __run__(self, cache_dir):
+        self.cache_dir = cache_dir 
         for og in self.Etree_OGs:
             if list_hog != None:
                 if int(og.get("id")) in list_hog:
@@ -58,11 +61,13 @@ class OrthoXMLSplitter(object):
         return gene_els
 
     def write_OG(self, Etree_OG):
+        if not self.cache_dir:
+            raise RuntimeError('Check calling order.')
 
         # Create file var
         hog_nr = int(Etree_OG.get("id"))
-        hog_id = "HOG{:06d}.html".format(hog_nr)
-        fname = os.path.join(self.dir_storage, hog_id)
+        hog_id = "HOG{:06d}.orthoxml".format(hog_nr)
+        fname = os.path.join(self.cache_dir, hog_id)
         print("Processing: ", fname)
 
         # Get element to store
@@ -124,7 +129,3 @@ class OrthoXMLSplitter(object):
         indent(etree_2_dump)
         tree = etree.ElementTree(etree_2_dump)
         tree.write(fname, xml_declaration=True, encoding='utf-8', method="xml")
-
-
-
-

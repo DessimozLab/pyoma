@@ -29,21 +29,21 @@ class OrthoXMLSplitter(object):
 
     def __init__(self, xml_file, list_hog = None):
         self.xml_file = xml_file
+        self.list_hog = list_hog
         self.cache_dir = None
         self.Etree_XML = etree.parse(self.xml_file)
         self.Etree_root = self.Etree_XML.getroot()
         self.Etree_OGs = fa.OrthoXMLQuery.getToplevelOrthologGroups(self.Etree_root)
         self.Etree_header_genes = fa.OrthoXMLQuery.getInputGenes(self.Etree_root)
-        
-    def __run__(self, cache_dir):
-        self.cache_dir = cache_dir 
-        for og in self.Etree_OGs:
-            if list_hog != None:
-                if int(og.get("id")) in list_hog:
-                    self.write_OG(og)
-            else:
-                self.write_OG(og)
 
+    def __call__(self, cache_dir):
+        self.cache_dir = cache_dir
+        for og in self.Etree_OGs:
+            if self.list_hog is None:
+                self.write_OG(og)
+            else:
+                if int(og.get("id")) in self.list_hog:
+                    self.write_OG(og)
 
     def get_generef_OG(self, Etree_OG):
         generef_els = []

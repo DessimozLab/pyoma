@@ -1,5 +1,6 @@
 __author__ = 'admin'
 
+import errno
 import familyanalyzer as fa
 import lxml.etree as etree
 import os
@@ -37,7 +38,16 @@ class OrthoXMLSplitter(object):
         self.Etree_header_genes = fa.OrthoXMLQuery.getInputGenes(self.Etree_root)
 
     def __call__(self, cache_dir):
+        # Ensure existance of cache directory (py2 compat)
+        try:
+            os.makedirs(cache_dir)
+        except OSError as exc:
+            if exc.errno == errno.EEXIST and os.path.isdir(cache_dir):
+                pass
+            else:
+                raise
         self.cache_dir = cache_dir
+
         for og in self.Etree_OGs:
             if self.list_hog is None:
                 self.write_OG(og)

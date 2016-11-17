@@ -164,6 +164,45 @@ def _load_taxonomy_without_ref_to_itselfs(data):
     return clean
 
 
+def compute_ortholog_types(data, genome_offs):
+    """this function computes the type of orthologs from the data and sets in
+    the RelType column.
+
+    :param data: a numpy recarray corresponding to the `numpy.dtype` of
+           `tablefmt.PairwiseRelationTable`
+    :param genome_offs: a numpy array with the genome offsets, i.e. the entry
+           numbers where the next genome starts
+
+    :returns: a modified version of data
+    """
+    typEnum = tablefmt.PairwiseRelationTable.columns.get('RelType').enum
+    query_type = {val: 'm' if cnt > 1 else '1'
+                  for val, cnt in zip(*numpy.unique(data['EntryNr2'],
+                                                    return_counts=True))}
+
+    def genome_idx(enr):
+        return numpy.searchsorted(genome_offs, enr-1, side='right')
+
+    g0 = genome_idx(data[0]['EntryNr2'])
+    it = numpy.nditer(data, flags=['c_index'], op_flags=['readwrite'])
+    while not it.finished:
+        row0 = it[0]
+        i1 = it.index + 1
+        # we move i1 forward to the row where the next genome starts, i.e. the
+        # current query changes the species or the query itself changes
+        while i1 < len(data):
+            row1 = data[i1]
+            g1 = genome_idx(row1['EntryNr2'])
+            if g1 != g0 or row0['EntryNr1'] != row1['EntryNr1']:
+                break
+            i1 += 1
+        subj_type = 'n' if i1-it.index > 1 else '1'
+        while not it.finished and it.index < i1:
+            typ = '{}:{}'.format(query_type[int(it[0]['EntryNr2'])], subj_type)
+            it[0]['RelType'] = typEnum[typ]
+            it.iternext()
+        g0 = g1
+
 class DarwinExporter(object):
     DB_SCHEMA_VERSION = '2.0'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
@@ -287,6 +326,8 @@ class DarwinExporter(object):
                                               expectedrows=len(data))
                 if isinstance(data, list):
                     data = self._convert_to_numpyarray(data, vp_tab)
+                if numpy.any(data['RelType'] >= tablefmt.PairwiseRelationTable.columns.get('RelType').enum['n/a']):
+                    compute_ortholog_types(data)
                 self._write_to_table(vp_tab, data)
                 vp_tab.cols.EntryNr1.create_csindex()
 

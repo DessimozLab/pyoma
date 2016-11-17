@@ -6,8 +6,8 @@ import tempfile
 import json
 import numpy
 from hashlib import md5
-
-from pyoma.browser.convert import callDarwinExport, DarwinExporter
+import pyoma.browser.tablefmt as tablefmt
+from pyoma.browser.convert import callDarwinExport, DarwinExporter, compute_ortholog_types
 
 
 def store_in_json(data, fn):
@@ -17,7 +17,6 @@ def store_in_json(data, fn):
 
 
 class ImportIntegrationBase(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls):
         cls.tmpdir = tempfile.mkdtemp()
@@ -45,7 +44,6 @@ class ImportIntegrationBase(unittest.TestCase):
 
 
 class GenomeDirectImport_Test(ImportIntegrationBase):
-
     def compare_genomes_tab(self, data):
         self.darwin_exporter.add_species_data()
         gstab = self.darwin_exporter.h5.get_node('/Genome')
@@ -76,7 +74,6 @@ class GenomeDirectImport_Test(ImportIntegrationBase):
 
 
 class ProteinImportViaJson(ImportIntegrationBase):
-
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -100,13 +97,37 @@ class ProteinImportViaJson(ImportIntegrationBase):
         version = self.darwin_exporter.get_version()
         self.assertIn('Test', version)
         self.darwin_exporter.add_version()
-        self.assertEqual(version, self.darwin_exporter.h5.get_node_attr('/', 'oma_version'))
+        self.assertEqual(version, self.darwin_exporter.h5.get_node_attr('/','oma_version'))
 
     def test_add_orthologs_from_darwin(self):
         pass
 
 
+class OrthologyTypeTester(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self.exp = DarwinExporter(os.path.join(self._tmpdir, 'test.h5'))
+        self.pw = self.exp.h5.create_table('/', 'VPairs',
+                                           tablefmt.PairwiseRelationTable)
 
+    def test_convert_to_numpytable(self):
+        rels = [[1, 5], (2, 6)]
+        tab = self.exp._convert_to_numpyarray(rels, self.pw)
+        self.assertEqual(len(tab), 2)
+        # test that default value are used
+        self.assertTrue(numpy.all(tab['Distance'] == -1))
 
+    def test_orthology_type_inference(self):
+        genome_offs = numpy.array([0, 4, 9, 19])
+        rels = [[1, 5], [1, 6], [1, 10], [1, 20],
+                [2, 5], [2, 6], [2, 10], [2, 11],
+                [3, 12], [3, 21], [3, 22]]
+        expected_rel_type = numpy.array([3, 3, 2, 0, 3, 3, 3, 1, 0, 1, 1])
 
+        reltab = self.exp._convert_to_numpyarray(rels, self.pw)
+        compute_ortholog_types(reltab, genome_offs)
+        self.assertTrue(numpy.array_equal(reltab['RelType'], expected_rel_type))
 
+    def tearDown(self):
+        self.exp.close()
+        shutil.rmtree(self._tmpdir)

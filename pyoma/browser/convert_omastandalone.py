@@ -106,10 +106,9 @@ class StandaloneHogConverter(HogConverter):
         self.fam_re = re.compile(r'(?P<fam_nr>\d+)')
 
 
-def import_oma_run(path, outfile, add_domains=True, force_allall=False):
+def import_oma_run(path, outfile, add_domains=True):
     log = getDebugLogger()
-    x = StandaloneExporter(path, outfile, logger=log, mode='write',
-                           force_allall=force_allall)
+    x = StandaloneExporter(path, outfile, logger=log, mode='write')
     x.add_version()
     x.add_species_data()
     x.add_orthologs()

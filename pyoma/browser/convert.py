@@ -38,7 +38,7 @@ class DarwinException(Exception):
     pass
 
 
-def callDarwinExport(func, drwfile=None, force_allall=False):
+def callDarwinExport(func, drwfile=None):
     """Function starts a darwin session, loads convert.drw file
     and calls the darwin function passed as argument. The output
     is expected to be written by darwin in json format into the
@@ -55,8 +55,7 @@ def callDarwinExport(func, drwfile=None, force_allall=False):
         resource.setrlimit(resource.RLIMIT_STACK, (min(stacksize), stacksize[1]))
         p = subprocess.Popen(['darwin', '-q', '-E', '-B'], stdin=subprocess.PIPE,
                              stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-        drw_cmd = "force_allall := {}: outfn := '{}': ReadProgram('{}'): {}; done;".format(
-            ('true' if force_allall else 'false'),
+        drw_cmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
             tmpfile.name,
             drwfile,
             func).encode('utf-8')
@@ -168,9 +167,8 @@ class DarwinExporter(object):
     DB_SCHEMA_VERSION = '2.0'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
 
-    def __init__(self, path, logger=None, mode=None, force_allall=False):
+    def __init__(self, path, logger=None, mode=None):
         self.logger = logger if logger is not None else common.package_logger
-        self.force_allall = force_allall
         fn = os.path.normpath(os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'],
             path))
@@ -184,9 +182,7 @@ class DarwinExporter(object):
             self.h5.root._f_setattr('convertion_start', time.strftime("%c"))
 
     def call_darwin_export(self, func):
-        return callDarwinExport(func,
-                                self.DRW_CONVERT_FILE,
-                                force_allall=self.force_allall)
+        return callDarwinExport(func, self.DRW_CONVERT_FILE)
 
     def _get_or_create_node(self, path, desc=None):
         try:

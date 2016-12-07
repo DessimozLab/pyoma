@@ -27,16 +27,13 @@ def main(args):
     parser.add_argument('--no-domains', action='store_false',
                         help="do not include CATH domain information. This flag is only "
                              "considered for oma standalone imports. (see -s/--standalone flag")
-    parser.add_argument('--force_allall', action='store_true',
-                        help="Ignore the hash checks when loading AllAll files.")
 
     options = parser.parse_args(args)
     if options.standalone:
         pyoma.browser.convert_omastandalone.import_oma_run(
             options.release,
             options.out,
-            add_domains=options.no_domains,
-            force_allall=options.force_allall)
+            add_domains=options.no_domains)
     else:
         if options.release:
             os.environ['DARWIN_BROWSERDATA_PATH'] = options.release

@@ -173,15 +173,15 @@ class SanitySession(object):
         return (result)
 
     def R_genes_per_hog(self):
-        "prints the number of genes for each HOG"
+        """prints the number of genes for each HOG"""
         result = ""
         for k in self.all_hogs:
             v = self.all_hogs[k]            
             result += self.release + "\t" + str(k.decode("utf-8")) + "\t" + str(v) + "\n"
-        return(result)
+        return result
 
     def num_hogs_per_level(self):
-        "get the number of hogs for a list of taxa levels"
+        """get the number of hogs for a list of taxa levels"""
         result = ""
         for taxa in self.all_lvls:
             result += str(taxa.decode("utf-8"))+"\t"+ self.release+"\t"+str(self.all_hog_lvls.get(taxa))+"\n"

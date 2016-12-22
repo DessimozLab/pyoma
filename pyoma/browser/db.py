@@ -88,7 +88,7 @@ class Database(object):
         if entry['EntryNr'] != entry_nr:
             logger.warning('EntryNr {} not at position {}. Using index instead'.format(entry_nr, entry_nr - 1))
             entry = self.db.root.Protein.Entries.read_where(
-                    'EntryNr == {:d}'.format(entry_nr))
+                'EntryNr == {:d}'.format(entry_nr))
             if len(entry) != 1:
                 raise ValueError("there are {} entries with entry_nr {}".format(len(entry), entry_nr))
             entry = entry[0]
@@ -113,10 +113,10 @@ class Database(object):
         dat = tab.read_where('(EntryNr1=={:d})'.format(entry_nr))
         typ = tab.get_enum('RelType')
         res = numpy.lib.recfunctions.append_fields(
-                dat[['EntryNr1', 'EntryNr2', 'Score', 'Distance']],
-                names='RelType',
-                data=[typ(x) for x in dat['RelType']],
-                usemask=False)
+            dat[['EntryNr1', 'EntryNr2', 'Score', 'Distance']],
+            names='RelType',
+            data=[typ(x) for x in dat['RelType']],
+            usemask=False)
         return res
 
     def get_vpairs(self, entry_nr):
@@ -174,13 +174,13 @@ class Database(object):
         genome_range = self.id_mapper['OMA'].genome_range(entry_nr)
         f = 5
         data = self.db.root.Protein.Entries.read_where(
-                '(EntryNr >= {:d}) & (EntryNr <= {:d}) & '
-                '(Chromosome == {!r}) & '
-                '((AltSpliceVariant == 0) |'
-                ' (AltSpliceVariant == EntryNr))'.format(
-                        max(genome_range[0], entry_nr - f * window),
-                        min(genome_range[1], entry_nr + f * window),
-                        target_chr))
+            '(EntryNr >= {:d}) & (EntryNr <= {:d}) & '
+            '(Chromosome == {!r}) & '
+            '((AltSpliceVariant == 0) |'
+            ' (AltSpliceVariant == EntryNr))'.format(
+                max(genome_range[0], entry_nr - f * window),
+                min(genome_range[1], entry_nr + f * window),
+                target_chr))
         data.sort(order=['EntryNr'])
         idx = data['EntryNr'].searchsorted(entry_nr)
         res = data[max(0, idx - window):min(len(data), idx + window + 1)]
@@ -205,7 +205,7 @@ class Database(object):
         :param fam_nr: the numeric id of the family (== Toplevel HOG)
         """
         return self.db.root.HogLevel.read_where(
-                '(Fam=={})'.format(fam_nr))['Level']
+            '(Fam=={})'.format(fam_nr))['Level']
 
     def get_subhogids_at_level(self, fam_nr, level):
         """get all the hog ids within a given family at a given taxonomic
@@ -225,7 +225,7 @@ class Database(object):
         :param level: the taxonomic level of interest"""
         lev = level if isinstance(level, bytes) else level.encode('ascii')
         return self.db.root.HogLevel.read_where(
-                '(Fam=={}) & (Level=={!r})'.format(fam_nr, lev))['ID']
+            '(Fam=={}) & (Level=={!r})'.format(fam_nr, lev))['ID']
 
     def member_of_hog_id(self, hog_id, level=None):
         """return an array of protein entries which belong to a given hog_id.
@@ -256,7 +256,7 @@ class Database(object):
         hog_range = self._hog_lex_range(hog_id)
         # get the proteins which have that HOG number
         memb = self.db.root.Protein.Entries.read_where(
-                '({!r} <= OmaHOG) & (OmaHOG < {!r})'.format(*hog_range))
+            '({!r} <= OmaHOG) & (OmaHOG < {!r})'.format(*hog_range))
         if level is not None:
             memb = [x for x in memb if level.encode('ascii') in self.tax.get_parent_taxa(
                 self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
@@ -293,7 +293,7 @@ class Database(object):
         if level != 'LUCA':
             # last, we need to filter the proteins to the tax range of interest
             members = [x for x in members if level.encode('ascii') in self.tax.get_parent_taxa(
-                    self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
+                self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
             if query not in members:
                 raise ValueError(u"Level '{0:s}' undefined for query gene".format(level))
         return members
@@ -357,15 +357,15 @@ class OmaIdMapper(object):
         self.genome_table = db.get_hdf5_handle().root.Genome.read()
         self._entry_off_keys = self.genome_table.argsort(order=('EntryOff'))
         self._genome_keys = self.genome_table.argsort(
-                order=('UniProtSpeciesCode'))
+            order=('UniProtSpeciesCode'))
         self._omaid_re = re.compile(r'(?P<genome>[A-Z][A-Z0-9]{4})(?P<nr>\d+)')
         self._db = db
 
     def genome_of_entry_nr(self, e_nr):
         """returns the genome code belonging to a given entry_nr"""
         idx = self.genome_table['EntryOff'].searchsorted(
-                e_nr - 1, side='right',
-                sorter=self._entry_off_keys)
+            e_nr - 1, side='right',
+            sorter=self._entry_off_keys)
         return self.genome_table[self._entry_off_keys[idx - 1]]
 
     def map_entry_nr(self, entry_nr):
@@ -376,7 +376,7 @@ class OmaIdMapper(object):
     def genome_from_UniProtCode(self, code):
         code = code.encode('ascii')
         idx = self.genome_table['UniProtSpeciesCode'].searchsorted(
-                code, sorter=self._genome_keys)
+            code, sorter=self._genome_keys)
         genome = self.genome_table[self._genome_keys[idx]]
         if genome['UniProtSpeciesCode'] != code:
             raise UnknownSpecies('{} is unknown'.format(code))
@@ -406,8 +406,7 @@ class OmaIdMapper(object):
         that the entries 1,2,3,4 and 5 belong to the query species"""
         if isinstance(query, (int, numpy.integer)):
             genome_row = self.genome_of_entry_nr(query)
-            if (query <= 0 or query > genome_row['EntryOff'] +
-                genome_row['TotEntries']):
+            if query <= 0 or query > genome_row['EntryOff'] + genome_row['TotEntries']:
                 raise InvalidOmaId(query)
         else:
             genome_row = self.genome_from_UniProtCode(query)
@@ -428,8 +427,7 @@ class OmaIdMapper(object):
         if root is None:
             root = self.genome_table[0]['UniProtSpeciesCode']
         root_genome = self.genome_from_UniProtCode(root)
-        lins = {g['UniProtSpeciesCode']: [lev['Name']
-                    for lev in self._db.tax.get_parent_taxa(g['NCBITaxonId'])][::-1]
+        lins = {g['UniProtSpeciesCode']: [lev['Name'] for lev in self._db.tax.get_parent_taxa(g['NCBITaxonId'])][::-1]
                 for g in self.genome_table}
         root_lin = lins[root_genome['UniProtSpeciesCode']]
         sort_key = {}
@@ -482,7 +480,7 @@ class IDResolver(object):
 class Taxonomy(object):
     """Taxonomy provides an interface to navigate the taxonomy data.
 
-    The input data is the same as what is stored in the Database in 
+    The input data is the same as what is stored in the Database in
     table "/Taxonomy"."""
 
     def __init__(self, data):
@@ -507,7 +505,7 @@ class Taxonomy(object):
 
     def _table_idx_from_numeric(self, tid):
         i = self.tax_table['NCBITaxonId'].searchsorted(
-                tid, sorter=self.taxid_key)
+            tid, sorter=self.taxid_key)
         idx = self.taxid_key[i]
         if self.tax_table[idx]['NCBITaxonId'] != tid:
             raise InvalidTaxonId(u"{0:d} is an invalid/unknown taxonomy id".format(tid))
@@ -754,13 +752,13 @@ class XrefIdMapper(object):
         source_condition = self._combine_query_values('XRefSource', self.idtype)
         for start in range(0, len(entry_nrs), junk_size):
             condition = "({}) & ({})".format(
-                    self._combine_query_values('EntryNr',
-                                               entry_nrs[start:start + junk_size]),
-                    source_condition)
+                self._combine_query_values('EntryNr',
+                                           entry_nrs[start:start + junk_size]),
+                source_condition)
             mapped_junks.append(self.xref_tab.read_where(condition))
         return numpy.lib.recfunctions.stack_arrays(
-                mapped_junks,
-                usemask=False)
+            mapped_junks,
+            usemask=False)
 
     def search_xref(self, xref):
         """identify proteins associcated with `xref`.

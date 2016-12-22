@@ -1,13 +1,9 @@
-__author__ = 'admin'
-
 import familyanalyzer as fa
 import lxml.etree as etree
 import os
 
 
-
 class OrthoXMLSplitter(object):
-
     def __init__(self, xml_file):
         self.xml_file = xml_file
         self.Etree_XML = etree.parse(self.xml_file)
@@ -15,7 +11,7 @@ class OrthoXMLSplitter(object):
         self.Etree_OGs = fa.OrthoXMLQuery.getToplevelOrthologGroups(self.Etree_root)
         self.Etree_header_genes = fa.OrthoXMLQuery.getInputGenes(self.Etree_root)
 
-    def split_each_hog_into_individual(self, storage_folder, list_hog_nr = None):
+    def split_each_hog_into_individual(self, storage_folder, list_hog_nr=None):
 
         os.system("mkdir " + storage_folder)
         os.system("rm " + storage_folder + '/*')
@@ -25,7 +21,7 @@ class OrthoXMLSplitter(object):
             fname = os.path.join(storage_folder, hog_id)
             print("Processing: ", fname)
 
-            if list_hog_nr != None:
+            if list_hog_nr is not None:
                 if int(og.get("id")) in list_hog_nr:
                     self.create_new_orthoxml(fname, [og])
             else:
@@ -39,11 +35,10 @@ class OrthoXMLSplitter(object):
                 ogs.append(og_etree)
         self.create_new_orthoxml(new_fn, ogs)
 
-
     def get_generef_OG(self, Etree_OG):
         generef_els = []
         for gene_etree in Etree_OG.getiterator():
-            if gene_etree.tag == "{http://orthoXML.org/2011/}geneRef" :
+            if gene_etree.tag == "{http://orthoXML.org/2011/}geneRef":
                 generef_els.append(gene_etree)
         return generef_els
 
@@ -63,14 +58,14 @@ class OrthoXMLSplitter(object):
         :param level:
         :return:
         """
-        i = "\n" + level*"  "
+        i = "\n" + level * "  "
         if len(elem):
             if not elem.text or not elem.text.strip():
                 elem.text = i + "  "
             if not elem.tail or not elem.tail.strip():
                 elem.tail = i
             for elem in elem:
-                self.indent(elem, level+1)
+                self.indent(elem, level + 1)
             if not elem.tail or not elem.tail.strip():
                 elem.tail = i
         else:
@@ -82,23 +77,23 @@ class OrthoXMLSplitter(object):
         # Get element to store
         generef_ids = []
         for etree_og in OGs:
-            og_gnref  = self.get_generef_OG(etree_og)
+            og_gnref = self.get_generef_OG(etree_og)
             for gnref in og_gnref:
                 generef_ids.append(gnref.get("id"))
         gene_els = self.get_gene_via_generef(generef_ids)
 
         # Get all information to store
-        zoo = {} # <- {key:sp_etree || value: {key:db_el || values:[list_genes]}}
-        for gene_el in gene_els: # <- for all gene el
+        zoo = {}  # <- {key:sp_etree || value: {key:db_el || values:[list_genes]}}
+        for gene_el in gene_els:  # <- for all gene el
             db_el = gene_el.getparent().getparent()
             sp_el = db_el.getparent()
-            if sp_el in zoo.keys(): # <- if species already visited
-                if db_el in zoo[sp_el].keys(): # <- if db already visited so add gene
+            if sp_el in zoo.keys():  # <- if species already visited
+                if db_el in zoo[sp_el].keys():  # <- if db already visited so add gene
                     zoo[sp_el][db_el].append(gene_el)
-                else: # <- if db not visited so add db,genes
+                else:  # <- if db not visited so add db,genes
                     zoo[sp_el][db_el] = []
                     zoo[sp_el][db_el].append(gene_el)
-            else: # <- if species not visited so add sp,db,gene
+            else:  # <- if species not visited so add sp,db,gene
                 zoo[sp_el] = {}
                 zoo[sp_el][db_el] = []
                 zoo[sp_el][db_el].append(gene_el)
@@ -141,10 +136,6 @@ class OrthoXMLSplitter(object):
         tree = etree.ElementTree(etree_2_dump)
         tree.write(fn, xml_declaration=True, encoding='utf-8', method="xml")
 
-
-
-
-
     def write_OG_(self, Etree_OG):
 
         # Create file var
@@ -159,28 +150,26 @@ class OrthoXMLSplitter(object):
         OG_el = Etree_OG
 
         # Get all information to store
-        zoo = {} # <- {key:sp_etree || value: {key:db_el || values:[list_genes]}}
-        for gene_el in gene_els: # <- for all gene el
+        zoo = {}  # <- {key:sp_etree || value: {key:db_el || values:[list_genes]}}
+        for gene_el in gene_els:  # <- for all gene el
             db_el = gene_el.getparent().getparent()
             sp_el = db_el.getparent()
-            if sp_el in zoo.keys(): # <- if species already visited
-                if db_el in zoo[sp_el].keys(): # <- if db already visited so add gene
+            if sp_el in zoo.keys():  # <- if species already visited
+                if db_el in zoo[sp_el].keys():  # <- if db already visited so add gene
                     zoo[sp_el][db_el].append(gene_el)
-                else: # <- if db not visited so add db,genes
+                else:  # <- if db not visited so add db,genes
                     zoo[sp_el][db_el] = []
                     zoo[sp_el][db_el].append(gene_el)
-            else: # <- if species not visited so add sp,db,gene
+            else:  # <- if species not visited so add sp,db,gene
                 zoo[sp_el] = {}
                 zoo[sp_el][db_el] = []
                 zoo[sp_el][db_el].append(gene_el)
-
 
         etree_2_dump = etree.Element("orthoXML")
         etree_2_dump.set("originVersion", 'Sep 2014')
         etree_2_dump.set("origin", 'OMA')
         etree_2_dump.set("version", '0.3')
         etree_2_dump.set("xmlns", 'http://orthoXML.org/2011/')
-
 
         for species_el in zoo.keys():
             species_xml = etree.Element("species")
@@ -212,7 +201,3 @@ class OrthoXMLSplitter(object):
         self.indent(etree_2_dump)
         tree = etree.ElementTree(etree_2_dump)
         tree.write(fname, xml_declaration=True, encoding='utf-8', method="xml")
-
-
-
-

@@ -26,7 +26,7 @@ class StandaloneExporter(DarwinExporter):
         if not self.transformed:
             cache_dir = os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'pyoma')
             res = self.call_darwin_export("TransformDataToCache('{}');".format(
-                    cache_dir))
+                cache_dir))
             if res != 'success':
                 raise DarwinException('could not transform data from darwin')
             self.transformed = True
@@ -56,7 +56,7 @@ class StandaloneExporter(DarwinExporter):
 
     def add_hogs(self):
         hog_path = os.path.join(
-            os.environ['DARWIN_BROWSERDATA_PATH'],'Output')
+            os.environ['DARWIN_BROWSERDATA_PATH'], 'Output')
 
         entryTab = self.h5.get_node('/Protein/Entries')
 
@@ -100,8 +100,6 @@ class StandaloneExporter(DarwinExporter):
             self.logger.exception(e)
 
         hog_converter.write_hogs()
-
-
 
     def _get_genome_database_paths(self):
         return self.call_darwin_export('GetGenomeFileNames();')

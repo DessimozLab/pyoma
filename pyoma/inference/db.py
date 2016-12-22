@@ -1,5 +1,3 @@
-__author__ = 'adriaal'
-
 import tables
 import numpy as np
 from functools import lru_cache
@@ -164,7 +162,7 @@ class GenomePair(object):
     def flush(self):
         modified = 0
         for i, rel_man in enumerate(self.rels):
-            if not rel_man is None and not rel_man.is_data_insync():
+            if rel_man is not None and not rel_man.is_data_insync():
                 modified += self.matches.modify_rows(start=self.entry_offset[i, 0],
                                                      stop=self.entry_offset[i, 1], rows=rel_man.data)
                 rel_man._data_changed = False

@@ -25,10 +25,10 @@ import hashlib
 import itertools
 import fileinput
 
-
 from .. import common
 from . import locus_parser
 from . import tablefmt
+
 with hooks():
     import urllib.request
 
@@ -51,7 +51,7 @@ def callDarwinExport(func, drwfile=None):
         with open(os.devnull, 'w') as DEVNULL:
             stacksize = resource.getrlimit(resource.RLIMIT_STACK)
             common.package_logger.info('current stacklimit: {}'.format(stacksize))
-            common.package_logger.info('setting stacklimit: {}'.format((max(stacksize)-1, stacksize[1])))
+            common.package_logger.info('setting stacklimit: {}'.format((max(stacksize) - 1, stacksize[1])))
             resource.setrlimit(resource.RLIMIT_STACK, (min(stacksize), stacksize[1]))
             p = subprocess.Popen(['darwin', '-q', '-E', '-B'], stdin=subprocess.PIPE,
                                  stderr=subprocess.PIPE, stdout=DEVNULL)
@@ -112,7 +112,7 @@ def load_tsv_to_numpy(args):
                                                        'RelType': lambda rel: (relEnum[rel[::read_dir].decode()]
                                                                                if len(rel) <= 3
                                                                                else relEnum[rel.decode()]),
-                                                       'Score': lambda score: float(score)/100})
+                                                       'Score': lambda score: float(score) / 100})
                 break
         except OSError as e:
             if curNr < 1:
@@ -181,7 +181,7 @@ def compute_ortholog_types(data, genome_offs):
                                                     return_counts=True))}
 
     def genome_idx(enr):
-        return numpy.searchsorted(genome_offs, enr-1, side='right')
+        return numpy.searchsorted(genome_offs, enr - 1, side='right')
 
     g0 = genome_idx(data[0]['EntryNr2'])
     it = numpy.nditer(data, flags=['c_index'], op_flags=['readwrite'])
@@ -196,12 +196,13 @@ def compute_ortholog_types(data, genome_offs):
             if g1 != g0 or row0['EntryNr1'] != row1['EntryNr1']:
                 break
             i1 += 1
-        subj_type = 'n' if i1-it.index > 1 else '1'
+        subj_type = 'n' if i1 - it.index > 1 else '1'
         while not it.finished and it.index < i1:
             typ = '{}:{}'.format(query_type[int(it[0]['EntryNr2'])], subj_type)
             it[0]['RelType'] = typEnum[typ]
             it.iternext()
         g0 = g1
+
 
 class DarwinExporter(object):
     DB_SCHEMA_VERSION = '2.0'
@@ -313,8 +314,8 @@ class DarwinExporter(object):
                     with open(cache_file, 'r') as fd:
                         data = json.load(fd)
                 elif ((not os.getenv('DARWIN_OMADATA_PATH') is None) and
-                          os.path.exists(os.path.join(
-                                  os.environ['DARWIN_OMADATA_PATH'], 'Phase4'))):
+                      os.path.exists(os.path.join(
+                           os.environ['DARWIN_OMADATA_PATH'], 'Phase4'))):
                     # try to read from Phase4 in parallel.
                     data = read_vps_from_tsv(self.h5.root.Genome,
                                              genome.encode('utf-8'))
@@ -398,8 +399,8 @@ class DarwinExporter(object):
 
             if len(data['seqs']) != gs['TotEntries']:
                 raise DataImportError('number of entries ({:d}) does '
-                                      'not match number of seqs ({:d}) for {}'.format(
-                                        len(data['seqs']), gs['TotEntries'], genome))
+                                      'not match number of seqs ({:d}) for {}'
+                                      .format(len(data['seqs']), gs['TotEntries'], genome))
 
             locTab = self.h5.create_table('/Protein/Locus',
                                           genome, tablefmt.LocusTable, createparents=True,
@@ -435,7 +436,7 @@ class DarwinExporter(object):
             for n in (protTab, seqArr, locTab):
                 if n.size_in_memory != 0:
                     self.logger.info('worte %s: compression ratio %3f%%' %
-                                 (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory))
+                                     (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory))
         protTab.cols.EntryNr.create_csindex(filters=self._compr)
         protTab.cols.MD5ProteinHash.create_csindex(filters=self._compr)
 
@@ -477,14 +478,16 @@ class DarwinExporter(object):
     def add_orthoxml(self, orthoxml_path, fam_nrs):
         """append orthoxml file content to orthoxml_buffer array and add index for the HOG family"""
         if len(fam_nrs) > 1:
-            self.logger.warning('expected only one family per HOG file, but found {}: {}'.format(len(fam_nrs), fam_nrs))
-            self.logger.warning(' --> the orthoxml files per family will be not correct, i.e. they will contain all families of this file.')
+            self.logger.warning('expected only one family per HOG file, but found {}: {}'
+                                .format(len(fam_nrs), fam_nrs))
+            self.logger.warning(' --> the orthoxml files per family will be not correct, '
+                                'i.e. they will contain all families of this file.')
         with open(orthoxml_path, 'r') as fh:
             orthoxml = fh.read().encode('utf-8')
             offset = len(self.orthoxml_buffer)
             length = len(orthoxml)
             self.orthoxml_buffer.append(numpy.ndarray((length,),
-                buffer=orthoxml, dtype=tables.StringAtom(1)))
+                                                      buffer=orthoxml, dtype=tables.StringAtom(1)))
             for fam in fam_nrs:
                 row = self.orthoxml_index.row
                 row['Fam'] = fam
@@ -587,7 +590,8 @@ class DarwinExporter(object):
 
     def add_domain_info(self, domains):
         self.logger.info('adding domain information...')
-        domtab = self.h5.create_table('/Annotations', 'Domains', tablefmt.DomainTable, createparents=True, expectedrows=1e7)
+        domtab = self.h5.create_table('/Annotations', 'Domains', tablefmt.DomainTable, createparents=True,
+                                      expectedrows=1e7)
         entrytab = self.h5.get_node('/Protein/Entries')
         md5_to_enr = collections.defaultdict(list)
         for e in entrytab:
@@ -624,7 +628,7 @@ class DarwinExporter(object):
 
 
 def download_url_if_not_present(url):
-    tmpfolder = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH','/tmp'), "Browser", "xref")
+    tmpfolder = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH', '/tmp'), "Browser", "xref")
     basename = url.split('/')[-1]
     fname = os.path.join(tmpfolder, basename)
     if not os.path.exists(tmpfolder):
@@ -667,17 +671,17 @@ class DescriptionManager(object):
     def __enter__(self):
         self.entry_tab = self.db.get_node(self.entry_path)
         if not numpy.all(numpy.equal(self.entry_tab.col('EntryNr'),
-                                     numpy.arange(1,len(self.entry_tab)+1))):
+                                     numpy.arange(1, len(self.entry_tab) + 1))):
             raise RuntimeError('entry table is not sorted')
 
         root, name = os.path.split(self.buffer_path)
         self.desc_buf = self.db.create_earray(root, name,
-            tables.StringAtom(1), (0,), 'concatenated protein descriptions',
-            expectedrows=len(self.entry_tab)*100)
+                                              tables.StringAtom(1), (0,), 'concatenated protein descriptions',
+                                              expectedrows=len(self.entry_tab) * 100)
         self.cur_eNr = None
         self.cur_desc = []
         bufindex_dtype = numpy.dtype([(col, self.entry_tab.coldtypes[col])
-            for col in ('DescriptionOffset', 'DescriptionLength')])
+                                      for col in ('DescriptionOffset', 'DescriptionLength')])
         # columns to be stored in entry table with buffer index data
         self.buf_index = numpy.zeros(len(self.entry_tab), dtype=bufindex_dtype)
         return self
@@ -691,8 +695,8 @@ class DescriptionManager(object):
         self.entry_tab.flush()
 
     def add_description(self, eNr, desc):
-        """stages a description for addition. Note that the descriptions 
-        must be ordered according to the entryNr, i.e. all descriptions 
+        """stages a description for addition. Note that the descriptions
+        must be ordered according to the entryNr, i.e. all descriptions
         related to eNr X must be staged before changeing to another eNr."""
         if self.cur_eNr and self.cur_eNr != eNr:
             self._store_description()
@@ -702,7 +706,7 @@ class DescriptionManager(object):
 
     def _store_description(self):
         buf = "; ".join(self.cur_desc).encode('utf-8')
-        buf = buf[0:2**16-1]  # limit to max value of buffer length field
+        buf = buf[0:2 ** 16 - 1]  # limit to max value of buffer length field
         len_buf = len(buf)
         idx = self.cur_eNr - 1
         self.buf_index[idx]['DescriptionOffset'] = len(self.desc_buf)
@@ -774,7 +778,7 @@ class XRefImporter(object):
                                   lambda key, enr: self.key_value_handler(key, enr, xrefEnum['UniProtKB/SwissProt']))
         db_parser.add_tag_handler('DE',
                                   lambda key, enr: self.description_handler(key, enr))
-        db_parser.add_tag_handler('GO',self.go_handler)
+        db_parser.add_tag_handler('GO', self.go_handler)
         db_parser.add_tag_handler('ID', self.assign_source_handler)
         db_parser.add_tag_handler('AC', self.assign_source_handler)
 
@@ -829,12 +833,12 @@ class XRefImporter(object):
             self._add_to_xrefs(eNr, enum_nr, key)
 
     def assign_source_handler(self, multikey, eNr):
-        """handler that splits the multikey field at '; ' locations and 
+        """handler that splits the multikey field at '; ' locations and
         tries to guess for each part the id_type. If a type could be
         identified, it is added under with this id type, otherwise left out."""
         for key in multikey.split('; '):
             ens_match = self.ENS_RE.match(key)
-            if not ens_match is None:
+            if ens_match is not None:
                 typ = ens_match.group('typ')
                 if typ == 'P':
                     enum_nr = self.xrefEnum['Ensembl Protein']
@@ -848,7 +852,7 @@ class XRefImporter(object):
 
             for enum, regex in {'FlyBase': self.FB_RE, 'NCBI': self.NCBI_RE}.items():
                 match = regex.match(key)
-                if not match is None:
+                if match is not None:
                     enum_nr = self.xrefEnum[enum]
                     self._add_to_xrefs(eNr, enum_nr, key)
 
@@ -903,7 +907,7 @@ class DarwinDbEntryParser:
         """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,
         ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ,
         SwissProt, SwissProt_AC, UniProt/TrEMBL, WikiGene, flybase_transcript_id
-        
+
         :param fh: an already opened file handle to the darwin database
                    file to be parsed."""
         eNr = 0
@@ -929,7 +933,10 @@ class DarwinDbEntryParser:
                         #    handler, value.encode('utf-8'), eNr))
 
 
-DomainDescription = collections.namedtuple('DomainDescription', tables.dtype_from_descr(tablefmt.DomainDescriptionTable).names)
+DomainDescription = collections.namedtuple('DomainDescription',
+                                           tables.dtype_from_descr(tablefmt.DomainDescriptionTable).names)
+
+
 class CathDomainNameParser(object):
     re_pattern = re.compile(r'(?P<id>[0-9.]*)\s{3,}\w{7}\s{3,}:\s*(?P<desc>.*)')
     source = b'CATH/Gene3D'
@@ -987,4 +994,3 @@ def main(name="OmaServer.h5"):
     x = DarwinExporter(name, logger=log)
     x.create_indexes()
     x.close()
-

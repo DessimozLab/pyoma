@@ -210,7 +210,7 @@ class DarwinExporter(object):
     def __init__(self, path, logger=None, mode=None):
         self.logger = logger if logger is not None else common.package_logger
         fn = os.path.normpath(os.path.join(
-            os.environ['DARWIN_BROWSERDATA_PATH'],
+            os.getenv('DARWIN_BROWSERDATA_PATH', ''),
             path))
         if mode is None:
             mode = 'append' if os.path.exists(fn) else 'write'

@@ -22,7 +22,15 @@ class ImportIntegrationBase(unittest.TestCase):
         cls.tmpdir = tempfile.mkdtemp()
         cls.old_env = {(z, os.getenv(z, None)) for z in ('DARWIN_NETWORK_SCRATCH_PATH', 'DARWIN_BROWSERDATA_PATH')}
         os.environ['DARWIN_NETWORK_SCRATCH_PATH'] = cls.tmpdir
-        os.environ['DARWIN_BROWSERDATA_PATH'] = '/pub/projects/cbrg-oma-browser/Test.Jul2014/data'
+        test_data_available = False
+        for folder in ('/pub/projects/cbrg-oma-browser', '/cs/research/biosciences/oma/oma-server',
+                       '/scratch/ul/projects/cdessimo/oma-browser'):
+            if os.path.isdir(folder):
+                test_data_available = True
+                break
+        if not test_data_available:
+            raise unittest.SkipTest('data not available')
+        os.environ['DARWIN_BROWSERDATA_PATH'] = os.path.join(folder, 'Test.Jul2014', 'data')
 
     @classmethod
     def tearDownClass(cls):
@@ -43,7 +51,7 @@ class ImportIntegrationBase(unittest.TestCase):
         os.remove(fn)
 
 
-class GenomeDirectImport_Test(ImportIntegrationBase):
+class GenomeDirectImportTest(ImportIntegrationBase):
     def compare_genomes_tab(self, data):
         self.darwin_exporter.add_species_data()
         gstab = self.darwin_exporter.h5.get_node('/Genome')

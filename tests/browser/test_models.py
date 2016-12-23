@@ -42,6 +42,11 @@ class ProteinEntryTests(unittest.TestCase):
         protein_entry = models.ProteinEntry.from_entry_nr(self.db, 12)
         self.assertEqual(len(protein_entry), len(protein_entry.sequence))
 
+    def test_ec_content(self):
+        protein_entry = models.ProteinEntry.from_entry_nr(self.db, 12)
+        self.assertLessEqual(protein_entry.ec_content, 1)
+        self.assertGreaterEqual(protein_entry.ec_content, 0)
+
 
 class SingletonTests(unittest.TestCase):
 

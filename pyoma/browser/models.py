@@ -93,6 +93,15 @@ class ProteinEntry(object):
     def cdna(self):
         return self._db.get_cdna(self._entry).decode()
 
+    @property
+    def ec_content(self):
+        cdna = self.cdna
+        cnts = list(map(cdna.count, 'GCAT'))
+        try:
+            return sum(cnts[0:2])/sum(cnts)
+        except ZeroDivisionError:
+            return 0
+
     @LazyProperty
     def sequence(self):
         return self._db.get_sequence(self._entry).decode()

@@ -1,6 +1,10 @@
+# This Python file uses the following encoding: latin-1
+from __future__ import unicode_literals
 import unittest
-import unittest.mock
-
+try:
+    import unittest.mock as mock
+except ImportError:
+    import mock as mock
 import numpy
 import tables
 import io
@@ -14,7 +18,7 @@ class XRefParsingTest(unittest.TestCase):
             <E><ID>BLA22; BLABLA22.Rep22</ID><AC>BLA22.1</AC><EntrezGene>32244</EntrezGene><PMP>P21122; Q24S32</PMP><GO>GO:0006270@[[IDA,{'PMID:2167836'}],[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]; GO:0006275@[[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]</GO></E>
             <E><UniProt/TrEMBL>L8ECQ9_BACSU</UniProt/TrEMBL><SwissProt_AC>Q6CI62</SwissProt_AC><SwissProt>ASF1_YARLI</SwissProt><ID>FBgn0218776</ID><AC>FBpp0245919; FBtr0247427</AC><DE>β-hemoglobin</DE><GO></GO></E>""")
         self.db_parser = pyoma.DarwinDbEntryParser()
-        self.desc_manager = unittest.mock.Mock()
+        self.desc_manager = mock.Mock()
         self.importer = pyoma.XRefImporter(self.db_parser, None, None, self.desc_manager)
 
     def test_standard_handler(self):

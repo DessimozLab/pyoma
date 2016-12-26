@@ -1,4 +1,4 @@
-from __future__ import absolute_import
+from __future__ import absolute_import, unicode_literals, print_function, division
 import unittest
 import os
 import shutil
@@ -84,7 +84,7 @@ class GenomeDirectImportTest(ImportIntegrationBase):
 class ProteinImportViaJson(ImportIntegrationBase):
     @classmethod
     def setUpClass(cls):
-        super().setUpClass()
+        super(ProteinImportViaJson, cls).setUpClass()
         data = callDarwinExport('GetGenomeData();')
         json_fname = os.path.join(cls.tmpdir, "pyoma", "gs.json")
         store_in_json(data, json_fname)

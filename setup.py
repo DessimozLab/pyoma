@@ -1,6 +1,11 @@
 from setuptools import setup, find_packages
+import sys
 
 name = 'pyoma'
+
+req_packages = ['numpy', 'tables>=3.2', 'future', 'familyanalyzer']
+if sys.version_info < (3, 3):
+    req_packages.extend(['mock', 'functools32'])
 
 setup(
     name=name,
@@ -22,5 +27,5 @@ setup(
         'Programming Language :: Python :: 3.5',
     ],
     package_data={'pyoma': ['browser/*.drw']},
-    install_requires=['numpy', 'tables>=3.2', 'future', 'familyanalyzer'],
+    install_requires=req_packages,
 )

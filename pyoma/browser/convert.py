@@ -914,11 +914,11 @@ class DarwinDbEntryParser:
         for line in fh:
             line = line.strip()
             if not line.startswith('<E>'):
-                common.package_logger.debug('skipping line:' + line)
+                common.package_logger.debug('skipping line:' + line.encode('utf-8'))
                 continue
 
             eNr += 1
-            common.package_logger.debug('entry {}: {}'.format(eNr, line))
+            common.package_logger.debug('entry {}: {}'.format(eNr, line.encode('utf-8')))
             entry = lxml.html.fragment_fromstring(line)
             for tag, handlers in self.tag_handlers.items():
                 common.package_logger.debug('tag {} ({} handlers)'.format(tag, len(handlers)))

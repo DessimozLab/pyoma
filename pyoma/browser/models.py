@@ -80,6 +80,10 @@ class ProteinEntry(object):
     def canonicalid(self):
         return self._entry['CanonicalId'].decode()
 
+    @property
+    def sequence_md5(self):
+        return self._entry['MD5ProteinHash'].decode()
+
     @LazyProperty
     def genome(self):
         g = self._db.id_mapper['OMA'].genome_of_entry_nr(self._entry['EntryNr'])
@@ -157,6 +161,7 @@ class Genome(object):
         # TODO: store directly in db
         return self._db.tax.get_parent_taxa(self._genome['NCBITaxonId'])[-1]['Name'].decode()
 
+    @property
     def is_polyploid(self):
         return self._genome['IsPolyploid']
 

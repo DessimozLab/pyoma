@@ -320,6 +320,19 @@ class Database(object):
         hog_str = hog.decode() if isinstance(hog, bytes) else hog
         return hog_str.encode('ascii'), (hog_str[0:-1] + chr(1 + ord(hog_str[-1]))).encode('ascii')
 
+    def oma_group_members(self, group_nr):
+        """get the member entries of an oma group.
+
+        This method returns a numpy array of protein entries that form
+        an oma group. If the numeric group id is invalid (not positive
+        integer value), an `InvalidId` Exception is raised.
+
+        :param int group_nr: numeric oma group id"""
+        if not isinstance(group_nr, int) or group_nr <= 0:
+            raise InvalidId('Invalid id of oma group')
+        members = self.db.root.Protein.Entries.read_where('OmaGroup=={:d}'.format(group_nr))
+        return members
+
     def get_sequence(self, entry):
         """get the protein sequence of a given entry as a string
 

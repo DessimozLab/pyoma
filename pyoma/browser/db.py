@@ -390,7 +390,11 @@ class OmaIdMapper(object):
         code = code.encode('ascii')
         idx = self.genome_table['UniProtSpeciesCode'].searchsorted(
             code, sorter=self._genome_keys)
-        genome = self.genome_table[self._genome_keys[idx]]
+        try:
+            genome = self.genome_table[self._genome_keys[idx]]
+        except IndexError:
+            raise UnknownSpecies('{} is unknown'.format(code))
+
         if genome['UniProtSpeciesCode'] != code:
             raise UnknownSpecies('{} is unknown'.format(code))
         return genome
@@ -736,8 +740,7 @@ class XrefIdMapper(object):
         self.idtype = frozenset(list(self.xrefEnum._values.keys()))
 
     def map_entry_nr(self, entry_nr):
-        """returns the set of XRef entries associated with the query
-        protein.
+        """returns the XRef entries associated with the query protein.
 
         The types of XRefs that are returned depends on the idtype
         class member variable. In the base-class, idtype contains
@@ -745,8 +748,10 @@ class XrefIdMapper(object):
         will change this set.
 
         :param entry_nr: the numeric id of the query protein."""
-        res = set([row[:] for row in self.xref_tab.where('EntryNr=={:d}'.format(entry_nr))
-                   if row['XRefSource'] in self.idtype])
+        res = [{'source': self.xrefEnum._values[row['XRefSource']],
+                'xref': row['XRefId'].decode()}
+                for row in self.xref_tab.where('EntryNr=={:d}'.format(entry_nr))
+                if row['XRefSource'] in self.idtype]
         return res
 
     def _combine_query_values(self, field, values):
@@ -773,7 +778,7 @@ class XrefIdMapper(object):
             mapped_junks,
             usemask=False)
 
-    def search_xref(self, xref):
+    def search_xref(self, xref, is_prefix=False):
         """identify proteins associcated with `xref`.
 
         The crossreferences are limited to the types in the class
@@ -781,8 +786,21 @@ class XrefIdMapper(object):
         xrefs. The method returns a :class:`numpy.recarry` defined
         for the XRef table with all entries pointing to `xref`.
 
-        :param xref: an xref to be located"""
-        res = self.xref_tab.read_where('XRefId=={!r}'.format(xref.encode('utf-8')))
+        The method by default returns only exact matches. By setting
+        `is_prefix` to True, one can indicated that the requested xref
+        should be interpreted as a prefix and all entries matching this
+        prefix should be returned.
+
+        :param str xref: an xref to be located
+        :param bool is_prefix: treat xref as a prefix and return
+                     potentially several matching xrefs"""
+        if is_prefix:
+            up = xref[:-1] + chr(ord(xref[-1])+1)
+            cond = '(XRefId >= {!r}) & (XRefId < {!r})'.format(
+                xref.encode('utf-8'), up.encode('utf-8'))
+        else:
+            cond = 'XRefId=={!r}'.format(xref.encode('utf-8'))
+        res = self.xref_tab.read_where(cond)
         if len(res) > 0 and len(self.idtype) < len(self.xrefEnum):
             res = res[numpy.in1d(res['XRefSource'], list(self.idtype))]
         return res
@@ -801,7 +819,7 @@ class XrefIdMapper(object):
             try:
                 typ = self.xrefEnum._values[row['XRefSource']]
             except IndexError:
-                logger.warn('invalid XRefSource value in {}'.format(row))
+                logger.warning('invalid XRefSource value in {}'.format(row))
                 continue
             if typ not in xrefdict[row['EntryNr']]:
                 xrefdict[row['EntryNr']][typ] = {'id': row['XRefId']}

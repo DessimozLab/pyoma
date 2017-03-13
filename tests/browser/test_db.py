@@ -1,3 +1,4 @@
+import types
 import unittest
 import numpy
 from pyoma.browser.db import *
@@ -130,6 +131,13 @@ class XRefIdMapperTest(unittest.TestCase):
         all_mapped = self.xrefmapper.map_many_entry_nrs(numpy.arange(1,4))
         self.assertEqual(all_mapped.shape, (6,))
         self.assertEqual(all_mapped.dtype, self.xrefmapper.xref_tab.dtype)
+
+    def test_map_entry_iterator(self):
+        it = self.xrefmapper.iter_xrefs_for_entry_nr(1)
+        self.assertTrue(isinstance(it, types.GeneratorType), 'not a generator')
+        exp_xrefs = ['XA000g1.4', 'XA001g1.4']
+        for dic in it:
+            self.assertIn(dic['xref'], exp_xrefs)
 
 
 class TaxonomyTest(unittest.TestCase):

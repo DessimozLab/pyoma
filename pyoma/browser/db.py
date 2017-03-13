@@ -754,6 +754,18 @@ class XrefIdMapper(object):
                 if row['XRefSource'] in self.idtype]
         return res
 
+    def iter_xrefs_for_entry_nr(self, entry_nr):
+        """Iterate over the xrefs of a given entry number.
+
+        This method returns a dict with 'source' and 'xref' fields
+        (both str) holding the information of the xref record.
+
+        :param entry_nr: the numeric id of the query protein"""
+        for row in self.xref_tab.where('EntryNr=={:d}'.format(entry_nr)):
+            if row['XRefSource'] in self.idtype:
+                yield {'source': self.xrefEnum._values[row['XRefSource']],
+                       'xref': row['XRefId'].decode()}
+
     def _combine_query_values(self, field, values):
         parts = ['({}=={})'.format(field, z) for z in values]
         return '|'.join(parts)
@@ -805,6 +817,18 @@ class XrefIdMapper(object):
             res = res[numpy.in1d(res['XRefSource'], list(self.idtype))]
         return res
 
+    def source_as_string(self, source):
+        """string representation of xref source enum value
+
+        this auxiliary method converts the numeric value of
+        a xref source into a string representation.
+
+        :param int source: numeric value of xref source"""
+        try:
+            return self.xrefEnum._values[source]
+        except KeyError:
+            raise ValueError("'{}' is not a valid xref source value".format(source))
+
     def xreftab_to_dict(self, tab):
         """convert a xreftable to a dictionary per entry_nr.
 
@@ -843,7 +867,11 @@ class LinkoutIdMapper(XrefIdMapper):
     def url(self, typ, id_):
         # TODO: improve url generator in external module with all xrefs
         url = None
-        id_ = id_.decode()
+        try:
+            id_ = id_.decode()
+        except AttributeError:
+            pass
+
         if typ.startswith('UniProtKB'):
             url = 'http://uniprot.org/uniprot/{}'.format(id_)
         elif typ == 'EntrezGene':
@@ -858,6 +886,12 @@ class LinkoutIdMapper(XrefIdMapper):
             for typ, elem in list(d.items()):
                 elem['url'] = self.url(typ, elem['id'])
         return xref
+
+    def iter_xrefs_for_entry_nr(self, entry_nr):
+        """same as base clase but includes also the url as a field"""
+        for xref in super(LinkoutIdMapper, self).iter_xrefs_for_entry_nr(entry_nr):
+            xref['url'] = self.url(xref['source'], xref['xref'])
+            yield xref
 
 
 class DomainNameIdMapper(object):

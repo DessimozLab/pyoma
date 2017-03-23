@@ -9,7 +9,7 @@ class OrthoXMLSplitter(object):
         self.Etree_XML = etree.parse(self.xml_file)
         self.Etree_root = self.Etree_XML.getroot()
         self.Etree_OGs = fa.OrthoXMLQuery.getToplevelOrthologGroups(self.Etree_root)
-        self.Etree_header_genes = fa.OrthoXMLQuery.getInputGenes(self.Etree_root)
+        self.gene_lookup = {gene.get('id'): gene for gene in fa.OrthoXMLQuery.getInputGenes(self.Etree_root)}
 
     def split_each_hog_into_individual(self, storage_folder, list_hog_nr=None):
         os.system("mkdir " + storage_folder)
@@ -33,31 +33,18 @@ class OrthoXMLSplitter(object):
                 ogs.append(og_etree)
         self.create_new_orthoxml(new_fn, ogs)
 
-    def get_generef_OG(self, Etree_OG):
-        generef_els = []
-        for gene_etree in Etree_OG.getiterator():
-            if gene_etree.tag == "{http://orthoXML.org/2011/}geneRef":
-                generef_els.append(gene_etree)
-        return generef_els
+    def get_generef_OG(self, og_node):
+        return fa.OrthoXMLQuery.getGeneRefNodes(og_node, recursively=True)
 
     def get_gene_via_generef(self, genesref_ids):
         genesref_ids = set(genesref_ids)
-        gene_els = []
-        cpt = 0
-        for gene_header in self.Etree_header_genes:
-            if gene_header.get("id") in genesref_ids:
-                gene_els.append(gene_header)
-        return gene_els
+        return [self.gene_lookup[gene_id] for gene_id in genesref_ids]
 
     def create_new_orthoxml(self, fn, OGs):
-
         # Get element to store
-        generef_ids = []
-        for etree_og in OGs:
-            og_gnref = self.get_generef_OG(etree_og)
-            for gnref in og_gnref:
-                generef_ids.append(gnref.get("id"))
-        gene_els = self.get_gene_via_generef(generef_ids)
+        for og_node in OGs:
+            gene_ids = [gene_ref_elem.get("id") for gene_ref_elem in self.get_generef_OG(og_node)]
+        gene_els = self.get_gene_via_generef(gene_ids)
 
         # Get all information to store
         zoo = {}  # <- {key:sp_etree || value: {key:db_el || values:[list_genes]}}

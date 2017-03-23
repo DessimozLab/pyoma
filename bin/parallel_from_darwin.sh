@@ -1,6 +1,9 @@
 #!/bin/bash
 
-NProc=25
+NProc=${1:-25}
+doVPS="${2:-false}"
+echo "Running with $NProc procs, doVPS=$doVPS"
+
 
 mkdir -p ${DARWIN_NETWORK_SCRATCH_PATH}/pyoma/{prots,cps}/
 for i in $(eval echo {1..${NProc}}) ; do
@@ -20,6 +23,10 @@ for i in $(eval echo {1..${NProc}}) ; do
             GetProteinsForGenome(g);
             outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/cps/'.g.'.json';
             GetSameSpeciesRelations(g);
+            if $doVPS=true then 
+                outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/vps/'.g.'.json';
+                GetVPsForGenome(g);
+            fi:
         fi:
     od:
     done

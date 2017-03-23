@@ -62,7 +62,7 @@ class OrthoXMLSplitter(object):
                 zoo[sp_el][db_el] = []
                 zoo[sp_el][db_el].append(gene_el)
 
-        etree_2_dump = etree.Element("orthoXML")
+        etree_2_dump = etree.Element("orthoXML", nsmap=self.Etree_root.nsmap)
         for attr, value in self.Etree_root.items():
             etree_2_dump.set(attr, value)
 
@@ -89,10 +89,7 @@ class OrthoXMLSplitter(object):
 
         groupsxml = etree.SubElement(etree_2_dump, "groups")
         for og_et in OGs:
-            str_OG_xml = etree.tostring(og_et)
-            str_OG_xml = str_OG_xml.decode().replace('xmlns="http://orthoXML.org/2011/"', "")
-            OG_xml = etree.fromstring(str_OG_xml)
-            groupsxml.append(OG_xml)
+            groupsxml.append(og_et)
 
         tree = etree.ElementTree(etree_2_dump)
         tree.write(fn, xml_declaration=True, encoding='utf-8', method="xml", pretty_print=True)

@@ -303,6 +303,7 @@ class DarwinExporter(object):
         return arr
 
     def add_orthologs(self):
+        genome_offs = self.h5.root.Genome.col('EntryOff')
         for gs in self.h5.root.Genome.iterrows():
             genome = gs['UniProtSpeciesCode'].decode()
             rel_node_for_genome = self._get_or_create_node('/PairwiseRelation/{}'.format(genome))
@@ -328,7 +329,7 @@ class DarwinExporter(object):
                 if isinstance(data, list):
                     data = self._convert_to_numpyarray(data, vp_tab)
                 if numpy.any(data['RelType'] >= tablefmt.PairwiseRelationTable.columns.get('RelType').enum['n/a']):
-                    compute_ortholog_types(data)
+                    compute_ortholog_types(data, genome_offs)
                 self._write_to_table(vp_tab, data)
                 vp_tab.cols.EntryNr1.create_csindex()
 

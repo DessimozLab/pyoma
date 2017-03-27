@@ -1,14 +1,16 @@
 from .convert import *
 from pyoma.browser import OrthoXMLSplitter
+import os
 
 
 class StandaloneExporter(DarwinExporter):
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
 
     def __init__(self, root, name, **kwargs):
-        os.environ['DARWIN_BROWSERDATA_PATH'] = root
+        os.environ['DARWIN_BROWSERDATA_PATH'] = os.path.abspath(root)
         super(StandaloneExporter, self).__init__(name, **kwargs)
         self.transformed = False
+        self.cache_dir = os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'pyoma')
 
     def add_homologs(self):
         self.assert_cached_results()
@@ -24,9 +26,8 @@ class StandaloneExporter(DarwinExporter):
 
     def assert_cached_results(self):
         if not self.transformed:
-            cache_dir = os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'pyoma')
             res = self.call_darwin_export("TransformDataToCache('{}');".format(
-                cache_dir))
+                    self.cache_dir))
             if res != 'success':
                 raise DarwinException('could not transform data from darwin')
             self.transformed = True
@@ -71,14 +72,10 @@ class StandaloneExporter(DarwinExporter):
 
         fn = 'HierarchicalGroups.orthoxml'
 
-        # Set cache splitted hog folder
-        split_hog_path = os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'split_hog')
-
-        # Get orthoxml in OrthoXMLSplitter obj
+        # Split the OrthoXML up (puts in cache_dir/split_hog).
+        hog_cache_dir = os.path.join(self.cache_dir, 'split_hogs')
         ortho_splitter = OrthoXMLSplitter.OrthoXMLSplitter(os.path.join(hog_path, fn))
-
-        # Split each hog into single file in the splitted hog cache folder
-        ortho_splitter.split_each_hog_into_individual(split_hog_path)
+        ortho_splitter(hog_cache_dir)
 
         hogTab = self.h5.create_table('/', 'HogLevel', tablefmt.HOGsTable,
                                       'nesting structure for each HOG', expectedrows=1e8)
@@ -94,7 +91,7 @@ class StandaloneExporter(DarwinExporter):
             fam_nrs = set([z[0] for z in levels])
             for fam_nr in fam_nrs:
                 hog_fn = "HOG{:06d}.orthoxml".format(fam_nr)
-                self.add_orthoxml(os.path.join(split_hog_path, hog_fn), [fam_nr])
+                self.add_orthoxml(os.path.join(hog_cache_dir, hog_fn), [fam_nr])
         except Exception as e:
             self.logger.error('an error occured while processing ' + fn + ':')
             self.logger.exception(e)

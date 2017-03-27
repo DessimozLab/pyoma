@@ -5,6 +5,7 @@ from future.builtins import range
 from future.builtins import object
 from future.builtins import super
 from future.standard_library import hooks
+from tempfile import NamedTemporaryFile
 import csv
 import resource
 import tables
@@ -44,31 +45,29 @@ def callDarwinExport(func, drwfile=None):
     file specified by 'outfn'.
     This function returns the parsed json datastructure"""
 
-    tmpfile = "/tmp/darwinExporter_{:d}.dat".format(os.getpid())
-    if drwfile is None:
-        drwfile = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
-    try:
-        with open(os.devnull, 'w') as DEVNULL:
-            stacksize = resource.getrlimit(resource.RLIMIT_STACK)
-            common.package_logger.info('current stacklimit: {}'.format(stacksize))
-            common.package_logger.info('setting stacklimit: {}'.format((max(stacksize) - 1, stacksize[1])))
-            resource.setrlimit(resource.RLIMIT_STACK, (min(stacksize), stacksize[1]))
-            p = subprocess.Popen(['darwin', '-q', '-E', '-B'], stdin=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, stdout=DEVNULL)
-            drw_cmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
-                tmpfile, drwfile, func).encode('utf-8')
-            common.package_logger.debug('calling darwin function: {}'.format(func))
-            p.communicate(input=drw_cmd)
-            if p.returncode > 0:
-                raise DarwinException(p.stderr.read())
+    with NamedTemporaryFile(suffix='.dat') as tmpfile:
+        if drwfile is None:
+            drwfile = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
+        # with open(os.devnull, 'w') as DEVNULL:
+        stacksize = resource.getrlimit(resource.RLIMIT_STACK)
+        common.package_logger.info('current stacklimit: {}'.format(stacksize))
+        common.package_logger.info('setting stacklimit: {}'.format((max(stacksize)-1, stacksize[1])))
+        resource.setrlimit(resource.RLIMIT_STACK, (min(stacksize), stacksize[1]))
+        p = subprocess.Popen(['darwin', '-q', '-E', '-B'], stdin=subprocess.PIPE,
+                             stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+        drw_cmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
+            tmpfile.name,
+            drwfile,
+            func).encode('utf-8')
+        common.package_logger.debug('calling darwin function: {}'.format(func))
+        (stdout, stderr) = p.communicate(input=drw_cmd)
+        if p.returncode > 0:
+            raise DarwinException(p.stderr.read())
 
         trans_tab = "".join(str(chr(x)) for x in range(128)) + " " * 128
-        with open(tmpfile, 'r') as jsonData:
+        with open(tmpfile.name, 'r') as jsonData:
             rawdata = jsonData.read()
-            data = json.loads(rawdata.translate(trans_tab))
-    finally:
-        silentremove(tmpfile)
-    return data
+            return json.loads(rawdata.translate(trans_tab))
 
 
 def uniq(seq):

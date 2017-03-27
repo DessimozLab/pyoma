@@ -1,37 +1,83 @@
 import familyanalyzer as fa
 import lxml.etree as etree
 import os
+import errno
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class OrthoXMLSplitter(object):
-    def __init__(self, xml_file):
+
+    def __init__(self, xml_file, cache_dir=None):
         self.xml_file = xml_file
+        if cache_dir is not None:
+            self._assert_cache_dir(cache_dir)
         self.Etree_XML = etree.parse(self.xml_file)
         self.Etree_root = self.Etree_XML.getroot()
         self.Etree_OGs = fa.OrthoXMLQuery.getToplevelOrthologGroups(self.Etree_root)
         self.gene_lookup = {gene.get('id'): gene for gene in fa.OrthoXMLQuery.getInputGenes(self.Etree_root)}
 
-    def split_each_hog_into_individual(self, storage_folder, list_hog_nr=None):
-        os.system("mkdir " + storage_folder)
-        os.system("rm " + storage_folder + '/*')
-        for og in self.Etree_OGs:
-            hog_nr = int(og.get("id"))
-            hog_id = "HOG{:06d}.orthoxml".format(hog_nr)
-            fname = os.path.join(storage_folder, hog_id)
-            print("Processing: ", fname)
-
-            if list_hog_nr is not None:
-                if int(og.get("id")) in list_hog_nr:
-                    self.create_new_orthoxml(fname, [og])
+    def _assert_cache_dir(self, cache_dir):
+        # Ensure existance of cache directory (py2 compat)
+        try:
+            os.makedirs(cache_dir)
+        except OSError as exc:
+            if exc.errno == errno.EEXIST and os.path.isdir(cache_dir):
+                pass
             else:
-                self.create_new_orthoxml(fname, [og])
+                raise
+        self.cache_dir = cache_dir
 
-    def extract_hogs_into_new_orthoxml(self, new_fn, list_hog_nr):
-        ogs = []
-        for og_etree in self.Etree_OGs:
-            if str(og_etree.get("id")) in list_hog_nr:
-                ogs.append(og_etree)
-        self.create_new_orthoxml(new_fn, ogs)
+    def __call__(self, hogs_to_extract=None, single_hog_files=True, basename=None, cache_dir=None):
+        """Split/extract hogs from orthoxml file based on root hogs ids.
+
+        Split the input orthoxml or extract a subset of root hogs. If no
+        argument is passed, one orthoxml file per root hog is created,
+        named as 'HOGxxxxxx.orthoxml', where xxxxxx is the numeric id of
+        each hog.
+
+        The set of root hogs to be extracted can be limited by specifying
+        a subset of hog ids in the hogs_to_extract parameter. If
+        single_hog_files is set to true, each of these hogs will be converted
+        into a single orthoxml file named as explained above. If single_hog_files
+        is set to false, the whole subset of hogs will be stored in one
+        orthoxml file named as specified in :param:`basename`.
+
+        The file(s) will be stored in the cache_dir folder which can be
+        specified in the constructor or overwritten as an argument in
+        this method.
+
+        :param hogs_to_extract: list or set that contains the set of root
+            hogs to be extracted. If set to None, all hogs are extracted.
+        :param bool single_hog_files: whether or not to build individual
+            orthoxml files for each hog or not.
+        :param str basename: name of the output file if a subset of hogs
+            is extracted into a single file.
+        :param str cache_dir: folder where to store the output files.
+        """
+        if cache_dir is not None:
+            self._assert_cache_dir(cache_dir)
+        elif self.cache_dir is None:
+            raise RuntimeError("cache dir to output files to is not set")
+
+        if single_hog_files:
+            if hogs_to_extract is None:
+                raise RuntimeError('useless to extract all hogs into single output file')
+            if basename is None or not isinstance(basename, str):
+                raise ValueError('basname needs to be specified')
+            ogs = [og for og in self.Etree_OGs if int(og.get("id")) in hogs_to_extract]
+            fn = os.path.join(self.cache_dir, basename)
+            logger.info("extracting {:d} hogs into {:s}".format(len(ogs), fn))
+            self.create_new_orthoxml(fn, ogs)
+        else:
+            for og in self.Etree_OGs:
+                if hogs_to_extract is None or int(og.get('id')) in hogs_to_extract:
+                    hog_nr = int(og.get("id"))
+                    hog_id = "HOG{:06d}.orthoxml".format(hog_nr)
+                    fname = os.path.join(self.cache_dir, hog_id)
+                    logger.info("extracting {} into {}", hog_id, fname)
+                    self.create_new_orthoxml(fname, [og])
 
     def get_generef_OG(self, og_node):
         return fa.OrthoXMLQuery.getGeneRefNodes(og_node, recursively=True)

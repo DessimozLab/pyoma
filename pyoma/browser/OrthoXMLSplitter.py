@@ -8,6 +8,30 @@ logger = logging.getLogger(__name__)
 
 
 class OrthoXMLSplitter(object):
+    """Convert orthoxml files with several families.
+
+    This class provides the means to extract a subset of root HOGs (i.e.
+    families) into a new output orthoxml file, or to split it and create
+    for each family an individual file.
+
+    The object should be instantiated with the input orthoxml file and
+    optionally a cache_dir argument where the output orthoxml files will
+    be stored. This later parameter can be overwritten in the __call__
+    method call that does the work.
+
+    ..note::
+
+       Calls to the splitter will remove the created families from the
+       loaded input file, so subsequent calls that contain a family in
+       common will miss them from the second call onwards.
+
+
+    :Example:
+
+      splitter = OrthoXMLSplitter("data.orthoxml", cache_dir="./splits")
+      splitter()
+
+    will create files HOGxxxxxx.orthoxml in the ./splits directory."""
 
     def __init__(self, xml_file, cache_dir=None):
         self.xml_file = xml_file
@@ -29,7 +53,7 @@ class OrthoXMLSplitter(object):
                 raise
         self.cache_dir = cache_dir
 
-    def __call__(self, hogs_to_extract=None, single_hog_files=True, basename=None, cache_dir=None):
+    def __call__(self, hogs_to_extract=None, single_hog_files=False, basename=None, cache_dir=None):
         """Split/extract hogs from orthoxml file based on root hogs ids.
 
         Split the input orthoxml or extract a subset of root hogs. If no
@@ -42,7 +66,7 @@ class OrthoXMLSplitter(object):
         single_hog_files is set to true, each of these hogs will be converted
         into a single orthoxml file named as explained above. If single_hog_files
         is set to false, the whole subset of hogs will be stored in one
-        orthoxml file named as specified in :param:`basename`.
+        orthoxml file named as specified in `basename`.
 
         The file(s) will be stored in the cache_dir folder which can be
         specified in the constructor or overwritten as an argument in
@@ -50,8 +74,8 @@ class OrthoXMLSplitter(object):
 
         :param hogs_to_extract: list or set that contains the set of root
             hogs to be extracted. If set to None, all hogs are extracted.
-        :param bool single_hog_files: whether or not to build individual
-            orthoxml files for each hog or not.
+        :param bool single_hog_files: whether or not to build one orthoxml
+            file for all the selected hogs or individual ones.
         :param str basename: name of the output file if a subset of hogs
             is extracted into a single file.
         :param str cache_dir: folder where to store the output files.
@@ -87,6 +111,12 @@ class OrthoXMLSplitter(object):
         return [self.gene_lookup[gene_id] for gene_id in genesref_ids]
 
     def create_new_orthoxml(self, fn, OGs):
+        """create a new orthoxml file for the passed orthologGroup elements.
+
+        :param fn: the filename of the output file. The path needs to exists
+            prior to calling this method.
+        :param OGs: the orthologGroup elements that should be included in the
+            new output file."""
         # Get element to store
         for og_node in OGs:
             gene_ids = [gene_ref_elem.get("id") for gene_ref_elem in self.get_generef_OG(og_node)]

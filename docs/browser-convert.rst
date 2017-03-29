@@ -29,3 +29,13 @@ Here comes now the module doc:
 .. automodule:: pyoma.browser.convert
     :members:
 
+Splitting an OrthoXML file
+--------------------------
+
+A useful tool might be OrthoXMLSplitter that can be used also outside of the conversion
+procedure. It has the following interface.
+
+.. autoclass:: pyoma.browser.OrthoXMLSplitter.OrthoXMLSplitter
+    :members:
+    :special-members: __call__
+

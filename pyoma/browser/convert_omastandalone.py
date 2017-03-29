@@ -74,8 +74,8 @@ class StandaloneExporter(DarwinExporter):
 
         # Split the OrthoXML up (puts in cache_dir/split_hog).
         hog_cache_dir = os.path.join(self.cache_dir, 'split_hogs')
-        ortho_splitter = OrthoXMLSplitter.OrthoXMLSplitter(os.path.join(hog_path, fn))
-        ortho_splitter(hog_cache_dir)
+        ortho_splitter = OrthoXMLSplitter.OrthoXMLSplitter(os.path.join(hog_path, fn), cache_dir=hog_cache_dir)
+        ortho_splitter()
 
         hogTab = self.h5.create_table('/', 'HogLevel', tablefmt.HOGsTable,
                                       'nesting structure for each HOG', expectedrows=1e8)

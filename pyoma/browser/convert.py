@@ -29,6 +29,7 @@ import fileinput
 from .. import common
 from . import locus_parser
 from . import tablefmt
+from .OrthoXMLSplitter import OrthoXMLSplitter
 
 with hooks():
     import urllib.request
@@ -453,6 +454,11 @@ class DarwinExporter(object):
         tree_filename = os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'],
             'speciestree.nwk')
+        if not os.path.exists(hog_path):
+            hog_file = os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'],
+                                    '..', 'downloads', 'oma-hogs.orthoxml.gz')
+            splitter = OrthoXMLSplitter(hog_file, cache_dir=hog_path)
+            splitter()
         hog_converter = HogConverter(entryTab)
         hog_converter.attach_newick_taxonomy(tree_filename)
         hogTab = self.h5.create_table('/', 'HogLevel', tablefmt.HOGsTable,

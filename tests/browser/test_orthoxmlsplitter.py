@@ -3,6 +3,7 @@ import unittest
 import tempfile
 import os
 import shutil
+import lxml.etree
 try:
     import unittest.mock as mock
 except ImportError:
@@ -85,3 +86,31 @@ class OrthoXMLSplitterTester(unittest.TestCase):
     def test_raises_exception_on_single_hog_files_without_filename(self):
         with self.assertRaises(ValueError):
             self.splitter(hogs_to_extract=[1, 2], single_hog_files=True)
+
+
+class OrthoXMLSplitterResultTester(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = tempfile.mkdtemp()
+        cls.infile = os.path.join(cls.tmpdir, 'input.orthoxml')
+        with open(cls.infile, 'w') as fh:
+            fh.write(TEST_ORTHXML)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmpdir)
+
+    def setUp(self):
+        self.outdir = os.path.join(self.tmpdir, 'splits')
+        self.splitter = OrthoXMLSplitter(self.infile, self.outdir)()
+
+    def load_data_of_file(self, fn):
+        xml = lxml.etree.parse(fn)
+        genes = [g.get('id') for g in xml.getroot().findall('.//{http://orthoXML.org/2011/}gene')]
+        return genes
+
+    def test_properly_split_in_hogs(self):
+        for nr in range(1, 4):
+            fn = os.path.join(self.outdir, "HOG{:06d}.orthoxml".format(nr))
+            exp = [str(nr), str(nr + 10)]
+            self.assertEqual(sorted(self.load_data_of_file(fn)), sorted(exp), "{} failed.".format(fn))

@@ -36,9 +36,13 @@ class OrthoXMLSplitter(object):
         self.xml_file = xml_file
         if cache_dir is not None:
             self._assert_cache_dir(cache_dir)
-        self.Etree_XML = etree.parse(self.xml_file)
+        logger.info('loading xml file {}...'.format(xml_file))
+        parser = etree.XMLParser(remove_blank_text=True)
+        self.Etree_XML = etree.parse(self.xml_file, parser=parser)
         self.Etree_root = self.Etree_XML.getroot()
+        logger.info('building lookup table for genes')
         self.gene_lookup = {gene.get('id'): gene for gene in self._iter_gene_elements()}
+        logger.info('init of OrthoXMLSplitter finished')
 
     def _assert_cache_dir(self, cache_dir):
         # Ensure existance of cache directory (py2 compat)
@@ -114,7 +118,7 @@ class OrthoXMLSplitter(object):
                     hog_nr = int(og.get("id"))
                     hog_id = "HOG{:06d}.orthoxml".format(hog_nr)
                     fname = os.path.join(self.cache_dir, hog_id)
-                    logger.info("extracting {} into {}", hog_id, fname)
+                    logger.info("extracting {} into {}".format(hog_id, fname))
                     self.create_new_orthoxml(fname, [og])
 
     def iter_generefs_in_og(self, og_node):

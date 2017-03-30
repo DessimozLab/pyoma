@@ -1,4 +1,3 @@
-import familyanalyzer as fa
 import lxml.etree as etree
 import os
 import errno
@@ -39,8 +38,7 @@ class OrthoXMLSplitter(object):
             self._assert_cache_dir(cache_dir)
         self.Etree_XML = etree.parse(self.xml_file)
         self.Etree_root = self.Etree_XML.getroot()
-        self.Etree_OGs = fa.OrthoXMLQuery.getToplevelOrthologGroups(self.Etree_root)
-        self.gene_lookup = {gene.get('id'): gene for gene in fa.OrthoXMLQuery.getInputGenes(self.Etree_root)}
+        self.gene_lookup = {gene.get('id'): gene for gene in self._iter_gene_elements()}
 
     def _assert_cache_dir(self, cache_dir):
         # Ensure existance of cache directory (py2 compat)
@@ -52,6 +50,22 @@ class OrthoXMLSplitter(object):
             else:
                 raise
         self.cache_dir = cache_dir
+
+    def _iter_gene_elements(self):
+        """This method is a faster version of xpath '//ns:gene'.
+
+        It iterates the element in sequential order"""
+        for node in self.Etree_root:
+            if node.tag == "{http://orthoXML.org/2011/}species":
+                for gene in node.iter('{http://orthoXML.org/2011/}gene'):
+                    yield gene
+
+    def _iter_toplevel_groups(self):
+        """This method yields all the root hogs sequentially."""
+        for node in self.Etree_root:
+            if node.tag == "{http://orthoXML.org/2011/}groups":
+                for root_hog in node:
+                    yield root_hog
 
     def __call__(self, hogs_to_extract=None, single_hog_files=False, basename=None, cache_dir=None):
         """Split/extract hogs from orthoxml file based on root hogs ids.
@@ -90,12 +104,12 @@ class OrthoXMLSplitter(object):
                 raise RuntimeError('useless to extract all hogs into single output file')
             if basename is None or not isinstance(basename, str):
                 raise ValueError('basname needs to be specified')
-            ogs = [og for og in self.Etree_OGs if int(og.get("id")) in hogs_to_extract]
+            ogs = [og for og in self._iter_toplevel_groups() if int(og.get("id")) in hogs_to_extract]
             fn = os.path.join(self.cache_dir, basename)
             logger.info("extracting {:d} hogs into {:s}".format(len(ogs), fn))
             self.create_new_orthoxml(fn, ogs)
         else:
-            for og in self.Etree_OGs:
+            for og in self._iter_toplevel_groups():
                 if hogs_to_extract is None or int(og.get('id')) in hogs_to_extract:
                     hog_nr = int(og.get("id"))
                     hog_id = "HOG{:06d}.orthoxml".format(hog_nr)
@@ -103,8 +117,9 @@ class OrthoXMLSplitter(object):
                     logger.info("extracting {} into {}", hog_id, fname)
                     self.create_new_orthoxml(fname, [og])
 
-    def get_generef_OG(self, og_node):
-        return fa.OrthoXMLQuery.getGeneRefNodes(og_node, recursively=True)
+    def iter_generefs_in_og(self, og_node):
+        for node in og_node.iterchildren('{http://orthoXML.org/2011/}geneRef'):
+            yield node
 
     def get_gene_via_generef(self, genesref_ids):
         genesref_ids = set(genesref_ids)
@@ -119,7 +134,7 @@ class OrthoXMLSplitter(object):
             new output file."""
         # Get element to store
         for og_node in OGs:
-            gene_ids = [gene_ref_elem.get("id") for gene_ref_elem in self.get_generef_OG(og_node)]
+            gene_ids = [gene_ref_elem.get("id") for gene_ref_elem in self.iter_generefs_in_og(og_node)]
         gene_els = self.get_gene_via_generef(gene_ids)
 
         # Get all information to store

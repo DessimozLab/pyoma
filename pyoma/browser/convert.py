@@ -782,14 +782,28 @@ class XRefImporter(object):
         self.desc_manager = desc_manager
 
         xrefEnum = tablefmt.XRefTable.columns.get('XRefSource').enum
-        for tag in ['GI', 'EntrezGene', 'WikiGene', 'IPI']:
+        tag_to_enums = {
+            'GI': xrefEnum['GI'],
+            'EntrezGene': xrefEnum['EntrezGene'],
+            'WikiGene': xrefEnum['WikiGene'],
+            'IPI': xrefEnum['IPI'],
+            'Refseq_ID': xrefEnum['RefSeq'],
+            'SwissProt': xrefEnum['UniProtKB/SwissProt'],
+            'GeneName': xrefEnum['Gene Name'],
+            'ORFNames': xrefEnum['ORF Name'],
+            'OrderedLocusNames': xrefEnum['Ordered Locus Name'],
+            'ProtName': xrefEnum['Protein Name'],
+            'Synonyms': xrefEnum['Synonym'],
+            'HGNC_Id': xrefEnum['HGNC'],
+            'PMP': xrefEnum['PMP'],
+            'EMBL': xrefEnum['EMBL'],
+            'ID': xrefEnum['SourceID'],
+            'AC': xrefEnum['SourceAC']
+        }
+        for tag, enumval in tag_to_enums.items():
             db_parser.add_tag_handler(
                 tag,
-                lambda key, enr, typ=xrefEnum[tag]: self.multi_key_handler(key, enr, typ))
-        db_parser.add_tag_handler('Refseq_ID',
-                                  lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['RefSeq']))
-        db_parser.add_tag_handler('SwissProt',
-                                  lambda key, enr: self.key_value_handler(key, enr, xrefEnum['UniProtKB/SwissProt']))
+                lambda key, enr, typ=enumval: self.multi_key_handler(key, enr, typ))
         db_parser.add_tag_handler('DE',
                                   lambda key, enr: self.description_handler(key, enr))
         db_parser.add_tag_handler('GO', self.go_handler)
@@ -797,14 +811,6 @@ class XRefImporter(object):
         db_parser.add_tag_handler('AC', self.assign_source_handler)
         db_parser.add_tag_handler('EC', self.ec_handler)
 
-        db_parser.add_tag_handler('ID',
-                                  lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['SourceID']))
-        db_parser.add_tag_handler('AC',
-                                  lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['SourceAC']))
-        for tag in ['PMP', 'EMBL']:
-            db_parser.add_tag_handler(
-                tag,
-                lambda key, enr, typ=xrefEnum[tag]: self.multi_key_handler(key, enr, typ))
         for tag in ['SwissProt_AC', 'UniProt']:  # UniProt/TrEMBL tag is cut to UniProt!
             db_parser.add_tag_handler(tag,
                                       lambda key, enr, typ=xrefEnum['UniProtKB/TrEMBL']:

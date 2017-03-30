@@ -72,7 +72,9 @@ class XRefTable(tables.IsDescription):
         tables.Enum(['UniProtKB/SwissProt', 'UniProtKB/TrEMBL', 'n/a', 'EMBL',
                      'Ensembl Gene', 'Ensembl Transcript', 'Ensembl Protein',
                      'RefSeq', 'EntrezGene', 'GI', 'WikiGene', 'IPI',
-                     'SourceID', 'SourceAC', 'PMP', 'NCBI', 'FlyBase']),
+                     'SourceID', 'SourceAC', 'PMP', 'NCBI', 'FlyBase',
+                     'HGNC', 'Gene Name', 'Synonym', 'Protein Name',
+                     'ORF Name', 'Ordered Locus Name']),
         'n/a', base='uint8', pos=2)
     XRefId = tables.StringCol(50, pos=3)
 

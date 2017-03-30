@@ -990,9 +990,10 @@ def main(name="OmaServer.h5"):
     x.add_hogs()
     x.add_xrefs()
     x.add_domain_info(only_pfam_or_cath_domains(
-        iter_domains('ftp://ftp.biochem.ucl.ac.uk/pub/gene3d_data/CURRENT_RELEASE/mdas.csv.gz')))
+        iter_domains('http://download.cathdb.info/gene3d/CURRENT_RELEASE/mdas.csv.gz')))
     x.add_domainname_info(itertools.chain(
-        CathDomainNameParser('ftp://ftp.biochem.ucl.ac.uk/pub/cath/latest_release/CathNames').parse(),
+        CathDomainNameParser('http://download.cathdb.info/cath/releases/latest-release/'
+                             'cath-classification-data/cath-names.txt').parse(),
         PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
     x.add_canonical_id()
     x.close()

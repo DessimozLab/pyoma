@@ -122,7 +122,7 @@ class OrthoXMLSplitter(object):
                     self.create_new_orthoxml(fname, [og])
 
     def iter_generefs_in_og(self, og_node):
-        for node in og_node.iterchildren('{http://orthoXML.org/2011/}geneRef'):
+        for node in og_node.iterdescendants('{http://orthoXML.org/2011/}geneRef'):
             yield node
 
     def get_gene_via_generef(self, genesref_ids):

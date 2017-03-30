@@ -15,11 +15,11 @@ class XRefParsingTest(unittest.TestCase):
     def setUp(self):
         self.data = io.StringIO(
             """<E><ID>ENSG00000204640</ID><AC>ENSP00000366061; ENST00000376865</AC><DE>hypotetical protein</DE><GI>125233342</GI><UniProt/TrEMBL>P21522</UniProt/TrEMBL></E>
-            <E><ID>BLA22; BLABLA22.Rep22</ID><AC>BLA22.1</AC><EntrezGene>32244</EntrezGene><PMP>P21122; Q24S32</PMP><GO>GO:0006270@[[IDA,{'PMID:2167836'}],[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]; GO:0006275@[[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]</GO></E>
+            <E><ID>BLA22; BLABLA22.Rep22</ID><AC>BLA22.1</AC><EC>3.2.2.-; 4.2.99.18</EC><EntrezGene>32244</EntrezGene><PMP>P21122; Q24S32</PMP><GO>GO:0006270@[[IDA,{'PMID:2167836'}],[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]; GO:0006275@[[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]</GO></E>
             <E><UniProt/TrEMBL>L8ECQ9_BACSU</UniProt/TrEMBL><SwissProt_AC>Q6CI62</SwissProt_AC><SwissProt>ASF1_YARLI</SwissProt><ID>FBgn0218776</ID><AC>FBpp0245919; FBtr0247427</AC><DE>β-hemoglobin</DE><GO></GO></E>""")
         self.db_parser = pyoma.DarwinDbEntryParser()
         self.desc_manager = mock.Mock()
-        self.importer = pyoma.XRefImporter(self.db_parser, None, None, self.desc_manager)
+        self.importer = pyoma.XRefImporter(self.db_parser, None, None, None, self.desc_manager)
 
     def test_standard_handler(self):
         self.db_parser.parse_entrytags(self.data)
@@ -48,6 +48,11 @@ class XRefParsingTest(unittest.TestCase):
         self.db_parser.parse_entrytags(self.data)
         self.assertIn((2, 6270, 'IDA', b'PMID:2167836'), self.importer.go)
         self.assertIn((2, 6275, 'IEA', b'OMA_Fun:001'), self.importer.go)
+
+    def test_ec(self):
+        self.db_parser.parse_entrytags(self.data)
+        self.assertIn((2, '3.2.2.-'), self.importer.ec)
+        self.assertIn((2, '4.2.99.18'), self.importer.ec)
 
     def test_disambiguate(self):
         self.db_parser.parse_entrytags(self.data)

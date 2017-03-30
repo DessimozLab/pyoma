@@ -506,15 +506,17 @@ class DarwinExporter(object):
         return os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'], 'ServerIndexed.db')
 
     def add_xrefs(self):
-        self.logger.info('start extracting XRefs and GO annotations')
+        self.logger.info('start extracting XRefs, EC and GO annotations')
         db_parser = DarwinDbEntryParser()
         xref_tab = self.h5.create_table('/', 'XRef', tablefmt.XRefTable,
                                         'Cross-references of proteins to external ids / descriptions',
                                         expectedrows=1e8)
         go_tab = self.h5.create_table('/', 'GeneOntology', tablefmt.GeneOntologyTable,
                                       'Gene Ontology annotations', expectedrows=1e8)
+        ec_tab = self.h5.create_table('/', 'EC', tablefmt.ECTable, 'Enzyme Commission annotations',
+                                      expectedrows=1e7)
         with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
-            xref_importer = XRefImporter(db_parser, xref_tab, go_tab, de_man)
+            xref_importer = XRefImporter(db_parser, xref_tab, go_tab, ec_tab, de_man)
             files = self.xref_databases()
             dbs_iter = fileinput.input(files=files)
             db_parser.parse_entrytags(dbs_iter)
@@ -547,6 +549,10 @@ class DarwinExporter(object):
         goTab = self.h5.get_node('/GeneOntology')
         goTab.cols.EntryNr.create_csindex()
         goTab.cols.TermNr.create_index()
+
+        self.logger.info('creating index for EC (EntryNr)')
+        ec_tab = self.h5.get_node('/EC')
+        ec_tab.cols.EntryNr.create_csindex()
 
         self.logger.info('creating index for domains (EntryNr)')
         domtab = self.h5.get_node('/Annotations/Domains')
@@ -766,11 +772,13 @@ class HogConverter(object):
 
 
 class XRefImporter(object):
-    def __init__(self, db_parser, xref_tab, go_tab, desc_manager):
+    def __init__(self, db_parser, xref_tab, go_tab, ec_tab, desc_manager):
         self.xrefs = []
         self.go = []
+        self.ec = []
         self.xref_tab = xref_tab
         self.go_tab = go_tab
+        self.ec_tab = ec_tab
         self.desc_manager = desc_manager
 
         xrefEnum = tablefmt.XRefTable.columns.get('XRefSource').enum
@@ -787,6 +795,7 @@ class XRefImporter(object):
         db_parser.add_tag_handler('GO', self.go_handler)
         db_parser.add_tag_handler('ID', self.assign_source_handler)
         db_parser.add_tag_handler('AC', self.assign_source_handler)
+        db_parser.add_tag_handler('EC', self.ec_handler)
 
         db_parser.add_tag_handler('ID',
                                   lambda key, enr: self.multi_key_handler(key, enr, xrefEnum['SourceID']))
@@ -808,15 +817,19 @@ class XRefImporter(object):
         self.NCBI_RE = re.compile(r'[A-Z]{3}\d{5}\.\d$')
         self.GO_RE = re.compile(r'GO:(?P<termNr>\d{7})')
         self.quote_re = re.compile(r'([[,])([\w_:]+)([,\]])')
+        self.EC_RE = re.compile(r'\d+\.(\d+|-)\.(\d+|-)\.(\d+|-)')
 
     def flush_buffers(self):
-        common.package_logger.info('flushing xrefs, go and description buffers')
+        common.package_logger.info('flushing xrefs, go, ec and description buffers')
         if len(self.xrefs) > 0:
             self.xref_tab.append(self.xrefs)
             self.xrefs = []
         if len(self.go) > 0:
             self.go_tab.append(self.go)
             self.go = []
+        if len(self.ec) > 0:
+            self.ec_tab.append(self.ec)
+            self.ec = []
 
     def _add_to_xrefs(self, eNr, enum_nr, key):
         if not isinstance(eNr, int):
@@ -882,6 +895,13 @@ class XRefImporter(object):
                     self.go.append((enr, termNr, evi, ref.encode('utf-8')))
             if len(self.go) > 5e6:
                 self.flush_buffers()
+
+    def ec_handler(self, ecs, enr):
+        for t in ecs.split('; '):
+            t = t.strip()
+            acc_match = self.EC_RE.match(t)
+            if acc_match is not None:
+                self.ec.append((enr, acc_match.group(0)))
 
     def description_handler(self, de, eNr):
         self.desc_manager.add_description(eNr, de)

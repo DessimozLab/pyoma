@@ -84,6 +84,11 @@ class GeneOntologyTable(tables.IsDescription):
     Reference = tables.StringCol(255, pos=4)
 
 
+class ECTable(tables.IsDescription):
+    EntryNr = tables.UInt32Col(pos=1)
+    ECacc = tables.StringCol(16, pos=2)
+
+
 class GenomeTable(tables.IsDescription):
     NCBITaxonId = tables.UInt32Col(pos=0)
     UniProtSpeciesCode = tables.StringCol(5, pos=1)

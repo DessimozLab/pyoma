@@ -456,7 +456,7 @@ class DarwinExporter(object):
             'speciestree.nwk')
         if not os.path.exists(hog_path):
             hog_file = os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'],
-                                    '..', 'downloads', 'oma-hogs.orthoxml.gz')
+                                    '..', 'downloads', 'oma-hogs.orthoXML.gz')
             splitter = OrthoXMLSplitter(hog_file, cache_dir=hog_path)
             splitter()
         hog_converter = HogConverter(entryTab)

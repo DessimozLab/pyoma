@@ -1,13 +1,17 @@
 from __future__ import absolute_import, unicode_literals, print_function, division
+
+import gzip
 import unittest
 import os
 import shutil
 import tempfile
 import json
 import numpy
+import csv
 from hashlib import md5
 import pyoma.browser.tablefmt as tablefmt
-from pyoma.browser.convert import callDarwinExport, DarwinExporter, compute_ortholog_types
+from pyoma.browser.convert import callDarwinExport, DarwinExporter, compute_ortholog_types,\
+    load_tsv_to_numpy
 
 
 def store_in_json(data, fn):
@@ -139,3 +143,40 @@ class OrthologyTypeTester(unittest.TestCase):
     def tearDown(self):
         self.exp.close()
         shutil.rmtree(self._tmpdir)
+
+
+class TSVOrthologyFileTester(unittest.TestCase):
+    def setUp(self):
+        with tempfile.NamedTemporaryFile(suffix=".gz", delete=False) as fh:
+            self.datafile = fh.name
+
+    def tearDown(self):
+        try:
+            os.remove(self.datafile)
+        except OSError:
+            pass
+
+    def put_test_data(self, data):
+        with gzip.open(self.datafile, mode='wt', compresslevel=6) as cmp:
+            writer = csv.writer(cmp, delimiter='\t')
+            for row in data:
+                writer.writerow(row)
+
+    def test_regular_example(self):
+        data = [(1, 1, 12421, '1:1', .99, 1.523),
+                (2, 5, 21214, 'n:1', .94, 12.14),
+                (3, 5, 23552, 'n:1', .91, 21.2)]
+        self.put_test_data(data)
+        res = load_tsv_to_numpy((self.datafile, 0, 100, False))
+        self.assertEqual(3, res.size)
+        self.assertTrue((numpy.arange(1, 4) == res['EntryNr1']).all())
+        self.assertTrue((numpy.array((101, 105, 105)) == res['EntryNr2']).all())
+        self.assertTrue((numpy.array((0, 2, 2)) == res['RelType']).all())
+        self.assertTrue(((res['Distance'] > 0) & (res['Distance'] < 22)).all())
+        self.assertTrue(((res['AlignmentOverlap'] > 0.9) & (res['AlignmentOverlap'] <= 1)).all())
+
+    def test_empty_file(self):
+        self.put_test_data([])
+        res = load_tsv_to_numpy((self.datafile, 0, 0, False))
+        self.assertEqual(0, res.size)
+

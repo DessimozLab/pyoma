@@ -91,6 +91,18 @@ def silentremove(filename):
             raise  # re-raise exception if a different error occured
 
 
+def gz_is_empty(fname):
+    """Test if gzip file fname is empty
+
+    Return True if the uncompressed data in fname has zero length
+    or if fname itself has zero length
+    Raises OSError if fname has non-zero length and is not a gzip file
+    """
+    with gzip.open(fname, 'rb') as f:
+        data = f.read(1)
+    return len(data) == 0
+
+
 def load_tsv_to_numpy(args):
     fn, off1, off2, swap = args
     relEnum = tablefmt.PairwiseRelationTable.columns['RelType'].enum._names
@@ -102,6 +114,8 @@ def load_tsv_to_numpy(args):
              ('AlignmentOverlap', 'f2'), ('Distance', 'f4')]
     for curNr, curFn in enumerate([fn, fn.replace('.ext.', '.')]):
         try:
+            if gz_is_empty(curFn):
+                return numpy.empty(0, dtype=tables.dtype_from_descr(tablefmt.PairwiseRelationTable))
             with gzip.GzipFile(curFn) as fh:
                 augData = numpy.genfromtxt(fh, dtype=dtype,
                                            names=[_[0] for _ in dtype],

@@ -462,8 +462,8 @@ class DarwinExporter(object):
 
     def add_hogs(self):
         hog_path = os.path.normpath(os.path.join(
-            os.environ['DARWIN_BROWSERDATA_PATH'],
-            '..', 'downloads', 'HOGs'))
+            os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
+            'pyoma', 'split_hogs'))
         entryTab = self.h5.get_node('/Protein/Entries')
         tree_filename = os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'],

@@ -156,9 +156,9 @@ class TSVOrthologyFileTester(unittest.TestCase):
         except OSError:
             pass
 
-    def put_test_data(self, data):
+    def put_data_in_file(self, data):
         with gzip.open(self.datafile, mode='wt', compresslevel=6) as cmp:
-            writer = csv.writer(cmp, delimiter='\t')
+            writer = csv.writer(cmp, delimiter=str('\t'))
             for row in data:
                 writer.writerow(row)
 
@@ -166,7 +166,7 @@ class TSVOrthologyFileTester(unittest.TestCase):
         data = [(1, 1, 12421, '1:1', .99, 1.523),
                 (2, 5, 21214, 'n:1', .94, 12.14),
                 (3, 5, 23552, 'n:1', .91, 21.2)]
-        self.put_test_data(data)
+        self.put_data_in_file(data)
         res = load_tsv_to_numpy((self.datafile, 0, 100, False))
         self.assertEqual(3, res.size)
         self.assertTrue((numpy.arange(1, 4) == res['EntryNr1']).all())
@@ -176,7 +176,7 @@ class TSVOrthologyFileTester(unittest.TestCase):
         self.assertTrue(((res['AlignmentOverlap'] > 0.9) & (res['AlignmentOverlap'] <= 1)).all())
 
     def test_empty_file(self):
-        self.put_test_data([])
+        self.put_data_in_file([])
         res = load_tsv_to_numpy((self.datafile, 0, 0, False))
         self.assertEqual(0, res.size)
 

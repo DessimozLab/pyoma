@@ -31,7 +31,7 @@ setup(
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
     ],
-    scripts=['bin/oma2hdf'],
+    scripts=['bin/importdata.py', 'bin/oma2hdf'],
     package_data={'pyoma': ['browser/*.drw']},
     install_requires=req_packages,
 )

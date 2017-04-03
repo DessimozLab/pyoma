@@ -1,3 +1,5 @@
+from __future__ import unicode_literals, division
+from builtins import str
 import lxml.etree as etree
 import os
 import errno
@@ -106,8 +108,8 @@ class OrthoXMLSplitter(object):
         if single_hog_files:
             if hogs_to_extract is None:
                 raise RuntimeError('useless to extract all hogs into single output file')
-            if basename is None or not isinstance(basename, str):
-                raise ValueError('basname needs to be specified')
+            if basename is None or not isinstance(basename, (str, bytes)):
+                raise ValueError('basename needs to be specified: {}'.format(basename))
             ogs = [og for og in self._iter_toplevel_groups() if int(og.get("id")) in hogs_to_extract]
             fn = os.path.join(self.cache_dir, basename)
             logger.info("extracting {:d} hogs into {:s}".format(len(ogs), fn))

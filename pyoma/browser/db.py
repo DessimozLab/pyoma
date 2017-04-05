@@ -35,6 +35,7 @@ class Database(object):
 
     def __init__(self, db):
         if isinstance(db, str):
+            logger.info('opening {} for read-only'.format(db))
             self.db = tables.open_file(db, 'r')
         elif isinstance(db, tables.File):
             self.db = db
@@ -46,6 +47,7 @@ class Database(object):
         except AttributeError:
             db_version = "1.0"
 
+        logger.info('database version: {}'.format(db_version))
         if db_version != self.EXPECTED_DB_SCHEMA:
             raise DBVersionError('Unsupported database version: {} != {} ({})'
                                  .format(db_version, self.EXPECTED_DB_SCHEMA, self.db.filename))

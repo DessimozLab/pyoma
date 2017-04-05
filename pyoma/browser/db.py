@@ -56,7 +56,7 @@ class Database(object):
         self.id_mapper = IdMapperFactory(self)
         self.tax = Taxonomy(self.db.root.Taxonomy.read())
 
-        self._re_fam = re.compile(r'HOG:(?P<fam>\d{7,})')
+        self._re_fam = re.compile(b'HOG:(?P<fam>\d+)')
 
     def get_hdf5_handle(self):
         """return the handle to the database hdf5 file"""
@@ -191,7 +191,7 @@ class Database(object):
 
     def hog_family(self, entry):
         entry = self.ensure_entry(entry)
-        m = self._re_fam.match(entry['OmaHOG'].decode())
+        m = self._re_fam.match(entry['OmaHOG'])
         if m is None:
             raise Singleton(entry)
         return int(m.group('fam'))

@@ -55,8 +55,9 @@ class Database(object):
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
         self.tax = Taxonomy(self.db.root.Taxonomy.read())
-
-        self._re_fam = re.compile(b'HOG:(?P<fam>\d+)')
+        self._re_fam = None
+        self._hog_fmt = None
+        self._set_hogid_schema()
 
     def get_hdf5_handle(self):
         """return the handle to the database hdf5 file"""
@@ -95,6 +96,34 @@ class Database(object):
                 raise ValueError("there are {} entries with entry_nr {}".format(len(entry), entry_nr))
             entry = entry[0]
         return entry
+
+    def _set_hogid_schema(self):
+        """Determines the used HOG ID schema
+
+        Some versions of the database have HOG IDs of the form
+        "HOG:0000001" and others without the prefix (e.g. standalone)
+        or with the prefix, but without padding. This method checks
+        which schema is used and sets the appropriate member vars
+        """
+        re_id = re.compile(b'(?P<prefix>HOG:)(?P<nr>\d+)')
+        for entry in self.db.root.Protein.Entries.iterrow():
+            m = re_id.match(entry['OmaHOG'])
+            if m is None:
+                continue
+            nr = m.group('nr')
+            if len(nr) >= 7 and not nr.startswith(b'0'):
+                continue  # a case where we cannot determine if padded nr
+            is_padded = nr.startswith(b'0')
+            prefix = m.group('prefix').decode()
+            if prefix is None:
+                prefix = ''
+            fmt = "{}{{:{}d}}".format(prefix, "07" if is_padded else "")
+            self._re_fam = re.compile('{}(?P<fam>\d{})'
+                                      .format(prefix, "{7,}" if is_padded else "+")
+                                      .encode('ascii'))
+            self._hog_fmt = lambda fam: fmt.format(fam)
+            return
+        raise DBConsistencyError('no protein in a hog')
 
     def _get_vptab(self, entry_nr):
         return self._get_pw_tab(entry_nr, 'VPairs')
@@ -269,7 +298,7 @@ class Database(object):
         """returns an array of protein entries which belong to a given fam"""
         if not isinstance(fam, (int, numpy.number)):
             raise ValueError('expect a numeric family id')
-        return self.member_of_hog_id('HOG:{:07d}'.format(fam))
+        return self.member_of_hog_id(self._hog_fmt.format(fam))
 
     def hog_members(self, entry, level):
         """get hog members with respect to a given taxonomic level.

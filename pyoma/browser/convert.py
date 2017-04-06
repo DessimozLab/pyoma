@@ -760,7 +760,7 @@ class HogConverter(object):
     def _assert_hogid_has_correct_prefix(self, fa_parser):
         for grp in fa_parser.getToplevelGroups():
             if not grp.get('id').startswith('HOG:'):
-                grp.set('id', 'HOG:{:d}'.format(int(grp.get('id'))))
+                grp.set('id', 'HOG:{:07d}'.format(int(grp.get('id'))))
 
     def convert_file(self, fn):
         p = familyanalyzer.OrthoXMLParser(fn)

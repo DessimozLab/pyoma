@@ -47,6 +47,11 @@ class ProteinEntryTests(unittest.TestCase):
         self.assertLessEqual(protein_entry.ec_content, 1)
         self.assertGreaterEqual(protein_entry.ec_content, 0)
 
+    def test_example_ec_content(self):
+        protein_entry = models.ProteinEntry.from_entry_nr(self.db, 12)
+        protein_entry.cdna = "GCGAATAT"
+        self.assertAlmostEqual(protein_entry.ec_content, 3.0/8.0)
+
 
 class SingletonTests(unittest.TestCase):
 

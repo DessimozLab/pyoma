@@ -1,3 +1,5 @@
+from __future__ import division, unicode_literals
+
 def format_sciname(sci, short=False):
     p = set([sci.find(x) for x in ['(', 'serogroup', 'serotype', 'serovar',
                                    'biotype', 'subsp', 'pv.', 'bv.']])

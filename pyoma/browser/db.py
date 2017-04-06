@@ -106,7 +106,7 @@ class Database(object):
         which schema is used and sets the appropriate member vars
         """
         re_id = re.compile(b'(?P<prefix>HOG:)(?P<nr>\d+)')
-        for entry in self.db.root.Protein.Entries.iterrow():
+        for entry in self.db.root.Protein.Entries:
             m = re_id.match(entry['OmaHOG'])
             if m is None:
                 continue

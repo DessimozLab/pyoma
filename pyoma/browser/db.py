@@ -56,7 +56,7 @@ class Database(object):
         self.id_mapper = IdMapperFactory(self)
         self.tax = Taxonomy(self.db.root.Taxonomy.read())
         self._re_fam = None
-        self._hog_fmt = None
+        self.format_hogid = None
         self._set_hogid_schema()
 
     def get_hdf5_handle(self):
@@ -121,7 +121,7 @@ class Database(object):
             self._re_fam = re.compile('{}(?P<fam>\d{})'
                                       .format(prefix, "{7,}" if is_padded else "+")
                                       .encode('ascii'))
-            self._hog_fmt = lambda fam: fmt.format(fam)
+            self.format_hogid = lambda fam: fmt.format(fam)
             logger.info("setting HOG ID schema: re_fam: {}, hog_fmt: {}"
                         .format(self._re_fam, fmt))
             return
@@ -300,7 +300,7 @@ class Database(object):
         """returns an array of protein entries which belong to a given fam"""
         if not isinstance(fam, (int, numpy.number)):
             raise ValueError('expect a numeric family id')
-        return self.member_of_hog_id(self._hog_fmt.format(fam))
+        return self.member_of_hog_id(self.format_hogid(fam))
 
     def hog_members(self, entry, level):
         """get hog members with respect to a given taxonomic level.

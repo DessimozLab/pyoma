@@ -122,6 +122,8 @@ class Database(object):
                                       .format(prefix, "{7,}" if is_padded else "+")
                                       .encode('ascii'))
             self._hog_fmt = lambda fam: fmt.format(fam)
+            logger.info("setting HOG ID schema: re_fam: {}, hog_fmt: {}"
+                        .format(self._re_fam, fmt))
             return
         raise DBConsistencyError('no protein in a hog')
 

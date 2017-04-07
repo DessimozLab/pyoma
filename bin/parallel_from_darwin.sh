@@ -2,6 +2,7 @@
 
 NProc=${1:-25}
 doVPS="${2:-false}"
+overwrite="${3:-true}"
 echo "Running with $NProc procs, doVPS=$doVPS"
 
 
@@ -15,17 +16,27 @@ for i in $(eval echo {1..${NProc}}) ; do
     pInf := DetectParallelInfo();
     if pInf['ProcNr']=1 then
         outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/gs.json';
-        GetGenomeData();
+        if $overwrite or length(FileStat(outfn))=0 then
+            GetGenomeData();
+        fi:
     fi:
     for g in genomes do
         if IsMyJob(pInf, g) then
             outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/prots/'.g.'.json';
-            GetProteinsForGenome(g);
+            if $overwrite or length(FileStat(outfn))=0 then
+                GetProteinsForGenome(g); 
+            fi:
+            
             outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/cps/'.g.'.json';
-            GetSameSpeciesRelations(g);
+            if $overwrite or length(FileStat(outfn))=0 then
+                GetSameSpeciesRelations(g); 
+            fi:
+            
             if $doVPS=true then 
                 outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/vps/'.g.'.json';
-                GetVPsForGenome(g);
+                if $overwrite or length(FileStat(outfn))=0 then
+                     GetVPsForGenome(g); 
+                fi:
             fi:
         fi:
     od:

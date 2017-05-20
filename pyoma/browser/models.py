@@ -142,6 +142,10 @@ class Genome(object):
 
     def strain(self):
         return self.species_and_strain_as_dict['strain']
+    
+    @property
+    def totEntries(self):
+        return int(self._genome['TotEntries'])
 
     @LazyProperty
     def kingdom(self):

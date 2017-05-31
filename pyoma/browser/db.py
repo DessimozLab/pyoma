@@ -482,7 +482,7 @@ class IDResolver(object):
 class Taxonomy(object):
     """Taxonomy provides an interface to navigate the taxonomy data.
 
-    The input data is the same as what is stored in the Database in 
+    The input data is the same as what is stored in the Database in
     table "/Taxonomy"."""
 
     def __init__(self, data):
@@ -631,6 +631,8 @@ class Taxonomy(object):
 
         Note: as many newick parsers do not support quoted labels,
         the method instead replaces spaces with underscores."""
+        def newick_enc(s):
+            return s.translate({ord(' '): '_', ord('('): '[', ord(')'): ']'})
 
         def _rec_newick(node):
             children = []
@@ -638,10 +640,10 @@ class Taxonomy(object):
                 children.append(_rec_newick(child))
 
             if len(children) == 0:
-                return node['Name'].decode().replace(' ', '_')
+                return newick_enc(node['Name'].decode())
             else:
                 t = ",".join(children)
-                return '(' + t + ')' + node['Name'].decode().replace(' ', '_')
+                return '(' + t + ')' + newick_enc(node['Name'].decode())
 
         return _rec_newick(self._get_root_taxon())
 

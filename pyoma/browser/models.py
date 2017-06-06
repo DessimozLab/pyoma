@@ -147,6 +147,10 @@ class Genome(object):
     def totEntries(self):
         return int(self._genome['TotEntries'])
 
+    @property
+    def EntryOff(self):
+        return int(self._genome['EntryOff'])
+
     @LazyProperty
     def kingdom(self):
         # TODO: store directly in db

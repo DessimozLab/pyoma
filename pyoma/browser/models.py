@@ -77,6 +77,10 @@ class ProteinEntry(object):
         return self._entry['OmaHOG'].decode()
 
     @property
+    def chromosome(self):
+        return self._entry['Chromosome'].decode()
+
+    @property
     def canonicalid(self):
         return self._entry['CanonicalId'].decode()
 

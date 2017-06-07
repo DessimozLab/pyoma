@@ -69,6 +69,10 @@ class ProteinEntry(object):
         return int(self._entry['EntryNr'])
 
     @property
+    def locus_start(self):
+        return int(self._entry['LocusStart'])
+
+    @property
     def oma_group(self):
         return int(self._entry['OmaGroup'])
 

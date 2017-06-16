@@ -27,7 +27,7 @@ class OrthoXmlHogTable(tables.IsDescription):
 
 class ProteinTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
-    SeqBufferOffset = tables.UInt32Col(pos=2)
+    SeqBufferOffset = tables.UInt64Col(pos=2)
     SeqBufferLength = tables.UInt32Col(pos=3)
     OmaGroup = tables.UInt32Col(pos=4, dflt=0)
     OmaHOG = tables.StringCol(255, pos=5, dflt=b"")
@@ -37,7 +37,7 @@ class ProteinTable(tables.IsDescription):
     LocusStrand = tables.Int8Col(pos=9, dflt=1)
     AltSpliceVariant = tables.Int32Col(pos=10, dflt=0)
     CanonicalId = tables.StringCol(20, pos=11, dflt=b"")
-    CDNABufferOffset = tables.UInt32Col(pos=12)
+    CDNABufferOffset = tables.UInt64Col(pos=12)
     CDNABufferLength = tables.UInt32Col(pos=13)
     MD5ProteinHash = tables.StringCol(32, pos=14)
     DescriptionOffset = tables.UInt32Col(pos=15)

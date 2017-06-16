@@ -219,7 +219,7 @@ def compute_ortholog_types(data, genome_offs):
 
 
 class DarwinExporter(object):
-    DB_SCHEMA_VERSION = '2.0'
+    DB_SCHEMA_VERSION = '3.0'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
 
     def __init__(self, path, logger=None, mode=None):

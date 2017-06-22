@@ -1,0 +1,156 @@
+format-version: 1.2
+data-version: dummy-test/2017-04-18
+subsetdef: goslim_chembl "ChEMBL protein targets summary"
+subsetdef: goslim_generic "Generic GO slim"
+default-namespace: gene_ontology
+remark: cvs version: use data-version
+remark: Includes Ontology(OntologyID(OntologyIRI(<http://purl.obolibrary.org/obo/go/never_in_taxon.owl>))) [Axioms: 18 Logical Axioms: 0]
+ontology: go
+
+[Term]
+id: GO:0000003
+name: reproduction
+namespace: biological_process
+alt_id: GO:0019952
+alt_id: GO:0050876
+def: "The production of new individuals that contain some portion of genetic material inherited from one or more parent organisms." [GOC:go_curators, GOC:isa_complete, GOC:jl, ISBN:0198506732]
+subset: goslim_agr
+subset: goslim_chembl
+subset: goslim_generic
+subset: goslim_pir
+subset: goslim_plant
+subset: gosubset_prok
+synonym: "reproductive physiological process" EXACT []
+xref: Wikipedia:Reproduction
+is_a: GO:0008150 ! biological_process
+
+[Term]
+id: GO:0003674
+name: molecular_function
+namespace: molecular_function
+alt_id: GO:0005554
+def: "Elemental activities, such as catalysis or binding, describing the actions of a gene product at the molecular level. A given gene product may exhibit one or more molecular functions." [GOC:go_curators]
+comment: Note that, in addition to forming the root of the molecular function ontology, this term is recommended for use for the annotation of gene products whose molecular function is unknown. Note that when this term is used for annotation, it indicates that no information was available about the molecular function of the gene product annotated as of the date the annotation was made; the evidence code ND, no data, is used to indicate this. Despite its name, this is not a type of 'function' in the sense typically defined by upper ontologies such as Basic Formal Ontology (BFO). It is instead a BFO:process carried out by a single gene product or complex.
+synonym: "molecular function" EXACT []
+
+[Term]
+id: GO:0003822
+name: obsolete MHC-interacting protein
+namespace: molecular_function
+def: "OBSOLETE (was not defined before being made obsolete)." [GOC:mah]
+comment: This term was made obsolete because it represents a gene product.
+synonym: "MHC-interacting protein" EXACT []
+is_obsolete: true
+
+[Term]
+id: GO:0003824
+name: catalytic activity
+namespace: molecular_function
+def: "Catalysis of a biochemical reaction at physiological temperatures. In biologically catalyzed reactions, the reactants are known as substrates, and the catalysts are naturally occurring macromolecular substances known as enzymes. Enzymes possess specific binding sites for substrates, and are usually composed wholly or largely of protein, but RNA that has catalytic activity (ribozyme) is often also regarded as enzymatic." [GOC:vw, ISBN:0198506732]
+subset: goslim_agr
+subset: goslim_chembl
+subset: goslim_metagenomics
+subset: goslim_pir
+subset: goslim_plant
+subset: gosubset_prok
+synonym: "enzyme activity" EXACT [GOC:dph, GOC:tb]
+xref: Wikipedia:Enzyme
+is_a: GO:0003674 ! molecular_function
+
+[Term]
+id: GO:0004871
+name: signal transducer activity
+namespace: molecular_function
+alt_id: GO:0009370
+def: "Conveys a signal across a cell to trigger a change in cell function or state. A signal is a physical entity or change in state that is used to transfer information in order to trigger a response." [GOC:go_curators]
+comment: Ligands do NOT have the molecular function 'signal transducer activity'.
+subset: goslim_plant
+synonym: "hematopoietin/interferon-class (D200-domain) cytokine receptor signal transducer activity" NARROW []
+synonym: "quorum sensing response regulator activity" NARROW []
+synonym: "quorum sensing signal generator activity" NARROW []
+is_a: GO:0003674 ! molecular_function
+
+[Term]
+id: GO:0007610
+name: behavior
+namespace: biological_process
+def: "The internally coordinated responses (actions or inactions) of whole living organisms (individuals or groups) to internal or external stimuli." [GOC:ems, GOC:jl, ISBN:0395448956, PMID:20160973]
+comment: Note that this term is in the subset of terms that should not be used for direct gene product annotation. Instead, select a child term or, if no appropriate child term exists, please request a new term. Direct annotations to this term may be amended during annotation QC.
+synonym: "behavioral response to stimulus" EXACT []
+synonym: "behaviour" EXACT []
+synonym: "behavioural response to stimulus" EXACT []
+xref: Wikipedia:Behavior
+is_a: GO:0008150 ! biological_process
+
+[Term]
+id: GO:0019953
+name: sexual reproduction
+namespace: biological_process
+def: "A reproduction process that creates a new organism by combining the genetic material of two organisms. It occurs both in eukaryotes and prokaryotes: in multicellular eukaryotic organisms, an individual is created anew; in prokaryotes, the initial cell has additional or transformed genetic material. In a process called genetic recombination, genetic material (DNA) originating from two different individuals (parents) join up so that homologous sequences are aligned with each other, and this is followed by exchange of genetic information. After the new recombinant chromosome is formed, it is passed on to progeny." [GOC:jl, http://en.wikipedia.org/wiki/Sexual_reproduction, ISBN:0387520546]
+comment: Sexual reproduction may be seen as the regular alternation, in the life cycle of haplontic, diplontic and diplohaplontic organisms, of meiosis and fertilization which provides for the production offspring. In diplontic organisms there is a life cycle in which the products of meiosis behave directly as gametes, fusing to form a zygote from which the diploid, or sexually reproductive polyploid, adult organism will develop. In diplohaplontic organisms a haploid phase (gametophyte) exists in the life cycle between meiosis and fertilization (e.g. higher plants, many algae and Fungi); the products of meiosis are spores that develop as haploid individuals from which haploid gametes develop to form a diploid zygote; diplohaplontic organisms show an alternation of haploid and diploid generations. In haplontic organisms meiosis occurs in the zygote, giving rise to four haploid cells (e.g. many algae and protozoa), only the zygote is diploid and this may form a resistant spore, tiding organisms over hard times.
+xref: Wikipedia:Sexual_reproduction
+is_a: GO:0000003 ! reproduction
+
+[Term]
+id: GO:0019954
+name: asexual reproduction
+namespace: biological_process
+def: "The biological process in which new individuals are produced by either a single cell or a group of cells, in the absence of any sexual process." [ISBN:0387520546]
+subset: gosubset_prok
+synonym: "parthenogenesis" RELATED [https://en.wikipedia.org/wiki/Parthenogenesis]
+xref: Wikipedia:Asexual_reproduction
+is_a: GO:0000003 ! reproduction
+
+[Term]
+id: GO:0008150
+name: biological_process
+namespace: biological_process
+alt_id: GO:0000004
+alt_id: GO:0007582
+def: "Any process specifically pertinent to the functioning of integrated living units: cells, tissues, organs, and organisms. A process is a collection of molecular events with a defined beginning and end." [GOC:go_curators, GOC:isa_complete]
+comment: Note that, in addition to forming the root of the biological process ontology, this term is recommended for use for the annotation of gene products whose biological process is unknown. Note that when this term is used for annotation, it indicates that no information was available about the biological process of the gene product annotated as of the date the annotation was made; the evidence code ND, no data, is used to indicate this.
+subset: goslim_chembl
+synonym: "biological process" EXACT []
+synonym: "physiological process" EXACT []
+xref: Wikipedia:Biological_process
+
+[Typedef]
+id: negatively_regulates
+name: negatively regulates
+namespace: external
+xref: RO:0002212
+is_a: regulates ! regulates
+transitive_over: part_of ! part of
+
+[Typedef]
+id: never_in_taxon
+name: never_in_taxon
+namespace: external
+xref: RO:0002161
+is_metadata_tag: true
+is_class_level: true
+
+[Typedef]
+id: part_of
+name: part of
+namespace: external
+xref: BFO:0000050
+is_transitive: true
+
+[Typedef]
+id: positively_regulates
+name: positively regulates
+namespace: external
+xref: RO:0002213
+holds_over_chain: negatively_regulates negatively_regulates
+is_a: regulates ! regulates
+transitive_over: part_of ! part of
+
+[Typedef]
+id: regulates
+name: regulates
+namespace: external
+xref: RO:0002211
+is_transitive: true
+transitive_over: part_of ! part of
+

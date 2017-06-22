@@ -118,3 +118,8 @@ class DomainDescriptionTable(tables.IsDescription):
     DomainId = tables.StringCol(20, pos=0)
     Source = tables.StringCol(11, pos=1)
     Description = tables.StringCol(150, pos=2)
+
+
+class GroupsizeHistogram(tables.IsDescription):
+    Size = tables.UInt32Col(pos=0)
+    Count = tables.UInt32Col(pos=1)

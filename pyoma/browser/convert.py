@@ -673,6 +673,106 @@ class DarwinExporter(object):
             self._write_to_table(dom_name_tab, buffer)
         dom_name_tab.flush()
 
+    def update_summary_stats(self):
+        """update the summary statistics of xrefs & go.
+
+        The function analyses the well-known xref sources as well as
+        GO annotations and computes aggregated counts for
+        all / in OMA Group / in HOGs for all of them.
+        """
+        for tab_name, sum_fun in [('/GeneOntology', self.count_xref_summary),
+                                  ('/XRef', self.count_xref_summary)]:
+            summary = sum_fun()
+            tab = self.h5.get_node(tab_name)
+            for attr, val in summary.items():
+                tab.set_attr(attr, val)
+
+        group_sizes = self.collect_group_sizes()
+        summary = self._get_or_create_node('/Summary', 'Various Summary Statistics')
+        for group_type in group_sizes.keys():
+            grp_size_tab = self.create_table_if_needed(
+                summary, '{}_size_hist'.format(group_type),
+                description=tablefmt.GroupsizeHistogram,
+                drop_data=True)
+            data = sorted(group_sizes[group_type].items())
+            grp_size_tab.append(data)
+
+    def count_gene_ontology_summary(self):
+        go_tab = self.h5.get_node('/GeneOntology')
+        prot_tab = self.h5.get_node('/Protein/Entries')
+        exp_codes = frozenset([b'EXP', b'IDA', b'IPI', b'IMP', b'IGI' b'IEP'])
+        cnts = collections.Counter()
+        cur_enr = None
+        for (enr, term), row_iter in itertools.groupby(go_tab, operator.itemgetter('EntryNr','TermNr')):
+            evidences = {row['Evidence'] for row in row_iter}
+            is_iea = b'IEA' in evidences
+            evidences.discard(b'IEA')
+            is_exp = not exp_codes.isdisjoint(evidences)
+            is_cur = len(evidences.difference(exp_codes)) > 0
+            cnts['annotations_any'] += 1
+            if is_exp:
+                cnts['annotations_exp'] += 1
+            if is_cur:
+                cnts['annotations_currated'] += 1
+            if is_iea:
+                cnts['annotations_iea'] += 1
+            if cur_enr != enr:
+                e = next(prot_tab.where('EntryNr == {}'.format(enr))).fetch_all_fields()
+                cnts['proteins_any'] += 1
+                if e['OmaGroup'] != 0:
+                    cnts['protein_OmaGroup'] += 1
+                if len(e['OmaHOG']) > 0:
+                    cnts['protein_HOG'] += 1
+                cur_enr = enr
+        return cnts
+
+    def count_xref_summary(self):
+        xref_tab = self.h5.get_node('/XRef')
+        prot_tab_iter = iter(self.h5.get_node('/Protein/Entries'))
+        source = xref_tab.get_enum('XRefSource')
+        trusted = frozenset(['UniProtKB/SwissProt', 'UniProtKB/TrEMBL', 'RefSeq', 'EntrezGene', 'Ensembl Gene', 'Ensembl Protein'])
+        if len(trusted.difference(source._names.keys())) > 0:
+            raise ValueError('set of trusted xrefs is invalid')
+        cnts = collections.Counter()
+
+        entry = next(prot_tab_iter)
+        for enr, xref_it in itertools.groupby(xref_tab, operator.itemgetter('EntryNr')):
+            while entry['EntryNr'] < enr:
+                entry = next(prot_tab_iter)
+            sources_all = [source._values[x['XRefSource']] for x in xref_it]
+            cnts += collections.Counter(sources_all)
+            has_trusted_xref = len(trusted.intersection(sources_all)) > 0
+            if has_trusted_xref:
+                cnts['trusted_all'] += 1
+                if entry['OmaGroup'] != 0:
+                    cnts['trusted_OmaGroup'] += 1
+                if len(entry['OmaHOG']) > 0:
+                    cnts['trusted_HOG'] += 1
+        return cnts
+
+    def collect_group_sizes(self):
+        groupings = ('OmaHOG', 'OmaGroup')
+        memb_cnts = {grp: collections.defaultdict(int) for grp in groupings}
+        fam_re = re.compile(br'([A-Z]+:)?(?P<fam>[0-9]+).*')
+        prot_tab = self.h5.get_node('/Protein/Entries')
+        for row in prot_tab:
+            for grp in groupings:
+                if grp == 'OmaHOG':
+                    m = fam_re.match(row[grp])
+                    if m is None:
+                        continue
+                    grp_id = int(m.group('fam'))
+                else:
+                    grp_id = int(row[grp])
+                    if grp_id == 0:
+                        continue
+                memb_cnts[grp][grp_id] += 1
+        sizes = {grp: collections.defaultdict(int) for grp in groupings}
+        for grp in groupings:
+            for grp_size in memb_cnts[grp].values():
+                sizes[grp][grp_size] += 1
+        return sizes
+
 
 def download_url_if_not_present(url):
     tmpfolder = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH', '/tmp'), "Browser", "xref")
@@ -1116,4 +1216,5 @@ def main(name="OmaServer.h5"):
 
     x = DarwinExporter(name, logger=log)
     x.create_indexes()
+    x.update_summary_stats()
     x.close()

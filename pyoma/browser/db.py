@@ -1,3 +1,4 @@
+import io
 from builtins import chr
 from builtins import range
 from builtins import object

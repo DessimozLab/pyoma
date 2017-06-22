@@ -43,6 +43,8 @@ class ProteinTable(tables.IsDescription):
     DescriptionOffset = tables.UInt32Col(pos=15)
     DescriptionLength = tables.UInt16Col(pos=16)
     SubGenome = tables.StringCol(1, pos=17, dflt=b"")
+    RootHogUpstream = tables.Int32Col(pos=18, dflt=-1)
+    RootHogDownStream = tables.Int32Col(pos=19, dflt=-1)
 
 
 class LocusTable(tables.IsDescription):

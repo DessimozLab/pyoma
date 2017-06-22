@@ -30,6 +30,7 @@ from .. import common
 from . import locus_parser
 from . import tablefmt
 from .OrthoXMLSplitter import OrthoXMLSplitter
+from .geneontology import GeneOntology, OntologyParser
 
 with hooks():
     import urllib.request
@@ -740,6 +741,79 @@ class DescriptionManager(object):
         self.desc_buf.append(numpy.ndarray((len_buf,), buffer=buf, dtype=tables.StringAtom(1)))
 
 
+class GeneOntologyManager(object):
+    ontology_url = "http://purl.obolibrary.org/obo/go/go-basic.obo"
+
+    def __init__(self, db, annotation_path, ontology_path):
+        self.db = db
+        self.annotation_path = annotation_path
+        self.ontology_path = ontology_path
+        self._go_buf = []
+        self.quote_re = re.compile(r'([[,])([\w_:]+)([,\]])')
+
+    def __enter__(self):
+        go_obo_file = download_url_if_not_present(self.ontology_url)
+        # check that ontology file is not broken. if we can build it, it should be ok
+        self.go = GeneOntology(OntologyParser(go_obo_file))
+        self.go.parse()
+
+        with open(go_obo_file, 'rb') as fh:
+            go_obo = fh.read()
+        root, name = os.path.split(self.ontology_path)
+        obo = self.db.create_carray(root, name, title='Gene ontology hierarchy definition', createparents=True,
+                              obj=numpy.ndarray(len(go_obo), buffer=go_obo, dtype=tables.StringAtom(1)))
+        obo._f_setattr('ontology_release', self._get_obo_version(obo))
+
+        root, name = os.path.split(self.annotation_path)
+        self.go_tab = self.db.create_table(root, name, tablefmt.GeneOntologyTable,
+                                      'Gene Ontology annotations', expectedrows=1e8, createparents=True)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._flush_buffers()
+        self.go_tab.flush()
+
+    def _get_obo_version(self, obo_arr):
+        header = obo_arr[0:1000].tobytes()
+        rel_info = re.search(rb'data-version:\s*(?P<version>[\w/_ -]+)', header)
+        if rel_info is not None:
+            rel_info = rel_info.group('version').decode()
+        return rel_info
+
+    def _flush_buffers(self):
+        common.package_logger.info('flushing go annotations buffers')
+        if len(self._go_buf) > 0:
+            self.go_tab.append(self._go_buf)
+        self._go_buf = []
+
+    def add_annotations(self, enr, gos):
+        """parse go annotations and add them to the go buffer"""
+        if not (isinstance(enr, int) and isinstance(gos, str)):
+            raise ValueError('input data invalid')
+        for t in gos.split('; '):
+            t = t.strip()
+            try:
+                term, rem = t.split('@')
+            except ValueError as e:
+                common.package_logger.warning('cannot parse GO annotation: ' + t)
+                continue
+
+            try:
+                term_nr = self.go.term_by_id(term).id
+            except ValueError:
+                common.package_logger.warning('invalid GO term for entry {:d}: {:s} (likely obsolete)'
+                                              .format(enr, term))
+                continue
+            rem = rem.replace('{', '[')
+            rem = rem.replace('}', ']')
+            rem = self.quote_re.sub('\g<1>"\g<2>"\g<3>', rem)
+            for evi, refs in eval(rem):
+                for ref in refs:
+                    self._go_buf.append((enr, term_nr, evi, ref.encode('utf-8')))
+            if len(self._go_buf) > 2e6:
+                self._flush_buffers()
+
+
 class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
     def _annotateGroupR(self, node, og, idx=0):
         if familyanalyzer.OrthoXMLQuery.is_geneRef_node(node):
@@ -792,13 +866,12 @@ class HogConverter(object):
 
 
 class XRefImporter(object):
-    def __init__(self, db_parser, xref_tab, go_tab, ec_tab, desc_manager):
+    def __init__(self, db_parser, xref_tab, ec_tab, go_manager, desc_manager):
         self.xrefs = []
-        self.go = []
         self.ec = []
         self.xref_tab = xref_tab
-        self.go_tab = go_tab
         self.ec_tab = ec_tab
+        self.go_manager = go_manager
         self.desc_manager = desc_manager
 
         xrefEnum = tablefmt.XRefTable.columns.get('XRefSource').enum
@@ -841,18 +914,13 @@ class XRefImporter(object):
         self.ENS_RE = re.compile(r'ENS(?P<species>[A-Z]{0,3})(?P<typ>[GTP])(?P<num>\d{11})')
         self.FB_RE = re.compile(r'FB(?P<typ>[gnptr]{2})(?P<num>\d{7})')
         self.NCBI_RE = re.compile(r'[A-Z]{3}\d{5}\.\d$')
-        self.GO_RE = re.compile(r'GO:(?P<termNr>\d{7})')
-        self.quote_re = re.compile(r'([[,])([\w_:]+)([,\]])')
         self.EC_RE = re.compile(r'\d+\.(\d+|-)\.(\d+|-)\.(\d+|-)')
 
     def flush_buffers(self):
-        common.package_logger.info('flushing xrefs, go, ec and description buffers')
+        common.package_logger.info('flushing xrefs and ec buffers')
         if len(self.xrefs) > 0:
             self.xref_tab.append(self.xrefs)
             self.xrefs = []
-        if len(self.go) > 0:
-            self.go_tab.append(self.go)
-            self.go = []
         if len(self.ec) > 0:
             self.ec_tab.append(self.ec)
             self.ec = []
@@ -902,25 +970,7 @@ class XRefImporter(object):
                     self._add_to_xrefs(eNr, enum_nr, key)
 
     def go_handler(self, gos, enr):
-        """parse go annotations and add them to the go buffer"""
-        for t in gos.split('; '):
-            t = t.strip()
-            try:
-                term, rem = t.split('@')
-            except ValueError as e:
-                common.package_logger.warning('cannot parse GO annotation: ' + t)
-                continue
-
-            term_match = self.GO_RE.match(term)
-            termNr = int(term_match.group('termNr'))
-            rem = rem.replace('{', '[')
-            rem = rem.replace('}', ']')
-            rem = self.quote_re.sub('\g<1>"\g<2>"\g<3>', rem)
-            for evi, refs in eval(rem):
-                for ref in refs:
-                    self.go.append((enr, termNr, evi, ref.encode('utf-8')))
-            if len(self.go) > 5e6:
-                self.flush_buffers()
+        self.go_manager.add_annotations(enr, gos)
 
     def ec_handler(self, ecs, enr):
         for t in ecs.split('; '):

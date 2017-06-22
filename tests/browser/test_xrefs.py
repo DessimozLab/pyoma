@@ -8,6 +8,7 @@ except ImportError:
 import numpy
 import tables
 import io
+import os
 from pyoma.browser import convert as pyoma
 
 
@@ -19,7 +20,8 @@ class XRefParsingTest(unittest.TestCase):
             <E><UniProt/TrEMBL>L8ECQ9_BACSU</UniProt/TrEMBL><SwissProt_AC>Q6CI62</SwissProt_AC><SwissProt>ASF1_YARLI</SwissProt><ID>FBgn0218776</ID><AC>FBpp0245919; FBtr0247427</AC><DE>β-hemoglobin</DE><GO></GO></E>""")
         self.db_parser = pyoma.DarwinDbEntryParser()
         self.desc_manager = mock.Mock()
-        self.importer = pyoma.XRefImporter(self.db_parser, None, None, None, self.desc_manager)
+        self.go_manager = mock.Mock()
+        self.importer = pyoma.XRefImporter(self.db_parser, None, None, self.go_manager, self.desc_manager)
 
     def test_standard_handler(self):
         self.db_parser.parse_entrytags(self.data)
@@ -46,8 +48,7 @@ class XRefParsingTest(unittest.TestCase):
 
     def test_go(self):
         self.db_parser.parse_entrytags(self.data)
-        self.assertIn((2, 6270, 'IDA', b'PMID:2167836'), self.importer.go)
-        self.assertIn((2, 6275, 'IEA', b'OMA_Fun:001'), self.importer.go)
+        self.assertEqual(len(self.go_manager.add_annotations.call_args_list), 1)
 
     def test_ec(self):
         self.db_parser.parse_entrytags(self.data)
@@ -115,3 +116,50 @@ class DescriptionManagerTest(unittest.TestCase):
         exp_txt = "".join(["; ".join(z) for z in descs])
         txt_in_db = self.h5.get_node('/Descr').read().tostring()
         self.assertEqual(exp_txt.encode('utf-8'), txt_in_db)
+
+
+class TestGeneOntologyManager(pyoma.GeneOntologyManager):
+    ontology_url = "file://" + os.path.dirname(__file__ ) + "/go-basic-tiny.obo"
+
+
+class GeneOntologyManagerTest(unittest.TestCase):
+    def setUp(self):
+        self.h5file = tables.open_file("test.h5", "w", driver="H5FD_CORE",
+                                  driver_core_backing_store=0)
+
+    def tearDown(self):
+        self.h5file.close();
+
+    def store_and_retrieve_data(self, enr, gos):
+        with TestGeneOntologyManager(self.h5file, '/Annotation/GO', '/obo') as man:
+            man.add_annotations(enr, gos)
+        return self.h5file.get_node('/Annotation/GO').read()
+
+    def test_add_none_as_data_raises_ValueError(self):
+        with self.assertRaises(ValueError):
+            self.store_and_retrieve_data(None, None)
+
+    def test_basic_anno(self):
+        res = self.store_and_retrieve_data(1, "GO:0007610@[[IDA,{'PMID:2167836'}],[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]; GO:0019954@[[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]")
+        self.assertEqual(7, len(res))
+        numpy.testing.assert_equal(1, res['EntryNr'])
+        self.assertEqual(7610, res[0]['TermNr'])
+        self.assertEqual(b"IDA", res[0]['Evidence'])
+        self.assertEqual(b"PMID:2167836", res[0]["Reference"])
+
+    def test_add_obsolete_term_is_skipped(self):
+        import sys
+        if sys.version_info >= (3, 4):
+            with self.assertLogs('pyoma', level='WARNING') as log:
+                res = self.store_and_retrieve_data(1, "GO:0003822@[[IEA,{OMA_Fun:001}]]")
+                self.assertIn("invalid GO term for entry 1: GO:0003822", ";".join(log.output))
+        else:
+            res = self.store_and_retrieve_data(1, "GO:0003822@[[IEA,{OMA_Fun:001}]]")
+        self.assertEqual(0, len(res))
+
+    def test_go_obo_version(self):
+        self.store_and_retrieve_data(1, "")
+        obo = self.h5file.get_node('/obo')
+        self.assertEqual("dummy-test/2017-04-18", obo._f_getattr('ontology_release'))
+
+

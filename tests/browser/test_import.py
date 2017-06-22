@@ -1,14 +1,16 @@
 from __future__ import absolute_import, unicode_literals, print_function, division
 
+import csv
 import gzip
-import unittest
+import json
 import os
 import shutil
 import tempfile
-import json
-import numpy
-import csv
+import unittest
 from hashlib import md5
+
+import numpy
+
 import pyoma.browser.tablefmt as tablefmt
 from pyoma.browser.convert import callDarwinExport, DarwinExporter, compute_ortholog_types,\
     load_tsv_to_numpy

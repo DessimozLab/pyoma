@@ -13,6 +13,8 @@ import json
 import os
 import collections
 import logging
+from .models import LazyProperty
+from .geneontology import GeneOntology, OntologyParser, AnnotationParser
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,18 @@ class Database(object):
         self._re_fam = None
         self.format_hogid = None
         self._set_hogid_schema()
+
+    @LazyProperty
+    def gene_ontology(self):
+        try:
+            fp = io.Bytes(self.db.go_obo.read().tobytes())
+        except tables.NoSuchNodeError:
+            p = os.path.join(os.path.dirname(self.db.filename), 'go-basic.obo')
+            fp = open(p, 'r')
+        go = GeneOntology(OntologyParser(fp))
+        go.parse()
+        fp.close()
+        return go
 
     def get_hdf5_handle(self):
         """return the handle to the database hdf5 file"""

@@ -22,25 +22,31 @@ def store_in_json(data, fn):
         json.dump(data, fd)
 
 
-class ImportIntegrationBase(unittest.TestCase):
+class ImportDummyBase(unittest.TestCase):
+    """This base class makes sure that the environment vars
+    `DARWIN_BROWSERDATA_PATH` and `DARWIN_NETWORK_SCRATCH_PATH`
+    are set to a temporary path at the beginning of the test cases
+    and get restored to the initial value after a test cases
+    finished.
+
+    At the beginning of each testcase, a new DarwinExporter is
+    created at the location of $DARWIN_BROWSERDATA_PATH and removed
+    after the testcase.
+
+    Subclasses can therefor overwrite the $DARWIN_BROWSERDATA_PATH
+    in the setUpClass method if needed.
+    """
+
     @classmethod
     def setUpClass(cls):
         cls.tmpdir = tempfile.mkdtemp()
         cls.old_env = {(z, os.getenv(z, None)) for z in ('DARWIN_NETWORK_SCRATCH_PATH', 'DARWIN_BROWSERDATA_PATH')}
         os.environ['DARWIN_NETWORK_SCRATCH_PATH'] = cls.tmpdir
-        test_data_available = False
-        for folder in ('/pub/projects/cbrg-oma-browser', '/cs/research/biosciences/oma/oma-server',
-                       '/scratch/ul/projects/cdessimo/oma-browser'):
-            if os.path.isdir(folder):
-                test_data_available = True
-                break
-        if not test_data_available:
-            raise unittest.SkipTest('data not available')
-        os.environ['DARWIN_BROWSERDATA_PATH'] = os.path.join(folder, 'Test.Jul2014', 'data')
+        os.environ['DARWIN_BROWSERDATA_PATH'] = cls.tmpdir
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(os.environ['DARWIN_NETWORK_SCRATCH_PATH'])
+        shutil.rmtree(cls.tmpdir)
         for var, val in cls.old_env:
             if val is None:
                 os.unsetenv(var)
@@ -55,6 +61,26 @@ class ImportIntegrationBase(unittest.TestCase):
         fn = self.darwin_exporter.h5.filename
         self.darwin_exporter.close()
         os.remove(fn)
+
+
+class ImportIntegrationBase(ImportDummyBase):
+    """This base class checks if the Test-case data
+    is available on any of the groups shared directories
+    and uses this directory for the DARWIN_BROWSERDATA_PATH.
+    If none of the shares is available, the tests are skipped.
+    """
+    @classmethod
+    def setUpClass(cls):
+        super(ImportIntegrationBase, cls).setUpClass()
+        test_data_available = False
+        for folder in ('/pub/projects/cbrg-oma-browser', '/cs/research/biosciences/oma/oma-server',
+                       '/scratch/ul/projects/cdessimo/oma-browser'):
+            if os.path.isdir(folder):
+                test_data_available = True
+                break
+        if not test_data_available:
+            raise unittest.SkipTest('data not available')
+        os.environ['DARWIN_BROWSERDATA_PATH'] = os.path.join(folder, 'Test.Jul2014', 'data')
 
 
 class GenomeDirectImportTest(ImportIntegrationBase):
@@ -182,3 +208,35 @@ class TSVOrthologyFileTester(unittest.TestCase):
         res = load_tsv_to_numpy((self.datafile, 0, 0, False))
         self.assertEqual(0, res.size)
 
+
+class H5HelpersTests(ImportDummyBase):
+    @staticmethod
+    def get_table_data():
+        return numpy.array([(1, 9), (2, 11), (5, 21)], dtype=[('X', 'i4'), ('Y', 'u2')])
+
+    def setUp(self):
+        super(H5HelpersTests, self).setUp()
+        self.darwin_exporter.h5.create_table('/', 'Example', obj=self.get_table_data())
+
+    def test_create_table_if_needed_without_existing_table(self):
+        self.darwin_exporter.create_table_if_needed('/', 'XRef2', description=self.get_table_data().dtype)
+        self.assertEqual(0, len(self.darwin_exporter.h5.get_node('/XRef2')))
+
+    def test_create_table_if_needed_not_needed(self):
+        self.darwin_exporter.create_table_if_needed('/', 'Example')
+        self.assertEqual(3, len(self.darwin_exporter.h5.get_node('/Example')))
+
+    def test_create_table_if_needed_replace_data(self):
+        data = self.get_table_data()
+        data['X'] *= 2
+        self.darwin_exporter.create_table_if_needed('/', 'Example', obj=data, drop_data=True)
+        res = self.darwin_exporter.h5.get_node('/Example').read()
+        numpy.testing.assert_equal(res, data)
+
+    def test_create_table_if_needed_append_data(self):
+        data = self.get_table_data()
+        data['X'] *= 2
+        expected = numpy.hstack((self.get_table_data(), data))
+        self.darwin_exporter.create_table_if_needed('/', 'Example', obj=data, dump_data=False)
+        res = self.darwin_exporter.h5.get_node('/Example').read()
+        numpy.testing.assert_equal(res, expected)

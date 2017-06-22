@@ -24,6 +24,7 @@ import collections
 import gzip
 import hashlib
 import itertools
+import operator
 import fileinput
 
 from .. import common
@@ -247,6 +248,25 @@ class DarwinExporter(object):
             base, name = os.path.split(path)
             grp = self.h5.create_group(base, name, title=desc, createparents=True)
         return grp
+
+    def create_table_if_needed(self, parent, name, drop_data=False, **kwargs):
+        """create a table if needed.
+
+        The function only checks whether a table exists with that name,
+        but not if it is compatible with the passed arguments.
+        if you pass data with the `obj` argument, this data is appended
+        to the table. If you set `drop_data` to True, data that was
+        previously in the existing table is dropped prior to adding new
+        data."""
+        try:
+            tab = self.h5.get_node(parent, name=name)
+            if drop_data:
+                tab.remove_rows(0, tab.nrows)
+            if 'obj' in kwargs:
+                tab.append(kwargs['obj'])
+        except tables.NoSuchNodeError:
+            tab = self.h5.create_table(parent, name, **kwargs)
+        return tab
 
     def get_version(self):
         """return version of the dataset.

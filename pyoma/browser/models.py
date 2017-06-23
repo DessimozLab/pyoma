@@ -190,3 +190,6 @@ class Genome(object):
     def __repr__(self):
         return "<{}({}, {})>".format(self.__class__.__name__, self.uniprot_species_code,
                                      self.ncbi_taxon_id)
+
+    def __len__(self):
+        return self.nr_entries

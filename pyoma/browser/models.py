@@ -71,12 +71,20 @@ class ProteinEntry(object):
         return int(self._entry['EntryNr'])
 
     @property
+    def locus_start(self):
+        return int(self._entry['LocusStart'])
+
+    @property
     def oma_group(self):
         return int(self._entry['OmaGroup'])
 
     @property
     def oma_hog(self):
         return self._entry['OmaHOG'].decode()
+
+    @property
+    def chromosome(self):
+        return self._entry['Chromosome'].decode()
 
     @property
     def canonicalid(self):
@@ -157,6 +165,14 @@ class Genome(object):
 
     def strain(self):
         return self.species_and_strain_as_dict['strain']
+    
+    @property
+    def nr_entries(self):
+        return int(self._genome['TotEntries'])
+
+    @property
+    def entry_nr_offset(self):
+        return int(self._genome['EntryOff'])
 
     @LazyProperty
     def kingdom(self):

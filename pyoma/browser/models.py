@@ -152,11 +152,11 @@ class Genome(object):
         return self.species_and_strain_as_dict['strain']
     
     @property
-    def totEntries(self):
+    def nr_entries(self):
         return int(self._genome['TotEntries'])
 
     @property
-    def EntryOff(self):
+    def entry_nr_offset(self):
         return int(self._genome['EntryOff'])
 
     @LazyProperty

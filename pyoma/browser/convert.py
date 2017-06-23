@@ -546,16 +546,20 @@ class DarwinExporter(object):
         xref_tab = self.h5.create_table('/', 'XRef', tablefmt.XRefTable,
                                         'Cross-references of proteins to external ids / descriptions',
                                         expectedrows=1e8)
-        go_tab = self.h5.create_table('/', 'GeneOntology', tablefmt.GeneOntologyTable,
-                                      'Gene Ontology annotations', expectedrows=1e8)
-        ec_tab = self.h5.create_table('/', 'EC', tablefmt.ECTable, 'Enzyme Commission annotations',
+
+        ec_tab = self.h5.create_table('/Annotations', 'EC', tablefmt.ECTable, 'Enzyme Commission annotations',
                                       expectedrows=1e7)
-        with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man:
-            xref_importer = XRefImporter(db_parser, xref_tab, go_tab, ec_tab, de_man)
+        with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man, \
+             GeneOntologyManager(self.h5, '/Annotations/GeneOntolgoy', '/Ontologies/GO') as go_man:
+            xref_importer = XRefImporter(db_parser, xref_tab, ec_tab, go_man, de_man)
             files = self.xref_databases()
             dbs_iter = fileinput.input(files=files)
             db_parser.parse_entrytags(dbs_iter)
             xref_importer.flush_buffers()
+
+    def add_group_metadata(self):
+        m = OmaGroupMetadataLoader(self.h5)
+        m.add_data()
 
     def close(self):
         self.h5.root._f_setattr('conversion_end', time.strftime("%c"))
@@ -581,12 +585,12 @@ class DarwinExporter(object):
         xrefTab.cols.XRefId.create_csindex()
 
         self.logger.info('creating index for go (EntryNr and TermNr)')
-        goTab = self.h5.get_node('/GeneOntology')
+        goTab = self.h5.get_node('/Annotations/GeneOntology')
         goTab.cols.EntryNr.create_csindex()
         goTab.cols.TermNr.create_index()
 
         self.logger.info('creating index for EC (EntryNr)')
-        ec_tab = self.h5.get_node('/EC')
+        ec_tab = self.h5.get_node('/Annotations/EC')
         ec_tab.cols.EntryNr.create_csindex()
 
         self.logger.info('creating index for domains (EntryNr)')
@@ -680,7 +684,7 @@ class DarwinExporter(object):
         GO annotations and computes aggregated counts for
         all / in OMA Group / in HOGs for all of them.
         """
-        for tab_name, sum_fun in [('/GeneOntology', self.count_xref_summary),
+        for tab_name, sum_fun in [('/Annotations/GeneOntology', self.count_xref_summary),
                                   ('/XRef', self.count_xref_summary)]:
             summary = sum_fun()
             tab = self.h5.get_node(tab_name)
@@ -698,7 +702,7 @@ class DarwinExporter(object):
             grp_size_tab.append(data)
 
     def count_gene_ontology_summary(self):
-        go_tab = self.h5.get_node('/GeneOntology')
+        go_tab = self.h5.get_node('/Annotations/GeneOntology')
         prot_tab = self.h5.get_node('/Protein/Entries')
         exp_codes = frozenset([b'EXP', b'IDA', b'IPI', b'IMP', b'IGI' b'IEP'])
         cnts = collections.Counter()
@@ -807,6 +811,95 @@ def only_pfam_or_cath_domains(iterable):
     for dom in iterable:
         if dom.id.startswith('PF') or cath_re.match(dom.id) is not None:
             yield dom
+
+
+class OmaGroupMetadataLoader(object):
+    keyword_name = "Keywords.drw"
+    finger_name = "Fingerprints"
+
+    meta_data_path = '/OmaGroups/MetaData'
+
+    def __init__(self, db):
+        self.db = db
+        self.add_data()
+
+    def add_data(self):
+        nr_groups = self._get_nr_of_groups()
+        has_meta_data = self._check_textfiles_avail()
+        if has_meta_data:
+            fingerprints = self._load_data(self.finger_name)
+            keywords = self._load_data(self.keyword_name)
+        else:
+            common.package_logger.warning('No fingerprint nor keyword information available')
+            fingerprints = [b'n/a'] * nr_groups
+            keywords = [b''] * nr_groups
+        if nr_groups != len(fingerprints) or nr_groups != len(keywords):
+            raise DataImportError('nr of oma groups does not match the number of fingerprints and keywords')
+
+        grptab, keybuf = self._create_db_objects(nr_groups)
+        self._fill_data_into_db(fingerprints, keywords, grptab, keybuf)
+        self._create_indexes(grptab)
+
+    def _create_db_objects(self, nrows):
+        key_path = os.path.join(os.path.dirname(self.meta_data_path), 'KeywordBuffer')
+        try:
+            self.db.get_node(self.meta_data_path)
+            self.db.remove_node(self.meta_data_path)
+            self.db.remove_node(key_path)
+        except tables.NoSuchNodeError:
+            pass
+        root, name = self.meta_data_path.rsplit('/', 1)
+        grptab = self.db.create_table(root, name, tablefmt.OmaGroupTable,
+                                      expectedrows=nrows, createparents=True)
+        buffer = self.db.create_earray(root, "KeywordBuffer", tables.StringAtom(1), (0,),
+                                       'concatenated group keywords  descriptions',
+                                              expectedrows=500 * nrows)
+        return grptab, buffer
+
+    def _fill_data_into_db(self, stable_ids, keywords, grp_tab, key_buf):
+        row = grp_tab.row
+        buf_pos = 0
+        for i in range(len(stable_ids)):
+            row['GroupNr'] = i+1
+            row['Fingerprint'] = stable_ids[i]
+            row['KeywordOffset'] = buf_pos
+            row['KeywordLength'] = len(keywords[i])
+            row.append()
+            key = numpy.ndarray((len(keywords[i]),), buffer=keywords[i],
+                                dtype=tables.StringAtom(1))
+            key_buf.append(key)
+        grp_tab.flush()
+        key_buf.flush()
+
+    def _create_indexes(self, grp_tab):
+        grp_tab.cols.Fingerprint.create_csindex()
+
+    def _parse_darwin_string_list_file(self, fh):
+        data = fh.read()
+        start, end = data.find(b'['), data.rfind(b', NULL]')
+        part = data[start:end] + b"]"
+        as_json = part.replace(b"''", b"__apos__").replace(b"'", b'"')\
+                      .replace(b'__apos__', b"'")
+        as_list = json.loads(as_json.decode())
+        return [el.endcode('utf8') for el in as_list]
+
+    def _load_data(self, fname):
+        with open(os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), fname), 'rb') as fh:
+            return self._parse_darwin_string_list_file(fh)
+
+    def _get_nr_of_groups(self):
+        etab = self.db.get_node('/Protein/Entries')
+        try:
+            return etab[etab.colindexes['OmaGroup'][-1]]['OmaGroup']
+        except KeyError:
+            return max(etab.col('OmaGroup'))
+
+    def _check_textfiles_avail(self):
+        rootdir = os.getenv('DARWIN_BROWSERDATA_PATH','')
+        fn1 = os.path.join(rootdir, self.keyword_name)
+        fn2 = os.path.join(rootdir, self.finger_name)
+        return os.path.exists(fn1) and os.path.exists(fn2)
+
 
 
 class DescriptionManager(object):
@@ -1212,6 +1305,7 @@ def main(name="OmaServer.h5"):
                              'cath-classification-data/cath-names.txt').parse(),
         PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
     x.add_canonical_id()
+    x.add_group_metadata()
     x.close()
 
     x = DarwinExporter(name, logger=log)

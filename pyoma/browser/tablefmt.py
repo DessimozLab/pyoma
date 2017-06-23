@@ -125,3 +125,10 @@ class DomainDescriptionTable(tables.IsDescription):
 class GroupsizeHistogram(tables.IsDescription):
     Size = tables.UInt32Col(pos=0)
     Count = tables.UInt32Col(pos=1)
+
+
+class OmaGroupTable(tables.IsDescription):
+    GroupNr = tables.UInt32Col(pos=0)
+    Fingerprint = tables.StringCol(7, pos=1)
+    KeywordOffset = tables.UInt32Col(pos=2)
+    KeywordLength = tables.UInt16Col(pos=3)

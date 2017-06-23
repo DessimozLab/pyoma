@@ -108,7 +108,7 @@ class ProteinEntry(object):
         return self._db.get_cdna(self._entry).decode()
 
     @property
-    def ec_content(self):
+    def gc_content(self):
         cdna = self.cdna
         cnts = list(map(cdna.count, 'GCAT'))
         try:

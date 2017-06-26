@@ -34,7 +34,7 @@ class Database(object):
     """This is the main interface to the oma database. Queries
     will typically be issued by methods of this object. Typically
     the result of queries will be :py:class:`numpy.recarray` objects."""
-    EXPECTED_DB_SCHEMA = "2.0"
+    EXPECTED_DB_SCHEMA = "3.0"
 
     def __init__(self, db):
         if isinstance(db, str):

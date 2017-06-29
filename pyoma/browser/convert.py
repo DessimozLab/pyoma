@@ -5,11 +5,14 @@ from future.builtins import range
 from future.builtins import object
 from future.builtins import super
 from future.standard_library import hooks
+from PySAIS import sais
 from tempfile import NamedTemporaryFile
+from tqdm import tqdm
 import csv
 import resource
 import tables
 import numpy
+import numpy as np  # TODO: change all numpy references to np.
 import numpy.lib.recfunctions
 import os
 import subprocess
@@ -30,6 +33,7 @@ import fileinput
 from .. import common
 from . import locus_parser
 from . import tablefmt
+from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
 from .geneontology import GeneOntology, OntologyParser
 
@@ -776,6 +780,81 @@ class DarwinExporter(object):
             for grp_size in memb_cnts[grp].values():
                 sizes[grp][grp_size] += 1
         return sizes
+
+    def add_sequence_suffix_array(self, k=6):
+        '''
+            Adds the sequence suffix array to the database. NOTE: this
+            (obviously) requires A LOT of memory for large DBs.
+        '''
+        # Ensure we're run in correct order...
+        assert ('Protein' in self.h5.root), 'Add proteins before calc. SA!'
+
+        # Load sequence buffer to memory - this is required to calculate the SA.
+        # Do it here (instead of in PySAIS) so that we can use it for computing
+        # the split points later.
+        seqs = self.h5.get_node('/Protein/SequenceBuffer')[:].tobytes()
+        n = len(self.h5.get_node('/Protein/Entries'))
+
+        # Compute & save the suffix array to DB. TODO: work out what compression
+        # works best!
+        sa = sais(seqs)
+        self.h5.create_array('/Protein',
+                             name='SequenceIndex',
+                             title='concatenated protein sequences suffix array',
+                             obj=sa)
+
+        # Sort delimiters by position rather than alphabet
+        sa[:n].sort()
+
+        # Create lookup table for fa2go
+        dtype = (np.uint32 if (n < np.iinfo(np.uint32).max) else
+                 np.uint64)
+        idx = np.zeros(sa.shape, dtype=dtype)
+        mask = np.zeros(sa.shape, dtype=np.bool)
+
+        # Compute mask and entry index for sequence buff
+        for i in range(1, n+1):
+            s = (sa[i - 1] if i > 0 else -1) + 1
+            e = (sa[i] + 1)
+            idx[s:e] = i
+            mask[(e - k):e] = True
+
+        # Mask off those we don't want...
+        sa = sa[~mask[sa]]
+
+        # Reorder the necessary elements of entry index
+        idx = idx[sa]
+
+        # Now find the split points.
+        kmers = KmerEncoder(k, is_protein=True)
+        dtype = (np.uint16 if (len(idx) < np.iinfo(np.uint16).max)
+                 else (np.uint32 if (len(idx) < np.iinfo(np.uint32).max)
+                       else np.uint64))
+        off = np.zeros((len(kmers) + 1), dtype=dtype)
+        for kk in tqdm(range(len(kmers)), description='Finding kmer cut-offs'):
+            kmer = kmers.encode(kk)
+            ii = off[kk]
+            if (ii < len(sa)) and (seqs[sa[ii]:(sa[ii] + k)] == kmer):
+                # Found kmer, woosh to end -> ->
+                jj = off[kk] + 1
+                while (jj < len(sa)) and (seqs[sa[jj]:(sa[jj] + k)] == kmer):
+                    jj += 1
+            else:
+                # End or not found
+                jj = ii
+            off[kk + 1] = jj
+
+        # Save to DB
+        protKmerGrp = self.h5.create_group('/Protein', 'KmerLookup')
+        tables.set_node_attr(protKmerGrp, 'k', k)
+        self.h5.create_array(protKmerGrp,
+                             name='KmerIndex',
+                             title='kmer to entry index for sequence buffer',
+                             obj=idx)
+        self.h5.create_array(protKmerGrp,
+                             name='KmerOffsets',
+                             title='offsets for kmer index',
+                             obj=off)
 
 
 def download_url_if_not_present(url):

@@ -831,7 +831,7 @@ class DarwinExporter(object):
                  else (np.uint32 if (len(idx) < np.iinfo(np.uint32).max)
                        else np.uint64))
         off = np.zeros((len(kmers) + 1), dtype=dtype)
-        for kk in tqdm(range(len(kmers)), description='Finding kmer cut-offs'):
+        for kk in tqdm(range(len(kmers)), desc='Finding kmer cut-offs'):
             kmer = kmers.encode(kk)
             ii = off[kk]
             if (ii < len(sa)) and (seqs[sa[ii]:(sa[ii] + k)] == kmer):

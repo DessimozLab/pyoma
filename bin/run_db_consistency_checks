@@ -1,0 +1,4 @@
+#!/bin/bash
+
+export PYOMA_DB2CHECK="$1"
+python -m unittest pyoma.browser.check_db_consistency

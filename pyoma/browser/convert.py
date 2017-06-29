@@ -846,7 +846,7 @@ class DarwinExporter(object):
 
         # Save to DB
         protKmerGrp = self.h5.create_group('/Protein', 'KmerLookup')
-        tables.set_node_attr(protKmerGrp, 'k', k)
+        protKmerGrp._f_setattr('k', k)
         self.h5.create_array(protKmerGrp,
                              name='KmerIndex',
                              title='kmer to entry index for sequence buffer',

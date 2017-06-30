@@ -141,7 +141,12 @@ class ProteinEntry(object):
 
     @LazyProperty
     def hog_family_nr(self):
-        return self._db.hog_family(self._entry)
+        from .db import Singleton as HOGSingleton
+        try:
+            fam = self._db.hog_family(self._entry)
+        except HOGSingleton:
+            fam = 0
+        return fam
 
     def __repr__(self):
         return "<{}({}, {})>".format(self.__class__.__name__, self.entry_nr, self.omaid)

@@ -1,5 +1,8 @@
 from __future__ import division, unicode_literals
 
+import collections
+
+
 def format_sciname(sci, short=False):
     p = set([sci.find(x) for x in ['(', 'serogroup', 'serotype', 'serovar',
                                    'biotype', 'subsp', 'pv.', 'bv.']])
@@ -193,7 +196,17 @@ class Genome(object):
 
     @LazyProperty
     def lineage(self):
-        return [lev['Name'].decode() for lev in self._db.tax.get_parent_taxa(self._genome['NCBITaxonId'])]
+        return [lev['Name'].decode() for lev in self._db.tax.get_parent_taxa(
+            self._genome['NCBITaxonId'])]
+
+    @LazyProperty
+    def chromosomes(self):
+        chrs = collections.defaultdict(list)
+        entry_tab = self._db.get_hdf5_handle().get_node('/Protein/Entries')
+        for row in entry_tab.where('(EntryNr > {}) & (EntryNr <= {})'
+                .format(self.entry_nr_offset, self.entry_nr_offset+self.nr_entries)):
+            chrs[row['Chromosome'].decode()].append(row['EntryNr'])
+        return chrs
 
     def __repr__(self):
         return "<{}({}, {})>".format(self.__class__.__name__, self.uniprot_species_code,

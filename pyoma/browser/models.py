@@ -219,3 +219,42 @@ class Genome(object):
 
     def __len__(self):
         return self.nr_entries
+
+
+class PairwiseRelation(object):
+    def __init__(self, db, relation):
+        self._relation = relation
+        self._db = db
+
+    @property
+    def distance(self):
+        return self._relation['Distance']
+
+    @property
+    def score(self):
+        return self._relation['Score']
+
+    @property
+    def alignment_overlap(self):
+        return self._relation['AlignmentOverlap']
+
+    @property
+    def synteny_conservation_local(self):
+        return self._relation['SyntenyConservationLocal']
+
+    @property
+    def synteny_conservation_chromosome(self):
+        return self._relation['SyntenyConservationChromosome']
+
+    @LazyProperty
+    def rel_type(self):
+        type_map = self._db._get_pw_tab(self._relation['EntryNr1'], 'VPairs').get_enum("RelType")
+        return type_map(self._relation['RelType'])
+
+    @LazyProperty
+    def entry_1(self):
+        return ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation['EntryNr1']))
+
+    @LazyProperty
+    def entry_2(self):
+        return ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation['EntryNr2']))

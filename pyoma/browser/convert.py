@@ -548,9 +548,9 @@ class DarwinExporter(object):
                                         expectedrows=1e8)
 
         ec_tab = self.h5.create_table('/Annotations', 'EC', tablefmt.ECTable, 'Enzyme Commission annotations',
-                                      expectedrows=1e7)
+                                      expectedrows=1e7, createparents=True)
         with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man, \
-             GeneOntologyManager(self.h5, '/Annotations/GeneOntolgoy', '/Ontologies/GO') as go_man:
+             GeneOntologyManager(self.h5, '/Annotations/GeneOntology', '/Ontologies/GO') as go_man:
             xref_importer = XRefImporter(db_parser, xref_tab, ec_tab, go_man, de_man)
             files = self.xref_databases()
             dbs_iter = fileinput.input(files=files)
@@ -821,9 +821,9 @@ class OmaGroupMetadataLoader(object):
 
     def __init__(self, db):
         self.db = db
-        self.add_data()
 
     def add_data(self):
+        common.package_logger.info('adding OmaGroup Metadata')
         nr_groups = self._get_nr_of_groups()
         has_meta_data = self._check_textfiles_avail()
         if has_meta_data:
@@ -877,11 +877,13 @@ class OmaGroupMetadataLoader(object):
     def _parse_darwin_string_list_file(self, fh):
         data = fh.read()
         start, end = data.find(b'['), data.rfind(b', NULL]')
-        part = data[start:end] + b"]"
+        if end == -1:
+            end = data.rfind(b']:')
+        part = data[start:end] + b']'
         as_json = part.replace(b"''", b"__apos__").replace(b"'", b'"')\
                       .replace(b'__apos__', b"'")
         as_list = json.loads(as_json.decode())
-        return [el.endcode('utf8') for el in as_list]
+        return [el.encode('utf8') for el in as_list]
 
     def _load_data(self, fname):
         with open(os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), fname), 'rb') as fh:

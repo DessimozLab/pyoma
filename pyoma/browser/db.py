@@ -34,7 +34,7 @@ class Database(object):
     """This is the main interface to the oma database. Queries
     will typically be issued by methods of this object. Typically
     the result of queries will be :py:class:`numpy.recarray` objects."""
-    EXPECTED_DB_SCHEMA = "2.0"
+    EXPECTED_DB_SCHEMA = "3.0"
 
     def __init__(self, db):
         if isinstance(db, str):
@@ -419,6 +419,7 @@ class OmaIdMapper(object):
         self._entry_off_keys = self.genome_table.argsort(order=('EntryOff'))
         self._genome_keys = self.genome_table.argsort(
             order=('UniProtSpeciesCode'))
+        self._taxid_keys = self.genome_table.argsort(order=('NCBITaxonId'))
         self._omaid_re = re.compile(r'(?P<genome>[A-Z][A-Z0-9]{4})(?P<nr>\d+)')
         self._db = db
 
@@ -446,6 +447,26 @@ class OmaIdMapper(object):
         if genome['UniProtSpeciesCode'] != code:
             raise UnknownSpecies('{} is unknown'.format(code))
         return genome
+
+    def genome_from_taxid(self, taxid):
+        try:
+            taxid = int(taxid)
+            idx = self.genome_table['NCBITaxonId'].searchsorted(
+                taxid, sorter=self._taxid_keys)
+            genome = self.genome_table[self._taxid_keys[idx]]
+        except (IndexError, ValueError):
+            raise UnknownSpecies('TaxonId "{}" is unknown'.format(taxid))
+        if genome['NCBITaxonId'] != taxid:
+            raise UnknownSpecies('TaxonId "{}" is unknown'.format(taxid))
+        return genome
+
+    def identify_genome(self, code):
+        """identify genome based on either a UniProtSpeciesCode or an
+        NCBI Taxonomy Id"""
+        if isinstance(code, int) or code.isdigit():
+            return self.genome_from_taxid(code)
+        else:
+            return self.genome_from_UniProtCode(code)
 
     def omaid_to_entry_nr(self, omaid):
         """returns the internal numeric entrynr from a

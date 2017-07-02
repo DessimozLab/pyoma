@@ -1,5 +1,8 @@
 from __future__ import division, unicode_literals
 
+import collections
+
+
 def format_sciname(sci, short=False):
     p = set([sci.find(x) for x in ['(', 'serogroup', 'serotype', 'serovar',
                                    'biotype', 'subsp', 'pv.', 'bv.']])
@@ -138,7 +141,12 @@ class ProteinEntry(object):
 
     @LazyProperty
     def hog_family_nr(self):
-        return self._db.hog_family(self._entry)
+        from .db import Singleton as HOGSingleton
+        try:
+            fam = self._db.hog_family(self._entry)
+        except HOGSingleton:
+            fam = 0
+        return fam
 
     def __repr__(self):
         return "<{}({}, {})>".format(self.__class__.__name__, self.entry_nr, self.omaid)
@@ -193,7 +201,17 @@ class Genome(object):
 
     @LazyProperty
     def lineage(self):
-        return [lev['Name'].decode() for lev in self._db.tax.get_parent_taxa(self._genome['NCBITaxonId'])]
+        return [lev['Name'].decode() for lev in self._db.tax.get_parent_taxa(
+            self._genome['NCBITaxonId'])]
+
+    @LazyProperty
+    def chromosomes(self):
+        chrs = collections.defaultdict(list)
+        entry_tab = self._db.get_hdf5_handle().get_node('/Protein/Entries')
+        for row in entry_tab.where('(EntryNr > {}) & (EntryNr <= {})'
+                .format(self.entry_nr_offset, self.entry_nr_offset+self.nr_entries)):
+            chrs[row['Chromosome'].decode()].append(row['EntryNr'])
+        return chrs
 
     def __repr__(self):
         return "<{}({}, {})>".format(self.__class__.__name__, self.uniprot_species_code,
@@ -201,3 +219,42 @@ class Genome(object):
 
     def __len__(self):
         return self.nr_entries
+
+
+class PairwiseRelation(object):
+    def __init__(self, db, relation):
+        self._relation = relation
+        self._db = db
+
+    @property
+    def distance(self):
+        return self._relation['Distance']
+
+    @property
+    def score(self):
+        return self._relation['Score']
+
+    @property
+    def alignment_overlap(self):
+        return self._relation['AlignmentOverlap']
+
+    @property
+    def synteny_conservation_local(self):
+        return self._relation['SyntenyConservationLocal']
+
+    @property
+    def synteny_conservation_chromosome(self):
+        return self._relation['SyntenyConservationChromosome']
+
+    @LazyProperty
+    def rel_type(self):
+        type_map = self._db._get_pw_tab(self._relation['EntryNr1'], 'VPairs').get_enum("RelType")
+        return type_map(self._relation['RelType'])
+
+    @LazyProperty
+    def entry_1(self):
+        return ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation['EntryNr1']))
+
+    @LazyProperty
+    def entry_2(self):
+        return ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation['EntryNr2']))

@@ -781,13 +781,25 @@ class DarwinExporter(object):
                 sizes[grp][grp_size] += 1
         return sizes
 
-    def add_sequence_suffix_array(self, k=6):
+    def add_sequence_suffix_array(self, k=6, fn=None):
         '''
             Adds the sequence suffix array to the database. NOTE: this
             (obviously) requires A LOT of memory for large DBs.
         '''
         # Ensure we're run in correct order...
         assert ('Protein' in self.h5.root), 'Add proteins before calc. SA!'
+
+        # Add to separate file if fn is set.
+        if fn is None:
+            db = self.h5
+        else:
+            fn = os.path.normpath(os.path.join(
+                    os.getenv('DARWIN_BROWSERDATA_PATH', ''),
+                    fn))
+            db = tables.open(fn, 'w', filters=self._compr)
+            db.create_group('/', 'Protein')
+            self.h5.root._f_setattr('conversion_start', time.strftime("%c"))
+            self.logger.info('opened {}'.format(db.filename))
 
         # Load sequence buffer to memory - this is required to calculate the SA.
         # Do it here (instead of in PySAIS) so that we can use it for computing
@@ -798,13 +810,11 @@ class DarwinExporter(object):
         # Compute & save the suffix array to DB. TODO: work out what compression
         # works best!
         sa = sais(seqs)
-        self.h5.create_array('/Protein',
-                             name='SequenceIndex',
-                             title='concatenated protein sequences suffix array',
-                             obj=sa)
-
-        # Sort delimiters by position rather than alphabet
-        sa[:n].sort()
+        sa[:n].sort()  # Sort delimiters by position.
+        db.create_array('/Protein',
+                        name='SequenceIndex',
+                        title='concatenated protein sequences suffix array',
+                        obj=sa)
 
         # Create lookup table for fa2go
         dtype = (np.uint32 if (n < np.iinfo(np.uint32).max) else
@@ -845,16 +855,21 @@ class DarwinExporter(object):
             off[kk + 1] = jj
 
         # Save to DB
-        protKmerGrp = self.h5.create_group('/Protein', 'KmerLookup')
+        protKmerGrp = db.create_group('/Protein', 'KmerLookup')
         protKmerGrp._f_setattr('k', k)
-        self.h5.create_array(protKmerGrp,
-                             name='KmerIndex',
-                             title='kmer to entry index for sequence buffer',
-                             obj=idx)
-        self.h5.create_array(protKmerGrp,
-                             name='KmerOffsets',
-                             title='offsets for kmer index',
-                             obj=off)
+        db.create_array(protKmerGrp,
+                        name='KmerIndex',
+                        title='kmer to entry index for sequence buffer',
+                        obj=idx)
+        db.create_array(protKmerGrp,
+                        name='KmerOffsets',
+                        title='offsets for kmer index',
+                        obj=off)
+
+        if db.filename != self.h5.filename:
+            db.root._f_setattr('conversion_end', time.strftime("%c"))
+            db.close()
+            self.logger.info('closed {}'.format(db.filename))
 
 
 def download_url_if_not_present(url):
@@ -1369,7 +1384,9 @@ def getDebugLogger():
     return log
 
 
-def main(name="OmaServer.h5"):
+def main(name="OmaServer.h5", k=6, idx_name=None):
+    idx_name = (name + '.idx') if idx_name is None else idx_name
+
     log = getDebugLogger()
     x = DarwinExporter(name, logger=log)
     x.add_version()
@@ -1391,5 +1408,6 @@ def main(name="OmaServer.h5"):
 
     x = DarwinExporter(name, logger=log)
     x.create_indexes()
+    x.add_sequence_suffix_array(k=k, fn=idx_name)
     x.update_summary_stats()
     x.close()

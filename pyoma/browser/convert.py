@@ -796,7 +796,7 @@ class DarwinExporter(object):
             fn = os.path.normpath(os.path.join(
                     os.getenv('DARWIN_BROWSERDATA_PATH', ''),
                     fn))
-            db = tables.open(fn, 'w', filters=self._compr)
+            db = tables.open_file(fn, 'w', filters=self._compr)
             db.create_group('/', 'Protein')
             self.h5.root._f_setattr('conversion_start', time.strftime("%c"))
             self.logger.info('opened {}'.format(db.filename))

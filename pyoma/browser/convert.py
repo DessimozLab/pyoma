@@ -823,11 +823,11 @@ class DarwinExporter(object):
         mask = np.zeros(sa.shape, dtype=np.bool)
 
         # Compute mask and entry index for sequence buff
-        for i in range(1, n+1):
+        for i in range(n):
             s = (sa[i - 1] if i > 0 else -1) + 1
             e = (sa[i] + 1)
-            idx[s:e] = i
-            mask[(e - k):e] = True
+            idx[s:e] = i + 1
+            mask[(e - k):e] = True  # (k-1) invalid and delim.
 
         # Mask off those we don't want...
         sa = sa[~mask[sa]]
@@ -858,9 +858,9 @@ class DarwinExporter(object):
         protKmerGrp = db.create_group('/Protein', 'KmerLookup')
         protKmerGrp._f_setattr('k', k)
         db.create_carray(protKmerGrp,
-                        name='KmerIndex',
-                        title='kmer to entry index for sequence buffer',
-                        obj=idx)
+                         name='KmerIndex',
+                         title='kmer to entry index for sequence buffer',
+                         obj=idx)
         db.create_carray(protKmerGrp,
                          name='KmerOffsets',
                          title='offsets for kmer index',

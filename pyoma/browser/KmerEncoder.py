@@ -24,7 +24,7 @@ class KmerEncoder(object):
         self.digits = DIGITS_AA if is_protein else DIGITS_DNA
         self.k = k
         self.max = (len(self.digits) ** k) - 1
-        self.n = self.decode(str(self.digits[-1], 'ascii') * k) + 1
+        self.n = self.decode(self.digits[-1] * k) + 1
         self._prot = np.zeros((k,), dtype='S1')
 
     def __len__(self):
@@ -45,17 +45,18 @@ class KmerEncoder(object):
                 self._prot[i] = self.digits[seq % self.digits.size]
                 seq //= self.digits.size
                 i -= 1
-            return str(self._prot.tostring(), 'ascii')
+            return self._prot.tostring()
         else:
             raise ValueError('{} Larger than largest kmer of size {}'
                              .format(seq, self.k))
 
     def decode(self, seq):
         '''
-            Decode a protein kmer -> integer. NOTE: sanitisation required first.
+            Decode a protein kmer -> integer. NOTE: sanitisation to a byte
+            string required first.
         '''
         x = 0
-        for digit in seq[:self.k]:
+        for digit in seq[:self.k].decode('ascii'):
             x = (x * self.digits.size) + np.searchsorted(self.digits, digit)
         return x
 

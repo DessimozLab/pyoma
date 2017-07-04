@@ -5,7 +5,11 @@ from builtins import object
 from builtins import zip
 import itertools
 
+from bisect import bisect_left
+from collections import Counter
+import pyopa
 import tables
+import threading
 import numpy
 import numpy.lib.recfunctions
 import re
@@ -13,11 +17,14 @@ import json
 import os
 import collections
 import logging
-from .models import LazyProperty
+from .KmerEncoder import KmerEncoder
+from .models import LazyProperty, KeyWrapper
 from .geneontology import GeneOntology, OntologyParser, AnnotationParser
 
 logger = logging.getLogger(__name__)
 
+# Raise stack limit for PyOPA ~400MB
+threading.stack_size(4096*100000)
 
 def count_elements(iterable):
     """return the number of elements in an iterator in the most efficient way.
@@ -55,6 +62,7 @@ class Database(object):
             raise DBVersionError('Unsupported database version: {} != {} ({})'
                                  .format(db_version, self.EXPECTED_DB_SCHEMA, self.db.filename))
 
+        self.seq_search = SequenceSearch(self)
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
         self.tax = Taxonomy(self.db.root.Taxonomy.read())
@@ -411,6 +419,147 @@ class Database(object):
             return self.db.root.Annotations.Domains.read_where('EntryNr == {:d}'.format(entry_nr))
         except ValueError as e:
             raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
+
+
+class SequenceSearch(object):
+    '''
+        Contains all the methods for searching the sequence
+
+        TODO: implement taxonomic filtering.
+    '''
+    from .KmerEncoder import DIGITS_AA
+    PROTEIN_CHARS = frozenset(map(lambda x: x.decode(), DIGITS_AA))
+    PAM100 = pyopa.generate_env(pyopa.load_default_environments()['log_pam1'],
+                                100)
+
+    def __init__(self, db):
+        # Backup reference to used DB method.
+        self.get_sequence = db.get_sequence
+
+        # Assume the index is stored in the main DB if there is no .idx file
+        self.db = db.get_hdf5_handle()
+        self.db_idx = (db if not os.path.isfile(db.filename + '.idx') else
+                       tables.open_file(db.filename + '.idx', 'r'))
+
+        # Protein search arrays.
+        self.seq_idx = self.db_idx.root.Protein.SequenceIndex
+        self.seq_buff = self.db.root.Protein.SequenceBuffer
+        self.n_entries = len(self.db.root.Protein.Entries)
+
+        # Kmer lookup arrays / kmer setup
+        self.k = db.get_node_attr('/Protein/KmerLookup', 'k')
+        self.encoder = KmerEncoder(self.k)
+        self.kmer_idx = self.db_idx.root.Protein.KmerLookup.KmerIndex  # TODO: should we cache this??
+        self.kmer_off = self.db_idx.root.Protein.KmerLookup.KmerOffsets
+
+    @LazyProperty
+    def entry_idx(self):
+        '''
+            Caches the index lookup part of the SA.
+        '''
+        return self.seq_idx[:self.n_entries]
+
+    def get_entrynr(self, ii):
+        '''
+            Get the entry number(s) corresponding to a location in the sequence
+            buffer.
+        '''
+        return numpy.searchsorted(self.entry_idx, ii)
+
+    def sanitise_seq(self, seq):
+        '''
+            Sanitise a string protein sequence. Deletes "invalid" characters.
+            TODO: add functionality for biopython sequence / skbio sequence.
+        '''
+        return ''.join(filter(lambda c: c in self.PROTEIN_CHARS,
+                              seq.upper())).encode('ascii')
+
+    def search(self, seq, n=None, is_sanitised=None):
+        '''
+            Searches the database for entries that match. If can't find an exact
+            match performs a kmer + local alignment approach to approximate
+            search.
+        '''
+        seq = (self._sanitise_seq(seq) if not is_sanitised else seq)
+        m = self.exact_search(seq, is_sanitised=True)
+        # TODO: taxonomic filtering.
+        if len(m) == 0:
+            # Do approximate search
+            m = self.approx_search(seq, is_sanitised=True)
+            # TODO: taxonomic filtering.
+            return (('approx', m) if m is not None else None)
+        else:
+            return ('exact', m)
+
+    def exact_search(self, seq, is_sanitised=None):
+        '''
+            Performs an exact match search using the suffix array.
+        '''
+        # TODO: work out whether to just use the approximate search and then
+        # check if any are actually exact matches. Do the counting and then
+        # do an equality checking on any of the sequences that have the correct
+        # number of kmer matches.
+        seq = (seq if is_sanitised else self._sanitise_seq(seq))
+        nn = len(seq)
+        if nn > 0:
+            z = KeyWrapper(self.seq_idx,
+                           key=lambda i: self.seq_buff[i:(i + nn)])
+            ii = bisect_left(z, seq, lo=self.n_entries)
+
+            if ii:
+                # Left most found.
+                jj = ii + 1
+                while (jj < len(z)) and (z[jj] == seq):
+                    # zoom to end -> -> ->
+                    jj += 1
+
+                # Find entry numbers.
+                return self.get_entrynr(self.seq_idx[ii:jj])
+
+        # Nothing found.
+        return None
+
+    def approx_search(self, seq, n=None, is_sanitised=None):
+        '''
+            Performs an exact match search using the suffix array.
+        '''
+        seq = (seq if is_sanitised else self._sanitise_seq(seq))
+        n = (n if n is not None else 50)
+
+        # 1. Do kmer counting vs entry numbers
+        c = Counter(self.kmer_idx[self.kmer_off[kmer]:self.kmer_off[kmer+1]]
+                    for kmer in self.encoder.decompose(seq))
+
+        # 2. Filter to top n if necessary
+        c = (list(sorted(c.items(), key=lambda x: x[1]))[:n] if c > 0 else
+             list(c.items()))
+
+        # 3. Do local alignments and return count / score / alignment
+        return sorted([(m[0], {'count': m[1],
+                               'score': a[0],
+                               'alignment': a[1]})
+                       for (m, a) in self._align_entries(seq, c)],
+                      key=lambda z: z[1]['score'],
+                      reverse=True)
+
+    def _align_entries(self, seq, matches):
+        # Does the alignment for the approximate search
+        def align(s1, s2s, env, aligned):
+            for s2 in s2s:
+                z = pyopa.align_double(s1, s2, env, False, False, True)
+                a = pyopa.align_strings(s1, s2, False, z)
+                aligned.append((z[0], (a[0].convert_readable(),
+                                       a[1].convert_readable())))
+
+        aligned = []
+        query = pyopa.Sequence(seq)
+        entries = list(map(lambda m: pyopa.Sequence(self.db.get_sequence(m[0])),
+                           matches))
+        t = threading.Thread(target=align,
+                             args=(query, entries, self.PAM100, aligned))
+        t.start()
+        t.join()
+        return zip(matches, aligned)
 
 
 class OmaIdMapper(object):

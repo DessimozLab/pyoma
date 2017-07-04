@@ -447,7 +447,7 @@ class SequenceSearch(object):
         self.n_entries = len(self.db.root.Protein.Entries)
 
         # Kmer lookup arrays / kmer setup
-        self.k = db.get_node_attr('/Protein/KmerLookup', 'k')
+        self.k = self.db_idx.get_node_attr('/Protein/KmerLookup', 'k')
         self.encoder = KmerEncoder(self.k)
         self.kmer_idx = self.db_idx.root.Protein.KmerLookup.KmerIndex  # TODO: should we cache this??
         self.kmer_off = self.db_idx.root.Protein.KmerLookup.KmerOffsets

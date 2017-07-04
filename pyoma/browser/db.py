@@ -439,7 +439,7 @@ class SequenceSearch(object):
         # Assume the index is stored in the main DB if there is no .idx file
         self.db = db.get_hdf5_handle()
         self.db_idx = (db if not os.path.isfile(self.db.filename + '.idx') else
-                       tables.open_file(db.filename + '.idx', 'r'))
+                       tables.open_file(self.db.filename + '.idx', 'r'))
 
         # Protein search arrays.
         self.seq_idx = self.db_idx.root.Protein.SequenceIndex

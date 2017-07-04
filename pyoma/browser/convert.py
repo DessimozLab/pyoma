@@ -798,7 +798,7 @@ class DarwinExporter(object):
                     fn))
             db = tables.open_file(fn, 'w', filters=self._compr)
             db.create_group('/', 'Protein')
-            self.h5.root._f_setattr('conversion_start', time.strftime("%c"))
+            db.root._f_setattr('conversion_start', time.strftime("%c"))
             self.logger.info('opened {}'.format(db.filename))
 
         # Load sequence buffer to memory - this is required to calculate the SA.

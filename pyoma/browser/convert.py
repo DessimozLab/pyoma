@@ -811,10 +811,10 @@ class DarwinExporter(object):
         # works best!
         sa = sais(seqs)
         sa[:n].sort()  # Sort delimiters by position.
-        db.create_array('/Protein',
-                        name='SequenceIndex',
-                        title='concatenated protein sequences suffix array',
-                        obj=sa)
+        db.create_carray('/Protein',
+                         name='SequenceIndex',
+                         title='concatenated protein sequences suffix array',
+                         obj=sa)
 
         # Create lookup table for fa2go
         dtype = (np.uint32 if (n < np.iinfo(np.uint32).max) else
@@ -857,14 +857,14 @@ class DarwinExporter(object):
         # Save to DB
         protKmerGrp = db.create_group('/Protein', 'KmerLookup')
         protKmerGrp._f_setattr('k', k)
-        db.create_array(protKmerGrp,
+        db.create_carray(protKmerGrp,
                         name='KmerIndex',
                         title='kmer to entry index for sequence buffer',
                         obj=idx)
-        db.create_array(protKmerGrp,
-                        name='KmerOffsets',
-                        title='offsets for kmer index',
-                        obj=off)
+        db.create_carray(protKmerGrp,
+                         name='KmerOffsets',
+                         title='offsets for kmer index',
+                         obj=off)
 
         if db.filename != self.h5.filename:
             db.root._f_setattr('conversion_end', time.strftime("%c"))

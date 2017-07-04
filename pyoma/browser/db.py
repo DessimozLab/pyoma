@@ -466,7 +466,7 @@ class SequenceSearch(object):
         '''
         return numpy.searchsorted(self.entry_idx, ii)
 
-    def _sanitise_seq(self, seq):
+    def _sazanitise_seq(self, seq):
         '''
             Sanitise a string protein sequence. Deletes "invalid" characters.
             TODO: add functionality for biopython sequence / skbio sequence.
@@ -503,7 +503,8 @@ class SequenceSearch(object):
         nn = len(seq)
         if nn > 0:
             z = KeyWrapper(self.seq_idx,
-                           key=lambda i: self.seq_buff[i:(i + nn)].tobytes())
+                           key=lambda i:
+                           self.seq_buff[i:(i + nn)].tobytes().decode('ascii'))
             ii = bisect_left(z, seq, lo=self.n_entries)
 
             if ii:

@@ -22,7 +22,7 @@ class KmerEncoder(object):
             If is_dna=True then DNA else AA.
         '''
         self.digits = DIGITS_AA if is_protein else DIGITS_DNA
-        self.k = k
+        self.k = int(k)  # Cast incase np-type for n below.
         self.max = (len(self.digits) ** k) - 1
         self.n = self.decode(self.digits[-1] * k) + 1
         self._prot = np.zeros((k,), dtype='S1')

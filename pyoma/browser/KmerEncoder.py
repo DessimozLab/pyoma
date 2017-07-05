@@ -23,9 +23,9 @@ class KmerEncoder(object):
         '''
         self.digits = DIGITS_AA if is_protein else DIGITS_DNA
         self.k = int(k)  # Cast incase np-type for n below.
-        self.max = (len(self.digits) ** k) - 1
-        self.n = self.decode(self.digits[-1] * k) + 1
-        self._prot = np.zeros((k,), dtype='S1')
+        self.max = (len(self.digits) ** self.k) - 1
+        self.n = self.decode(self.digits[-1] * self.k) + 1
+        self._prot = np.zeros((self.k,), dtype='S1')
 
     def __len__(self):
         '''

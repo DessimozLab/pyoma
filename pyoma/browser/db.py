@@ -11,6 +11,7 @@ import pyopa
 import tables
 import threading
 import numpy
+import numpy as np  # TODO: change all.
 import numpy.lib.recfunctions
 import re
 import json
@@ -532,8 +533,8 @@ class SequenceSearch(object):
         # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
         c = Counter(z
                     for z in map(lambda x:
-                                 dict(zip(numpy.unique(self.kmer_idx[x[0]:x[1]],
-                                                       return_counts=True))),
+                                 dict(zip(*np.unique(self.kmer_idx[x[0]:x[1]],
+                                                     return_counts=True))),
                                  map(lambda kmer: (self.kmer_off[kmer],
                                                    self.kmer_off[kmer+1]),
                                      self.encoder.decompose(seq))))

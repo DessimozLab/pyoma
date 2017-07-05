@@ -521,23 +521,26 @@ class SequenceSearch(object):
         # Nothing found.
         return None
 
-    def approx_search(self, seq, n=None, is_sanitised=None):
+    def approx_search(self, seq, n=None, is_sanitised=None, cut_off=None):
         '''
             Performs an exact match search using the suffix array.
         '''
         seq = (seq if is_sanitised else self._sanitise_seq(seq))
         n = (n if n is not None else 50)
+        cut_off = (0.0 if cut_off is None else cut_off)
 
-        # 1. Do kmer counting vs entry numbers
+        # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
         c = Counter(self.kmer_idx[self.kmer_off[kmer]:self.kmer_off[kmer+1]]
                     for kmer in self.encoder.decompose(seq))
 
         # 2. Filter to top n if necessary
-        c = (list(sorted(c.items(), key=lambda x: x[1]))[:n] if c > 0 else
-             list(c.items()))
+        z = len(seq) - self.k + 1
+        c = [(x[0], x[1] / z) for x in c.items()]
+        c = (sorted(c, key=lambda x: x[1])[:n] if n > 0 else c)
 
         # 3. Do local alignments and return count / score / alignment
-        return sorted([(m[0], {'count': m[1],
+
+        return sorted([(m[0], {'coverage': m[1],
                                'score': a[0],
                                'alignment': a[1]})
                        for (m, a) in self._align_entries(seq, c)],
@@ -555,7 +558,7 @@ class SequenceSearch(object):
 
         aligned = []
         query = pyopa.Sequence(seq)
-        entries = list(map(lambda m: pyopa.Sequence(self.db.get_sequence(m[0])),
+        entries = list(map(lambda m: pyopa.Sequence(self.get_sequence(m[0])),
                            matches))
         t = threading.Thread(target=align,
                              args=(query, entries, self.PAM100, aligned))

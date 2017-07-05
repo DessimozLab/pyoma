@@ -530,8 +530,11 @@ class SequenceSearch(object):
         cut_off = (0.0 if cut_off is None else cut_off)
 
         # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
-        c = Counter(self.kmer_idx[self.kmer_off[kmer]:self.kmer_off[kmer+1]]
-                    for kmer in self.encoder.decompose(seq))
+        c = Counter(self.kmer_idx[s:e]
+                    for (s, e) in map(lambda kmer: (self.kmer_off[kmer],
+                                                    self.kmer_off[kmer+1]),
+                                      self.encoder.decompose(seq))
+                    if e > s)
 
         # 2. Filter to top n if necessary
         z = len(seq) - self.k + 1

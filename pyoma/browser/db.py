@@ -540,16 +540,18 @@ class SequenceSearch(object):
 
         # 2. Filter to top n if necessary
         z = len(seq) - self.k + 1
-        c = [(x[0], x[1] / z) for x in c.items()]
-        c = (sorted(c, key=lambda x: x[1])[:n] if n > 0 else c)
+        c = [(x[0], (x[1] / z)) for x in c.items()]
+        c = (sorted(c,
+                    reverse=True, 
+                    key=lambda x: x[1])[:n] if n > 0 else c)
 
         # 3. Do local alignments and return count / score / alignment
-
-        return sorted([(m[0], {'coverage': m[1],
-                               'score': a[0],
-                               'alignment': a[1]})
-                       for (m, a) in self._align_entries(seq, c)],
-                      key=lambda z: z[1]['score'],
+        if len(c) > 0:
+            return sorted([(m[0], {'kmer_coverage': m[1],
+                                   'score': a[0],
+                                   'alignment': a[1]})
+                           for (m, a) in self._align_entries(seq, c)],
+                          key=lambda z: z[1]['score'],
                       reverse=True)
 
     def _align_entries(self, seq, matches):
@@ -557,18 +559,22 @@ class SequenceSearch(object):
         def align(s1, s2s, env, aligned):
             for s2 in s2s:
                 z = pyopa.align_double(s1, s2, env, False, False, True)
-                a = pyopa.align_strings(s1, s2, False, z)
+                a = pyopa.align_strings(s1, s2, env, False, z)
                 aligned.append((z[0], (a[0].convert_readable(),
-                                       a[1].convert_readable())))
+                                       (z[3], z[1]),
+                                       a[1].convert_readable(),
+                                       (z[4], z[2]))))
 
         aligned = []
-        query = pyopa.Sequence(seq)
-        entries = list(map(lambda m: pyopa.Sequence(self.get_sequence(m[0])),
+        query = pyopa.Sequence(seq.decode('ascii'))
+        entries = list(map(lambda m: 
+                           pyopa.Sequence(self.get_sequence(m[0]).decode('ascii')),
                            matches))
         t = threading.Thread(target=align,
                              args=(query, entries, self.PAM100, aligned))
         t.start()
         t.join()
+        assert (len(aligned) > 0), 'Alignment thread crashed.'
         return zip(matches, aligned)
 
 

@@ -368,18 +368,56 @@ class Database(object):
         hog_str = hog.decode() if isinstance(hog, bytes) else hog
         return hog_str.encode('ascii'), (hog_str[0:-1] + chr(1 + ord(hog_str[-1]))).encode('ascii')
 
-    def oma_group_members(self, group_nr):
+    def oma_group_members(self, group_id):
         """get the member entries of an oma group.
 
         This method returns a numpy array of protein entries that form
-        an oma group. If the numeric group id is invalid (not positive
-        integer value), an `InvalidId` Exception is raised.
+        an oma group. If the group id is invalid (not positive
+        integer value or a valid Fingerprint), an `InvalidId` Exception
+        is raised.
 
-        :param int group_nr: numeric oma group id"""
-        if not isinstance(group_nr, int) or group_nr <= 0:
+        :param group_id: numeric oma group id or Fingerprint"""
+        if isinstance(group_id, (str, bytes)):
+            if group_id.isdigit():
+                return self.oma_group_members(int(group_id))
+            if isinstance(group_id, str):
+                group_id = group_id.encode('utf-8')
+            if group_id == b'n/a':
+                raise InvalidId('Invalid fingerprint for an OMA Group')
+            group_meta_tab = self.db.get_node('/OmaGroups/MetaData')
+            try:
+                e = next(group_meta_tab.where('(Fingerprints == {!r})'
+                                              .format(group_id)))
+                group_nr = e['GroupNr']
+            except StopIteration:
+                raise InvalidId('Unknown fingerprint for an OMA Group')
+        elif isinstance(group_id, int) and group_id > 0:
+            group_nr = group_id
+        else:
             raise InvalidId('Invalid id of oma group')
         members = self.db.root.Protein.Entries.read_where('OmaGroup=={:d}'.format(group_nr))
         return members
+
+    def oma_group_metadata(self, group_nr):
+        """get the meta data associated with a OMA Group
+
+        The meta data contains the fingerprint and the keywords infered for this group.
+        The method retuns this information as a dictionary. The parameter must be
+        the numeric oma group nr.
+
+        :param int group_nr: a numeric oma group id."""
+        if not isinstance(group_nr, int) or group_nr < 0:
+            raise InvalidId('Invalid group id')
+        meta_tab = self.db.get_node('/OmaGroups/MetaData')
+        try:
+            e = next(meta_tab.where('GroupNr == {:d}'.format(group_nr)))
+            kw_buf = self.db.get_node('/OmaGroups/KeywordBuffer')
+            res = {'fingerprint': e['Fingerprint'].decode(),
+                   'group_nr': int(e['GroupNr']),
+                   'keywords': kw_buf[e['KeywordOffset']:e['KeywordOffset']+e['KeywordLength']].tostring().decode()}
+            return res
+        except StopIteration:
+            raise InvalidId('invalid group nr')
 
     def get_sequence(self, entry):
         """get the protein sequence of a given entry as a string

@@ -100,6 +100,13 @@ class DatabaseTests(unittest.TestCase):
             order = self.db.id_mapper['OMA'].species_ordering(root)
             self.assertEqual(order[root], 0, '{} should be first genome, but comes at {}'.format(root, order[root]))
 
+    def test_oma_group_from_numeric_id(self):
+        group_id = 5
+        grp =  self.db.oma_group_members(group_id)
+        self.assertEqual(4, len(grp))
+        for e in grp:
+            self.assertEqual(group_id, e['OmaGroup'])
+
 
 class XRefDatabaseMock(Database):
     def __init__(self):

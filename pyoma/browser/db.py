@@ -65,10 +65,10 @@ class Database(object):
     @LazyProperty
     def gene_ontology(self):
         try:
-            fp = io.Bytes(self.db.go_obo.read().tobytes())
+            fp = io.StringIO(self.db.get_node('/Ontologies/GO').read().tobytes().decode())
         except tables.NoSuchNodeError:
             p = os.path.join(os.path.dirname(self.db.filename), 'go-basic.obo')
-            fp = open(p, 'r')
+            fp = open(p, 'rt')
         go = GeneOntology(OntologyParser(fp))
         go.parse()
         fp.close()
@@ -447,6 +447,12 @@ class Database(object):
     def get_domains(self, entry_nr):
         try:
             return self.db.root.Annotations.Domains.read_where('EntryNr == {:d}'.format(entry_nr))
+        except ValueError as e:
+            raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
+
+    def get_gene_ontology_annotations(self, entry_nr):
+        try:
+            return self.db.root.Annotations.GeneOntology.read_where('EntryNr == {:d}'.format(entry_nr))
         except ValueError as e:
             raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
 

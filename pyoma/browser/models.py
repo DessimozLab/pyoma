@@ -258,3 +258,30 @@ class PairwiseRelation(object):
     @LazyProperty
     def entry_2(self):
         return ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation['EntryNr2']))
+
+
+class GeneOntologyAnnotation(object):
+    def __init__(self, db, anno):
+        self.db = db
+        self.anno = anno
+
+    @LazyProperty
+    def term(self):
+        return self.db.gene_ontology.term_by_id(self.anno['TermNr'])
+
+    @property
+    def evidence(self):
+        return self.anno['Evidence'].decode()
+
+    @property
+    def reference(self):
+        return self.anno['Reference'].decode()
+
+    @property
+    def entry_nr(self):
+        return int(self.anno['EntryNr'])
+
+    @LazyProperty
+    def aspect(self):
+        from .geneontology import GOAspect
+        return GOAspect.to_string(self.term.aspect)

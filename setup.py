@@ -36,7 +36,7 @@ setup(
     package_data={'pyoma': ['browser/*.drw']},
     install_requires=req_packages,
     extras_require={
-        'create_db': ['PySAIS', 'familyanlyzer'],
+        'create_db': ['PySAIS', 'familyanalyzer'],
     },
 )
 

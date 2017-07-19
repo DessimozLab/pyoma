@@ -107,6 +107,9 @@ class DatabaseTests(unittest.TestCase):
         for e in grp:
             self.assertEqual(group_id, e['OmaGroup'])
 
+    def test_fingerprint(self):
+        fingerprint = 'ADRIANA'
+
 
 class XRefDatabaseMock(Database):
     def __init__(self):

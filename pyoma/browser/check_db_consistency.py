@@ -16,7 +16,6 @@ class DatabaseChecks(unittest.TestCase):
 
         cls.db = pyomadb.Database(path)
 
-
     def translated_cdna_match_protein_sequence(self, cdna, prot):
         cdna = cdna.replace('X', 'N')
         for tab in range(1, 22):
@@ -58,3 +57,12 @@ class DatabaseChecks(unittest.TestCase):
                             .format(row.nrow, seq_off, row['CDNABufferOffset']))
             seq_off = row['SeqBufferOffset']
             cds_off = row['CDNABufferOffset']
+
+    def test_homeology_flag(self):
+        genome_tab = self.db.get_hdf5_handle().get_node('/Genome')
+        for g in (b'WHEAT', b'GOSHI', b'BRANA'):
+            for row in genome_tab.read_where('UniProtSpeciesCode == g'):
+                self.assertTrue(row['IsPolyploid'], "{} is not recorded as polyploid genome".format(g))
+        for g in (b'YEAST', b'HUMAN', b'PLAF7', b'ARATH', b'MOUSE'):
+            for row in genome_tab.read_where('UniProtSpeciesCode == g'):
+                self.assertFalse(row['IsPolyploid'], "{} is recorded to be a ployploid genome".format(g))

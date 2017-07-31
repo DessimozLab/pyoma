@@ -5,8 +5,12 @@ from builtins import object
 from builtins import zip
 import itertools
 
+from Bio.UniProt.GOA import GAF20FIELDS
 from bisect import bisect_left
 from collections import Counter
+import dateutil
+import h5py
+import pandas as pd
 import pyopa
 import tables
 import threading
@@ -19,12 +23,16 @@ import collections
 import logging
 from .KmerEncoder import KmerEncoder
 from .models import LazyProperty, KeyWrapper
-from .geneontology import GeneOntology, OntologyParser, AnnotationParser
+from .geneontology import GeneOntology, OntologyParser, AnnotationParser, GOAspect
 
 logger = logging.getLogger(__name__)
 
 # Raise stack limit for PyOPA ~400MB
 threading.stack_size(4096*100000)
+
+# Global initialisations
+GAF_VERSION = '2.1'
+
 
 def count_elements(iterable):
     """return the number of elements in an iterator in the most efficient way.
@@ -73,7 +81,7 @@ class Database(object):
     @LazyProperty
     def gene_ontology(self):
         try:
-            fp = io.Bytes(self.db.go_obo.read().tobytes())
+            fp = io.StringIO(self.db.root.Ontologies.GO.read().tobytes().decode('utf-8'))
         except tables.NoSuchNodeError:
             p = os.path.join(os.path.dirname(self.db.filename), 'go-basic.obo')
             fp = open(p, 'r')
@@ -85,6 +93,10 @@ class Database(object):
     def get_hdf5_handle(self):
         """return the handle to the database hdf5 file"""
         return self.db
+
+    def get_conversion_date(self):
+       """return the conversion end date from the DB attributes"""
+       return dateutil.parser.parse(self.db.root._v_attrs['conversion_end'])
 
     def ensure_entry(self, entry):
         """This method allows to use an entry or an entry_nr.
@@ -420,6 +432,60 @@ class Database(object):
         except ValueError as e:
             raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
 
+    def get_goannotations(self, entry_nr, as_string=False):
+        try:
+            annots = self.db.root.Annotations.GeneOntology.read_where('EntryNr == {:d}'.format(entry_nr))
+        except ValueError as e:
+            raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
+
+        df = pd.DataFrame(annots)
+
+        if len(df) == 0:
+            # Quick exit...
+            return None
+
+        # 1R DB
+        df['DB'] = 'OMA'
+        # 2R DB Object ID
+        df['DB_Object_ID'] = df['EntryNr'].apply(self.id_mapper['Oma'].map_entry_nr)
+        # 3R DB Object Symbol
+        df['DB_Object_Symbol'] = df['DB_Object_ID']
+        # 4O Qualifier
+        df['Qualifier'] = ''
+        # 5R GO ID
+        df['GO_ID'] = df['TermNr'].apply(lambda t: 'GO:{:07d}'.format(t))
+        # 6R DB:Reference
+        df['DB:Reference'] = df['Reference'].apply(lambda x: x.decode('ascii'))
+        # 7R Evidence code
+        df['Evidence'] = df['Evidence'].apply(lambda x: x.decode('ascii'))
+        # 8O With (or) From
+        df['With'] = ''
+        # 9R Aspect
+        df['Aspect'] = df['GO_ID'].apply(lambda t: GOAspect.to_char(self.gene_ontology.term_by_id(t).aspect))
+        # 10O DB Object Name
+        df['DB_Object_Name'] = ''
+        # 11O DB Object Synonym (|Synonym)
+        df['Synonym'] = ''
+        # 12R DB Object Type
+        df['DB_Object_Type'] = 'protein'
+        # 13R Taxon (|taxon)
+        df['Taxon_ID'] = df['EntryNr'].apply(lambda e: self.id_mapper['Oma'].genome_of_entry_nr(e)['NCBITaxonId'])
+        # 14R Date
+        df['Date'] = self.get_conversion_date().strftime('%Y%m%d')
+        # 15R Assigned by - TODO: FIX FOR NON OMA!!!
+        df['Assigned_By'] = df['DB']
+        # 16O Annotation Extension
+        df['Annotation_Extension'] = ''
+        # 17O Gene Product Form ID
+        df['Gene_Product_Form_ID'] = ''
+
+        df = df[GAF20FIELDS]
+        return (df if not as_string else 
+                ('!gaf-version: {}\n'.format(GAF_VERSION) + 
+                 '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) + 
+                 '\n'))
+
+
 
 class SequenceSearch(object):
     '''
@@ -449,8 +515,13 @@ class SequenceSearch(object):
         # Kmer lookup arrays / kmer setup
         self.k = self.db_idx.get_node_attr('/Protein/KmerLookup', 'k')
         self.encoder = KmerEncoder(self.k)
-        self.kmer_idx = self.db_idx.root.Protein.KmerLookup.KmerIndex  # TODO: should we cache this??
-        self.kmer_off = self.db_idx.root.Protein.KmerLookup.KmerOffsets
+        self.kmer_lookup = self.db_idx.root.Protein.KmerLookup
+
+    def get_entry_length(self, ii):
+        '''
+            Get lenght of a particular entry.
+        '''
+        return (self.db.root.Protein.Entries[ii - 1]['SeqBufferLength'] - 1)
 
     @LazyProperty
     def entry_idx(self):
@@ -464,18 +535,18 @@ class SequenceSearch(object):
             Get the entry number(s) corresponding to a location in the sequence
             buffer.
         '''
-        return numpy.searchsorted(self.entry_idx, ii)
+        return (numpy.searchsorted(self.entry_idx, ii) + 1)
 
     def _sanitise_seq(self, seq):
         '''
             Sanitise a string protein sequence. Deletes "invalid" characters.
             TODO: add functionality for biopython sequence / skbio sequence.
         '''
-        assert type(seq) == str  # TODO: Remove this check
+        assert type(seq) == str
         return ''.join(filter(lambda c: c in self.PROTEIN_CHARS,
                               seq.upper())).encode('ascii')
 
-    def search(self, seq, n=None, is_sanitised=None):
+    def search(self, seq, n=None, coverage=None, is_sanitised=None):
         '''
             Searches the database for entries that match. If can't find an exact
             match performs a kmer + local alignment approach to approximate
@@ -486,7 +557,7 @@ class SequenceSearch(object):
         # TODO: taxonomic filtering.
         if len(m) == 0:
             # Do approximate search
-            m = self.approx_search(seq, is_sanitised=True)
+            m = self.approx_search(seq, n=n, coverage=coverage, is_sanitised=True)
             # TODO: taxonomic filtering.
             return (('approx', m) if m is not None else None)
         else:
@@ -508,43 +579,43 @@ class SequenceSearch(object):
                            self.seq_buff[i:(i + nn)].tobytes())
             ii = bisect_left(z, seq, lo=self.n_entries)
 
-            if ii:
+            if ii and (z[ii] == seq):
                 # Left most found.
                 jj = ii + 1
                 while (jj < len(z)) and (z[jj] == seq):
                     # zoom to end -> -> ->
                     jj += 1
 
-                # Find entry numbers.
-                return self.get_entrynr(self.seq_idx[ii:jj])
+                # Find entry numbers and filter to remove incorrect entries
+                return list(filter(lambda e: self.get_entry_length(e) == nn, 
+                                   self.get_entrynr(self.seq_idx[ii:jj])))
 
         # Nothing found.
-        return None
+        return []
 
-    def approx_search(self, seq, n=None, is_sanitised=None, cut_off=None):
+    def approx_search(self, seq, n=None, is_sanitised=None, coverage=None):
         '''
             Performs an exact match search using the suffix array.
         '''
         seq = (seq if is_sanitised else self._sanitise_seq(seq))
         n = (n if n is not None else 50)
-        cut_off = (0.0 if cut_off is None else cut_off)
+        coverage = (0.0 if coverage is None else coverage)
 
         # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
         c = Counter()
-        for z in map(lambda x: numpy.unique(self.kmer_idx[x[0]:x[1]],
-                                            return_counts=True),
-                     map(lambda kmer: (self.kmer_off[kmer],
-                                       self.kmer_off[kmer+1]),
-                         self.encoder.decompose(seq))):
+        for z in map(lambda kmer: numpy.unique(self.kmer_lookup[int(kmer)],
+                                               return_counts=True),
+                         self.encoder.decompose(seq)):
             c.update(dict(zip(*z)))
 
         # 2. Filter to top n if necessary
         z = len(seq) - self.k + 1
-        c = [(x[0], (x[1] / z)) for x in c.items()]
+        cut_off = coverage * z
+        c = [(x[0], (x[1] / z)) for x in c.items() if x[1] >= cut_off]
         c = (sorted(c,
                     reverse=True, 
                     key=lambda x: x[1])[:n] if n > 0 else c)
-
+        
         # 3. Do local alignments and return count / score / alignment
         if len(c) > 0:
             return sorted([(m[0], {'kmer_coverage': m[1],
@@ -560,15 +631,15 @@ class SequenceSearch(object):
             for s2 in s2s:
                 z = pyopa.align_double(s1, s2, env, False, False, True)
                 a = pyopa.align_strings(s1, s2, env, False, z)
-                aligned.append((z[0], (a[0].convert_readable(),
-                                       (z[3], z[1]),
-                                       a[1].convert_readable(),
-                                       (z[4], z[2]))))
+                aligned.append((z[0], ((a[0].convert_readable(),
+                                        (z[3], z[1])),
+                                       (a[1].convert_readable(),
+                                        (z[4], z[2])))))
 
         aligned = []
         query = pyopa.Sequence(seq.decode('ascii'))
         entries = list(map(lambda m: 
-                           pyopa.Sequence(self.get_sequence(m[0]).decode('ascii')),
+                           pyopa.Sequence(self.get_sequence(int(m[0])).decode('ascii')),
                            matches))
         t = threading.Thread(target=align,
                              args=(query, entries, self.PAM100, aligned))
@@ -1124,3 +1195,51 @@ class DomainNameIdMapper(object):
         info = self._get_dominfo(domain_id)
         return {'name': info['Description'].decode(), 'source': info['Source'].decode(),
                 'domainid': domain_id.decode()}
+
+class FastMapper(object):
+    GOANNOTATIONS_COMMENT = 'This file was created using OMA FastMapper.'
+
+    def __init__(self, db):
+        self.db = db
+
+    def goannotations(self, records, as_string=False):
+        # gene ontology fast mapping, uses exact / approximate search. 
+        # todo: implement taxonomic restriction.
+        # Input: iterable of biopython SeqRecords
+        tdfs = []
+        
+        for rec in records:
+            r = self.db.seq_search.search(str(rec.seq))
+            if r is not None:
+                if r[0] == 'exact':
+                    tdfs1 = []
+                    for enum in r[1]:
+                        tdf = self.db.get_goannotations(enum)
+                        tdf['With'] = 'Exact:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(enum))
+                        tdfs1.append(tdf)
+                    tdf = pd.concat(tdfs1, ignore_index=True)
+
+                else:
+                    # Take best match. TODO: remove those below some level of match.
+                    match_enum = r[1][0][0]
+                    match_score = r[1][0][1]['score']
+
+                    tdf = self.db.get_goannotations(match_enum)
+                    tdf['With'] = 'Approx:{}:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(match_enum), 
+                                                        match_score)
+
+                tdf['DB_Object_ID'] = rec.id
+                tdf['DB_Object_Symbol'] = tdf['DB_Object_ID']
+                tdfs.append(tdf)
+
+        if len(tdfs) > 0 and any(len(tdf) > 0 for tdf in tdfs):
+            df = pd.concat(tdfs, ignore_index=True)
+            df['DB'] = 'OMA_FastMap'
+            df['Assigned_By'] = df['DB']
+            return (df if not as_string else 
+                    ('!gaf-version: {}\n!\n!{}\n'.format(GAF_VERSION, self.GOANNOTATIONS_COMMENT) + 
+                     '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) + 
+                     '\n'))
+
+        else:
+            return None if not as_string else '!gaf-version: {}\n'.format(GAF_VERSION)

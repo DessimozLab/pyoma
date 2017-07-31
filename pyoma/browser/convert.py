@@ -781,13 +781,14 @@ class DarwinExporter(object):
                 sizes[grp][grp_size] += 1
         return sizes
 
-    def add_sequence_suffix_array(self, k=6, fn=None):
+    def add_sequence_suffix_array(self, k=6, fn=None, sa=None):
         '''
             Adds the sequence suffix array to the database. NOTE: this
             (obviously) requires A LOT of memory for large DBs.
         '''
         # Ensure we're run in correct order...
         assert ('Protein' in self.h5.root), 'Add proteins before calc. SA!'
+        idx_compr = tables.Filters(complevel=6, complib='blosc', fletcher32=True)
 
         # Add to separate file if fn is set.
         if fn is None:
@@ -796,7 +797,7 @@ class DarwinExporter(object):
             fn = os.path.normpath(os.path.join(
                     os.getenv('DARWIN_BROWSERDATA_PATH', ''),
                     fn))
-            db = tables.open_file(fn, 'w', filters=self._compr)
+            db = tables.open_file(fn, 'w', filters=idx_compr)
             db.create_group('/', 'Protein')
             db.root._f_setattr('conversion_start', time.strftime("%c"))
             self.logger.info('opened {}'.format(db.filename))
@@ -809,12 +810,14 @@ class DarwinExporter(object):
 
         # Compute & save the suffix array to DB. TODO: work out what compression
         # works best!
-        sa = sais(seqs)
-        sa[:n].sort()  # Sort delimiters by position.
+        if sa is None:
+            sa = sais(seqs)
+            sa[:n].sort()  # Sort delimiters by position.
         db.create_carray('/Protein',
                          name='SequenceIndex',
                          title='concatenated protein sequences suffix array',
-                         obj=sa)
+                         obj=sa,
+                         filters=idx_compr)
 
         # Create lookup table for fa2go
         dtype = (np.uint32 if (n < np.iinfo(np.uint32).max) else
@@ -835,37 +838,33 @@ class DarwinExporter(object):
         # Reorder the necessary elements of entry index
         idx = idx[sa]
 
-        # Now find the split points.
+        # Initialise lookup array
+        atom = (tables.UInt32Atom if dtype is np.uint32 else tables.UInt64Atom)
         kmers = KmerEncoder(k, is_protein=True)
-        dtype = (np.uint16 if (len(idx) < np.iinfo(np.uint16).max)
-                 else (np.uint32 if (len(idx) < np.iinfo(np.uint32).max)
-                       else np.uint64))
-        off = np.zeros((len(kmers) + 1), dtype=dtype)
-        for kk in tqdm(range(len(kmers)), desc='Finding kmer cut-offs'):
+        z = db.create_vlarray('/Protein',
+                              name='KmerLookup',
+                              atom=atom(shape=()),
+                              title='kmer entry lookup table',
+                              filters=idx_compr,
+                              expectedrows=len(kmers))
+        z._f_setattr('k', k)
+
+        # Now find the split points and construct lookup ragged array.
+        ii = 0
+        for kk in tqdm(range(len(kmers)), desc='Constructing kmer lookup'):
             kmer = kmers.encode(kk)
-            ii = off[kk]
             if (ii < len(sa)) and (seqs[sa[ii]:(sa[ii] + k)] == kmer):
-                # Found kmer, woosh to end -> ->
-                jj = off[kk] + 1
+                jj = ii + 1
                 while (jj < len(sa)) and (seqs[sa[jj]:(sa[jj] + k)] == kmer):
                     jj += 1
+                z.append(idx[ii:jj])
             else:
                 # End or not found
-                jj = ii
-            off[kk + 1] = jj
-
-        # Save to DB
-        protKmerGrp = db.create_group('/Protein', 'KmerLookup')
-        protKmerGrp._f_setattr('k', k)
-        db.create_carray(protKmerGrp,
-                         name='KmerIndex',
-                         title='kmer to entry index for sequence buffer',
-                         obj=idx)
-        db.create_carray(protKmerGrp,
-                         name='KmerOffsets',
-                         title='offsets for kmer index',
-                         obj=off)
-
+                z.append([])
+            
+            # New start
+            ii = jj
+                
         if db.filename != self.h5.filename:
             db.root._f_setattr('conversion_end', time.strftime("%c"))
             db.close()

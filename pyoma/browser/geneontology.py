@@ -50,6 +50,7 @@ def validate_go_id(term):
 
 class GOAspect(object):
     aspects = dict(molecular_function=0, biological_process=1, cellular_component=2)
+    aspect2char = {0: 'F', 1: 'P', 2: 'C'}
 
     @classmethod
     def from_string(cls, aspect):
@@ -61,6 +62,11 @@ class GOAspect(object):
             if i == aspectnr:
                 return o
         raise KeyError('aspect number not found: ' + str(aspectnr))
+
+    @classmethod
+    def to_char(cls, aspectnr):
+        # Converts an encoded aspect to the character required for GOA files
+        return cls.aspect2char[aspectnr]
 
 
 class GOterm(object):

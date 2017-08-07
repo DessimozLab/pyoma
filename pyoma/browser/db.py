@@ -9,7 +9,6 @@ from Bio.UniProt.GOA import GAF20FIELDS
 from bisect import bisect_left
 from collections import Counter
 import dateutil
-import h5py
 import pandas as pd
 import pyopa
 import tables

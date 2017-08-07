@@ -84,7 +84,7 @@ class Database(object):
             fp = io.StringIO(self.db.root.Ontologies.GO.read().tobytes().decode('utf-8'))
         except tables.NoSuchNodeError:
             p = os.path.join(os.path.dirname(self.db.filename), 'go-basic.obo')
-            fp = open(p, 'r')
+            fp = open(p, 'rt')
         go = GeneOntology(OntologyParser(fp))
         go.parse()
         fp.close()
@@ -388,18 +388,56 @@ class Database(object):
         hog_str = hog.decode() if isinstance(hog, bytes) else hog
         return hog_str.encode('ascii'), (hog_str[0:-1] + chr(1 + ord(hog_str[-1]))).encode('ascii')
 
-    def oma_group_members(self, group_nr):
+    def oma_group_members(self, group_id):
         """get the member entries of an oma group.
 
         This method returns a numpy array of protein entries that form
-        an oma group. If the numeric group id is invalid (not positive
-        integer value), an `InvalidId` Exception is raised.
+        an oma group. If the group id is invalid (not positive
+        integer value or a valid Fingerprint), an `InvalidId` Exception
+        is raised.
 
-        :param int group_nr: numeric oma group id"""
-        if not isinstance(group_nr, int) or group_nr <= 0:
+        :param group_id: numeric oma group id or Fingerprint"""
+        if isinstance(group_id, (str, bytes)):
+            if group_id.isdigit():
+                return self.oma_group_members(int(group_id))
+            if isinstance(group_id, str):
+                group_id = group_id.encode('utf-8')
+            if group_id == b'n/a':
+                raise InvalidId('Invalid fingerprint for an OMA Group')
+            group_meta_tab = self.db.get_node('/OmaGroups/MetaData')
+            try:
+                e = next(group_meta_tab.where('(Fingerprints == {!r})'
+                                              .format(group_id)))
+                group_nr = e['GroupNr']
+            except StopIteration:
+                raise InvalidId('Unknown fingerprint for an OMA Group')
+        elif isinstance(group_id, int) and group_id > 0:
+            group_nr = group_id
+        else:
             raise InvalidId('Invalid id of oma group')
         members = self.db.root.Protein.Entries.read_where('OmaGroup=={:d}'.format(group_nr))
         return members
+
+    def oma_group_metadata(self, group_nr):
+        """get the meta data associated with a OMA Group
+
+        The meta data contains the fingerprint and the keywords infered for this group.
+        The method retuns this information as a dictionary. The parameter must be
+        the numeric oma group nr.
+
+        :param int group_nr: a numeric oma group id."""
+        if not isinstance(group_nr, int) or group_nr < 0:
+            raise InvalidId('Invalid group id')
+        meta_tab = self.db.get_node('/OmaGroups/MetaData')
+        try:
+            e = next(meta_tab.where('GroupNr == {:d}'.format(group_nr)))
+            kw_buf = self.db.get_node('/OmaGroups/KeywordBuffer')
+            res = {'fingerprint': e['Fingerprint'].decode(),
+                   'group_nr': int(e['GroupNr']),
+                   'keywords': kw_buf[e['KeywordOffset']:e['KeywordOffset']+e['KeywordLength']].tostring().decode()}
+            return res
+        except StopIteration:
+            raise InvalidId('invalid group nr')
 
     def get_sequence(self, entry):
         """get the protein sequence of a given entry as a string
@@ -429,6 +467,12 @@ class Database(object):
     def get_domains(self, entry_nr):
         try:
             return self.db.root.Annotations.Domains.read_where('EntryNr == {:d}'.format(entry_nr))
+        except ValueError as e:
+            raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
+
+    def get_gene_ontology_annotations(self, entry_nr):
+        try:
+            return self.db.root.Annotations.GeneOntology.read_where('EntryNr == {:d}'.format(entry_nr))
         except ValueError as e:
             raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
 
@@ -480,11 +524,10 @@ class Database(object):
         df['Gene_Product_Form_ID'] = ''
 
         df = df[GAF20FIELDS]
-        return (df if not as_string else 
-                ('!gaf-version: {}\n'.format(GAF_VERSION) + 
-                 '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) + 
+        return (df if not as_string else
+                ('!gaf-version: {}\n'.format(GAF_VERSION) +
+                 '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) +
                  '\n'))
-
 
 
 class SequenceSearch(object):
@@ -587,7 +630,7 @@ class SequenceSearch(object):
                     jj += 1
 
                 # Find entry numbers and filter to remove incorrect entries
-                return list(filter(lambda e: self.get_entry_length(e) == nn, 
+                return list(filter(lambda e: self.get_entry_length(e) == nn,
                                    self.get_entrynr(self.seq_idx[ii:jj])))
 
         # Nothing found.
@@ -613,9 +656,9 @@ class SequenceSearch(object):
         cut_off = coverage * z
         c = [(x[0], (x[1] / z)) for x in c.items() if x[1] >= cut_off]
         c = (sorted(c,
-                    reverse=True, 
+                    reverse=True,
                     key=lambda x: x[1])[:n] if n > 0 else c)
-        
+
         # 3. Do local alignments and return count / score / alignment
         if len(c) > 0:
             return sorted([(m[0], {'kmer_coverage': m[1],
@@ -638,7 +681,7 @@ class SequenceSearch(object):
 
         aligned = []
         query = pyopa.Sequence(seq.decode('ascii'))
-        entries = list(map(lambda m: 
+        entries = list(map(lambda m:
                            pyopa.Sequence(self.get_sequence(int(m[0])).decode('ascii')),
                            matches))
         t = threading.Thread(target=align,
@@ -655,6 +698,7 @@ class OmaIdMapper(object):
         self._entry_off_keys = self.genome_table.argsort(order=('EntryOff'))
         self._genome_keys = self.genome_table.argsort(
             order=('UniProtSpeciesCode'))
+        self._taxid_keys = self.genome_table.argsort(order=('NCBITaxonId'))
         self._omaid_re = re.compile(r'(?P<genome>[A-Z][A-Z0-9]{4})(?P<nr>\d+)')
         self._db = db
 
@@ -682,6 +726,26 @@ class OmaIdMapper(object):
         if genome['UniProtSpeciesCode'] != code:
             raise UnknownSpecies('{} is unknown'.format(code))
         return genome
+
+    def genome_from_taxid(self, taxid):
+        try:
+            taxid = int(taxid)
+            idx = self.genome_table['NCBITaxonId'].searchsorted(
+                taxid, sorter=self._taxid_keys)
+            genome = self.genome_table[self._taxid_keys[idx]]
+        except (IndexError, ValueError):
+            raise UnknownSpecies('TaxonId "{}" is unknown'.format(taxid))
+        if genome['NCBITaxonId'] != taxid:
+            raise UnknownSpecies('TaxonId "{}" is unknown'.format(taxid))
+        return genome
+
+    def identify_genome(self, code):
+        """identify genome based on either a UniProtSpeciesCode or an
+        NCBI Taxonomy Id"""
+        if isinstance(code, int) or code.isdigit():
+            return self.genome_from_taxid(code)
+        else:
+            return self.genome_from_UniProtCode(code)
 
     def omaid_to_entry_nr(self, omaid):
         """returns the internal numeric entrynr from a
@@ -1203,11 +1267,11 @@ class FastMapper(object):
         self.db = db
 
     def goannotations(self, records, as_string=False):
-        # gene ontology fast mapping, uses exact / approximate search. 
+        # gene ontology fast mapping, uses exact / approximate search.
         # todo: implement taxonomic restriction.
         # Input: iterable of biopython SeqRecords
         tdfs = []
-        
+
         for rec in records:
             r = self.db.seq_search.search(str(rec.seq))
             if r is not None:
@@ -1225,7 +1289,7 @@ class FastMapper(object):
                     match_score = r[1][0][1]['score']
 
                     tdf = self.db.get_goannotations(match_enum)
-                    tdf['With'] = 'Approx:{}:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(match_enum), 
+                    tdf['With'] = 'Approx:{}:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(match_enum),
                                                         match_score)
 
                 tdf['DB_Object_ID'] = rec.id
@@ -1236,9 +1300,9 @@ class FastMapper(object):
             df = pd.concat(tdfs, ignore_index=True)
             df['DB'] = 'OMA_FastMap'
             df['Assigned_By'] = df['DB']
-            return (df if not as_string else 
-                    ('!gaf-version: {}\n!\n!{}\n'.format(GAF_VERSION, self.GOANNOTATIONS_COMMENT) + 
-                     '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) + 
+            return (df if not as_string else
+                    ('!gaf-version: {}\n!\n!{}\n'.format(GAF_VERSION, self.GOANNOTATIONS_COMMENT) +
+                     '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) +
                      '\n'))
 
         else:

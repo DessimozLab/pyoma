@@ -53,6 +53,25 @@ class ProteinEntryTests(unittest.TestCase):
         self.assertAlmostEqual(protein_entry.gc_content, 3.0 / 8.0)
 
 
+class GeneOntologyAnnotationTests(unittest.TestCase):
+    db = None
+
+    @classmethod
+    def setUpClass(cls):
+        fn = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        cls.db = db.Database(fn)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.db.get_hdf5_handle().close()
+
+    def test_from_annotation_table(self):
+        annos = self.db.get_gene_ontology_annotations(12)
+        goa = models.GeneOntologyAnnotation(self.db, annos[0])
+        self.assertEqual(12, goa.entry_nr)
+        self.assertIn(goa.aspect, ['molecular_function', 'biological_process','cellular_component'])
+
+
 class SingletonTests(unittest.TestCase):
 
     def test_singleton(self):

@@ -5,8 +5,8 @@ import shutil
 
 name = 'pyoma'
 
-req_packages = ['numpy', 'tables>=3.2', 'future', 'familyanalyzer', 'PySAIS',
-                'tqdm']
+req_packages = ['numpy', 'tables>=3.2', 'future',
+                'tqdm', 'pyoma', 'pandas']
 if sys.version_info < (3, 3):
     req_packages.extend(['mock', 'functools32'])
 
@@ -35,6 +35,9 @@ setup(
     scripts=['bin/importdata.py', 'bin/oma2hdf'],
     package_data={'pyoma': ['browser/*.drw']},
     install_requires=req_packages,
+    extras_require={
+        'create_db': ['PySAIS', 'familyanlyzer'],
+    },
 )
 
 # Remove local copy of oma2hdf (installed)

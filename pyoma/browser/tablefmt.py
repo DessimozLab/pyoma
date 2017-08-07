@@ -79,6 +79,9 @@ class XRefTable(tables.IsDescription):
                      'ORF Name', 'Ordered Locus Name']),
         'n/a', base='uint8', pos=2)
     XRefId = tables.StringCol(50, pos=3)
+    #Verification = tables.EnumCol(
+    #    tables.Enum({'exact': 0, 'modified': 1, 'unchecked': 2}),
+    #    'unchecked', base='uint8', pos=4)
 
 
 class GeneOntologyTable(tables.IsDescription):

@@ -3,6 +3,7 @@ import csv
 import logging
 import math
 import re
+import numpy
 
 """
 IMPORTANT NOTE:
@@ -35,8 +36,8 @@ def reverse_name_of_rels(rels):
 
 
 def validate_go_id(term):
-    if isinstance(term, int):
-        return term
+    if isinstance(term, (int, numpy.integer)):
+        return int(term)
 
     term = term.strip()
     if term.startswith('GO:'):

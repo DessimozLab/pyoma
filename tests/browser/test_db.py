@@ -122,6 +122,16 @@ class DatabaseTests(unittest.TestCase):
             self.assertTrue((i in {z[0] for z in self.db.seq_search.search(s, is_sanitised=True)[1]}),
                             'exact search for entry {} failed.'.format(i))
 
+    def test_oma_group_from_numeric_id(self):
+        group_id = 5
+        grp =  self.db.oma_group_members(group_id)
+        self.assertEqual(4, len(grp))
+        for e in grp:
+            self.assertEqual(group_id, e['OmaGroup'])
+
+    def test_fingerprint(self):
+        fingerprint = 'ADRIANA'
+
 
 class XRefDatabaseMock(Database):
     def __init__(self):
@@ -187,7 +197,7 @@ class TaxonomyTest(unittest.TestCase):
         member = frozenset([self.tax._taxon_from_numeric(x)['Name']
                             for x in self.tax.tax_table['NCBITaxonId']])
         phylo = self.tax.get_induced_taxonomy(member, collapse=True)
-        expected = '(((Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056),Saccharomyces cerevisiae (strain ATCC 204508 / S288c))Saccharomycetaceae,Schizosaccharomyces pombe (strain 972 / ATCC 24843))Ascomycota,Plasmodium falciparum (isolate 3D7))Eukaryota'
+        expected = '(((Ashbya gossypii [strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056],Saccharomyces cerevisiae [strain ATCC 204508 / S288c])Saccharomycetaceae,Schizosaccharomyces pombe [strain 972 / ATCC 24843])Ascomycota,Plasmodium falciparum [isolate 3D7])Eukaryota'
         expected = expected.replace(' ', '_')
         self.assertEqual(expected, phylo.newick())
 
@@ -203,3 +213,45 @@ class TaxonomyTest(unittest.TestCase):
                         {"id":284812, "name": "Schizosaccharomyces pombe (strain 972 / ATCC 24843)"}]},
                       {"id":36329, "name": "Plasmodium falciparum (isolate 3D7)"}]}
         self.assertEqual(expected, phylo.as_dict())
+
+class DBMock(object):
+    def __init__(self, h5):
+        self.h5 = h5
+
+    def get_hdf5_handle(self):
+        return self.h5
+
+
+class GenomeIdResolverTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        cls.db = DBMock(tables.open_file(path))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.db.get_hdf5_handle().close()
+
+    def setUp(self):
+        self.OmaIdMapper = OmaIdMapper(self.db)
+
+    def test_resolve_uniprot_code(self):
+        query = 'YEAST'
+        g = self.OmaIdMapper.identify_genome(query)
+        self.assertEqual(g['UniProtSpeciesCode'], query.encode('ascii'))
+
+    def test_resolve_non_existing_uniprot_code(self):
+        query = 'XED22'
+        with self.assertRaises(UnknownSpecies):
+            self.OmaIdMapper.identify_genome(query)
+
+    def test_resolve_taxon_id(self):
+        expected = b'PLAF7'
+        for query in (36329, b'36329', "36329"):
+            with self.subTest(query=query):
+                g = self.OmaIdMapper.identify_genome(query)
+                self.assertEqual(g['UniProtSpeciesCode'], expected)
+
+    def test_resolve_nonexisting_code(self):
+        with self.assertRaises(UnknownSpecies):
+            self.OmaIdMapper.identify_genome(2)

@@ -5,7 +5,8 @@ from builtins import object
 from builtins import zip
 import itertools
 
-from Bio.UniProt.GOA import GAF20FIELDS
+import time
+from Bio.UniProt import GOA
 from bisect import bisect_left
 from collections import Counter
 import dateutil
@@ -94,8 +95,8 @@ class Database(object):
         return self.db
 
     def get_conversion_date(self):
-       """return the conversion end date from the DB attributes"""
-       return dateutil.parser.parse(self.db.root._v_attrs['conversion_end'])
+        """return the conversion end date from the DB attributes"""
+        return dateutil.parser.parse(self.db.root._v_attrs['conversion_end'])
 
     def ensure_entry(self, entry):
         """This method allows to use an entry or an entry_nr.
@@ -469,23 +470,20 @@ class Database(object):
         except ValueError as e:
             raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
 
-    def get_gene_ontology_annotations(self, entry_nr):
-        try:
-            return self.db.root.Annotations.GeneOntology.read_where('EntryNr == {:d}'.format(entry_nr))
-        except ValueError as e:
-            raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
-
-    def get_goannotations(self, entry_nr, as_string=False):
+    def get_gene_ontology_annotations(self, entry_nr, as_dataframe=False, as_gaf=False):
         try:
             annots = self.db.root.Annotations.GeneOntology.read_where('EntryNr == {:d}'.format(entry_nr))
         except ValueError as e:
             raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
+        if not as_dataframe and not as_gaf:
+            return annots
+
+        # early return if no annotations available
+        if len(annots) == 0:
+            return '!gaf-version: {}\n'.format(GAF_VERSION) if as_gaf else None
+
 
         df = pd.DataFrame(annots)
-
-        if len(df) == 0:
-            # Quick exit...
-            return None
 
         # 1R DB
         df['DB'] = 'OMA'
@@ -512,7 +510,8 @@ class Database(object):
         # 12R DB Object Type
         df['DB_Object_Type'] = 'protein'
         # 13R Taxon (|taxon)
-        df['Taxon_ID'] = df['EntryNr'].apply(lambda e: self.id_mapper['Oma'].genome_of_entry_nr(e)['NCBITaxonId'])
+        df['Taxon_ID'] = df['EntryNr'].apply(lambda e: 'taxon:{:d}'
+                                             .format(self.id_mapper['Oma'].genome_of_entry_nr(e)['NCBITaxonId']))
         # 14R Date
         df['Date'] = self.get_conversion_date().strftime('%Y%m%d')
         # 15R Assigned by - TODO: FIX FOR NON OMA!!!
@@ -522,8 +521,8 @@ class Database(object):
         # 17O Gene Product Form ID
         df['Gene_Product_Form_ID'] = ''
 
-        df = df[GAF20FIELDS]
-        return (df if not as_string else
+        df = df[GOA.GAF20FIELDS]
+        return (df if not as_gaf else
                 ('!gaf-version: {}\n'.format(GAF_VERSION) +
                  '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) +
                  '\n'))
@@ -1259,50 +1258,70 @@ class DomainNameIdMapper(object):
         return {'name': info['Description'].decode(), 'source': info['Source'].decode(),
                 'domainid': domain_id.decode()}
 
+
 class FastMapper(object):
-    GOANNOTATIONS_COMMENT = 'This file was created using OMA FastMapper.'
+    """GO Function projection to sequences from OMA hdf5 file"""
 
     def __init__(self, db):
         self.db = db
 
-    def goannotations(self, records, as_string=False):
+    def iter_projected_goannotations(self, records):
         # gene ontology fast mapping, uses exact / approximate search.
         # todo: implement taxonomic restriction.
         # Input: iterable of biopython SeqRecords
-        tdfs = []
 
         for rec in records:
+            logger.debug('projecting function to {}'.format(rec))
             r = self.db.seq_search.search(str(rec.seq))
             if r is not None:
+                logger.debug(str(r))
                 if r[0] == 'exact':
                     tdfs1 = []
                     for enum in r[1]:
-                        tdf = self.db.get_goannotations(enum)
-                        tdf['With'] = 'Exact:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(enum))
-                        tdfs1.append(tdf)
-                    tdf = pd.concat(tdfs1, ignore_index=True)
+                        df = self.db.get_gene_ontology_annotations(enum, as_dataframe=True)
+                        if df is not None:
+                            df['With'] = 'Exact:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(enum))
+                            tdfs1.append(go_df)
+                    go_df = pd.concat(tdfs1, ignore_index=True)
 
                 else:
                     # Take best match. TODO: remove those below some level of match.
                     match_enum = r[1][0][0]
                     match_score = r[1][0][1]['score']
-
-                    tdf = self.db.get_goannotations(match_enum)
-                    tdf['With'] = 'Approx:{}:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(match_enum),
+                    logger.debug('match: enum: {}, score:{}'.format(match_enum, match_score))
+                    go_df = self.db.get_gene_ontology_annotations(match_enum, as_dataframe=True)
+                    if go_df is not None:
+                        go_df['With'] = 'Approx:{}:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(match_enum),
                                                         match_score)
+                if go_df is not None:
+                    go_df['DB'] = 'OMA_FastMap'
+                    go_df['Assigned_By'] = go_df['DB']
+                    go_df['DB_Object_ID'] = rec.id
+                    go_df['DB_Object_Symbol'] = go_df['DB_Object_ID']
+                    go_df['Evidence'] = 'IEA'
+                    go_df['DB:Reference'] = 'OMA_Fun:002'
+                    go_df['Taxon_ID'] = 'taxon:-1'
+                    len_with_dupl = len(go_df)
+                    go_df.drop_duplicates(inplace=True)
+                    logger.debug('cleaning duplicates: from {} to {} annotations'.format(len_with_dupl, len(go_df)))
+                    for row in go_df.to_dict('records'):
+                        yield row
 
-                tdf['DB_Object_ID'] = rec.id
-                tdf['DB_Object_Symbol'] = tdf['DB_Object_ID']
-                tdfs.append(tdf)
+    def write_annotations(self, file, seqrecords):
+        """Project annotations and write them to file
 
-        if len(tdfs) > 0 and any(len(tdf) > 0 for tdf in tdfs):
-            df = pd.concat(tdfs, ignore_index=True)
-            df['DB'] = 'OMA_FastMap'
-            df['Assigned_By'] = df['DB']
-            return (df if not as_string else
-                    ('!gaf-version: {}\n!\n!{}\n'.format(GAF_VERSION, self.GOANNOTATIONS_COMMENT) +
-                     '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) +
-                     '\n'))
+        This method takes a filehandle and an iterable of BioPython
+        SeqRecords objects as input. The function computes the
+        projected annotations and writes them to the file in gaf
+        format.
 
-        else:
-            return None if not as_string else '!gaf-version: {}\n'.format(GAF_VERSION)
+        :param file: filehandle to write annotations to
+        :param seqrecords: input sequencs to project functions to
+        """
+
+        file.write('!gaf-version: {}\n'.format(GAF_VERSION))
+        file.write('!Project Name: OMA Fast Function Projection\n')
+        file.write('!Date created: {}\n'.format(time.strftime("%c")))
+        file.write('!Contact Email: contact@omabrowser.org\n')
+        for anno in self.iter_projected_goannotations(seqrecords):
+            GOA.writerec(anno, file, GOA.GAF20FIELDS)

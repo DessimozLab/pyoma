@@ -471,8 +471,20 @@ class Database(object):
             raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
 
     def get_gene_ontology_annotations(self, entry_nr, as_dataframe=False, as_gaf=False):
+        # function to check if an annotation term is obsolete
+        def filter_obsolete_terms(term):
+            try:
+                self.gene_ontology.term_by_id(term)
+                return True
+            except (KeyError, ValueError):
+                return False
         try:
             annots = self.db.root.Annotations.GeneOntology.read_where('EntryNr == {:d}'.format(entry_nr))
+
+            # for test database we also have some obsolete terms. we need to filter those
+            if len(annots) > 0:
+                not_obsolete = numpy.vectorize(filter_obsolete_terms)(annots['TermNr'])
+                annots = annots[not_obsolete]
         except ValueError as e:
             raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
         if not as_dataframe and not as_gaf:
@@ -481,7 +493,6 @@ class Database(object):
         # early return if no annotations available
         if len(annots) == 0:
             return '!gaf-version: {}\n'.format(GAF_VERSION) if as_gaf else None
-
 
         df = pd.DataFrame(annots)
 

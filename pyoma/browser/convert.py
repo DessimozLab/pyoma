@@ -866,6 +866,9 @@ class DarwinExporter(object):
             ii = jj
                 
         if db.filename != self.h5.filename:
+            self.logger.info('storing external links to SequenceIndex and KmerLookup')
+            self.h5.create_external_link('/Protein', 'KmerLookup', z)
+            self.h5.create_external_link('/Protein', 'SequenceIndex', db.root.Protein.SequenceIndex)
             db.root._f_setattr('conversion_end', time.strftime("%c"))
             db.close()
             self.logger.info('closed {}'.format(db.filename))

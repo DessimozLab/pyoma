@@ -5,7 +5,8 @@ import shutil
 
 name = 'pyoma'
 
-req_packages = ['numpy', 'tables>=3.2', 'future']
+req_packages = ['numpy', 'tables>=3.2', 'future',
+                'tqdm', 'pyoma', 'pandas']
 if sys.version_info < (3, 3):
     req_packages.extend(['mock', 'functools32'])
 
@@ -35,7 +36,7 @@ setup(
     package_data={'pyoma': ['browser/*.drw']},
     install_requires=req_packages,
     extras_require={
-        'create_db': ['familyanlyzer'],
+        'create_db': ['PySAIS', 'familyanlyzer'],
     },
 )
 

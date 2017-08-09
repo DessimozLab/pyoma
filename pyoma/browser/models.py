@@ -37,6 +37,21 @@ class LazyProperty(object):
         return result
 
 
+class KeyWrapper(object):
+    '''
+        Enables the use of functions, e.g. bisect, with a key function.
+    '''
+    def __init__(self, it, key):
+        self.it = it
+        self.key = key
+
+    def __getitem__(self, i):
+        return self.key(self.it[i])
+
+    def __len__(self):
+        return len(self.it)
+
+
 class Singleton(type):
     """A meta-class to enforce a Singleton, e.g. a class that can be
     instantiated only exactly once.
@@ -181,7 +196,7 @@ class Genome(object):
 
     def strain(self):
         return self.species_and_strain_as_dict['strain']
-    
+
     @property
     def nr_entries(self):
         return int(self._genome['TotEntries'])

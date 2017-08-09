@@ -5,11 +5,14 @@ from future.builtins import range
 from future.builtins import object
 from future.builtins import super
 from future.standard_library import hooks
+from PySAIS import sais
 from tempfile import NamedTemporaryFile
+from tqdm import tqdm
 import csv
 import resource
 import tables
 import numpy
+import numpy as np  # TODO: change all numpy references to np.
 import numpy.lib.recfunctions
 import os
 import subprocess
@@ -30,6 +33,7 @@ import fileinput
 from .. import common
 from . import locus_parser
 from . import tablefmt
+from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
 from .geneontology import GeneOntology, OntologyParser
 
@@ -777,6 +781,95 @@ class DarwinExporter(object):
                 sizes[grp][grp_size] += 1
         return sizes
 
+    def add_sequence_suffix_array(self, k=6, fn=None, sa=None):
+        '''
+            Adds the sequence suffix array to the database. NOTE: this
+            (obviously) requires A LOT of memory for large DBs.
+        '''
+        # Ensure we're run in correct order...
+        assert ('Protein' in self.h5.root), 'Add proteins before calc. SA!'
+        idx_compr = tables.Filters(complevel=6, complib='blosc', fletcher32=True)
+
+        # Add to separate file if fn is set.
+        if fn is None:
+            db = self.h5
+        else:
+            fn = os.path.normpath(os.path.join(
+                    os.getenv('DARWIN_BROWSERDATA_PATH', ''),
+                    fn))
+            db = tables.open_file(fn, 'w', filters=idx_compr)
+            db.create_group('/', 'Protein')
+            db.root._f_setattr('conversion_start', time.strftime("%c"))
+            self.logger.info('opened {}'.format(db.filename))
+
+        # Load sequence buffer to memory - this is required to calculate the SA.
+        # Do it here (instead of in PySAIS) so that we can use it for computing
+        # the split points later.
+        seqs = self.h5.get_node('/Protein/SequenceBuffer')[:].tobytes()
+        n = len(self.h5.get_node('/Protein/Entries'))
+
+        # Compute & save the suffix array to DB. TODO: work out what compression
+        # works best!
+        if sa is None:
+            sa = sais(seqs)
+            sa[:n].sort()  # Sort delimiters by position.
+        db.create_carray('/Protein',
+                         name='SequenceIndex',
+                         title='concatenated protein sequences suffix array',
+                         obj=sa,
+                         filters=idx_compr)
+
+        # Create lookup table for fa2go
+        dtype = (np.uint32 if (n < np.iinfo(np.uint32).max) else
+                 np.uint64)
+        idx = np.zeros(sa.shape, dtype=dtype)
+        mask = np.zeros(sa.shape, dtype=np.bool)
+
+        # Compute mask and entry index for sequence buff
+        for i in range(n):
+            s = (sa[i - 1] if i > 0 else -1) + 1
+            e = (sa[i] + 1)
+            idx[s:e] = i + 1
+            mask[(e - k):e] = True  # (k-1) invalid and delim.
+
+        # Mask off those we don't want...
+        sa = sa[~mask[sa]]
+
+        # Reorder the necessary elements of entry index
+        idx = idx[sa]
+
+        # Initialise lookup array
+        atom = (tables.UInt32Atom if dtype is np.uint32 else tables.UInt64Atom)
+        kmers = KmerEncoder(k, is_protein=True)
+        z = db.create_vlarray('/Protein',
+                              name='KmerLookup',
+                              atom=atom(shape=()),
+                              title='kmer entry lookup table',
+                              filters=idx_compr,
+                              expectedrows=len(kmers))
+        z._f_setattr('k', k)
+
+        # Now find the split points and construct lookup ragged array.
+        ii = 0
+        for kk in tqdm(range(len(kmers)), desc='Constructing kmer lookup'):
+            kmer = kmers.encode(kk)
+            if (ii < len(sa)) and (seqs[sa[ii]:(sa[ii] + k)] == kmer):
+                jj = ii + 1
+                while (jj < len(sa)) and (seqs[sa[jj]:(sa[jj] + k)] == kmer):
+                    jj += 1
+                z.append(idx[ii:jj])
+            else:
+                # End or not found
+                z.append([])
+            
+            # New start
+            ii = jj
+                
+        if db.filename != self.h5.filename:
+            db.root._f_setattr('conversion_end', time.strftime("%c"))
+            db.close()
+            self.logger.info('closed {}'.format(db.filename))
+
 
 def download_url_if_not_present(url):
     tmpfolder = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH', '/tmp'), "Browser", "xref")
@@ -1290,7 +1383,9 @@ def getDebugLogger():
     return log
 
 
-def main(name="OmaServer.h5"):
+def main(name="OmaServer.h5", k=6, idx_name=None):
+    idx_name = (name + '.idx') if idx_name is None else idx_name
+
     log = getDebugLogger()
     x = DarwinExporter(name, logger=log)
     x.add_version()
@@ -1312,5 +1407,6 @@ def main(name="OmaServer.h5"):
 
     x = DarwinExporter(name, logger=log)
     x.create_indexes()
+    x.add_sequence_suffix_array(k=k, fn=idx_name)
     x.update_summary_stats()
     x.close()

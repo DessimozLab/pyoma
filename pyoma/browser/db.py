@@ -1292,7 +1292,7 @@ class FastMapper(object):
                         df = self.db.get_gene_ontology_annotations(enum, as_dataframe=True)
                         if df is not None:
                             df['With'] = 'Exact:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(enum))
-                            tdfs1.append(go_df)
+                            tdfs1.append(df)
                     go_df = pd.concat(tdfs1, ignore_index=True)
 
                 else:

@@ -125,6 +125,17 @@ class DomainDescriptionTable(tables.IsDescription):
     Description = tables.StringCol(150, pos=2)
 
 
+class HOGDomainArchPrevalenceTable(tables.IsDescription):
+    Fam = tables.UInt32Col(pos=0)
+    ReprEntryNr = tables.UInt32Col(pos=1)
+    Prevalence = tables.Float16Col(pos=2)
+
+
+class HOGDomainPresenceTable(tables.IsDescription):
+    Offset = tables.UInt32Col(pos=0)
+    DomainId = tables.StringCol(20, pos=1)
+
+
 class GroupsizeHistogram(tables.IsDescription):
     Size = tables.UInt32Col(pos=0)
     Count = tables.UInt32Col(pos=1)

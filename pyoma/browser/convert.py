@@ -5,6 +5,7 @@ from future.builtins import range
 from future.builtins import object
 from future.builtins import super
 from future.standard_library import hooks
+from collections import defaultdict
 from tempfile import NamedTemporaryFile
 import csv
 import resource
@@ -26,6 +27,7 @@ import hashlib
 import itertools
 import operator
 import fileinput
+import pandas as pd
 
 from .. import common
 from . import locus_parser
@@ -597,6 +599,13 @@ class DarwinExporter(object):
         domtab = self.h5.get_node('/Annotations/Domains')
         domtab.cols.EntryNr.create_csindex()
 
+        self.logger.info('creating indexes for HOG to prevalent domains '
+                         '(Fam and DomainId)')
+        dom2hog_tab = self.h5.get_node('/HOGAnnotations/Domains')
+        dom2hog_tab.cols.DomainId.create_csindex()
+        domprev_tab = self.h5.get_node('/HOGAnnotations/DomainArchPrevalence')
+        domprev_tab.cols.Fam.create_csindex()
+
     def _iter_canonical_xref(self):
         """extract one canonical xref id for each protein.
 
@@ -776,6 +785,79 @@ class DarwinExporter(object):
             for grp_size in memb_cnts[grp].values():
                 sizes[grp][grp_size] += 1
         return sizes
+
+    def add_hog_domain_prevalence(self):
+        # Check that protein entries / domains are added already to the DB
+        assert True  # TODO
+
+        # Load the HOG -> Entry table to memory
+        prot_tab = self.h5.root.Protein.Entries
+        df = pd.DataFrame.from_records(((z['EntryNr'], z['OmaHOG'])
+                                        for z in prot_tab.iterrows()),
+                                       columns=['EntryNr', 'OmaHOG'])
+        # Strip singletons
+        df = df[~(df['OmaHOG'] == b'')]
+
+        # Reformat HOG ID to plain-integer for top-level grouping only
+        df['OmaHOG'] = df['OmaHOG'].apply(lambda i: int(i[4:].split(b'.')[0]))
+
+        # Load domains
+        domains = pd.DataFrame.from_records(self.h5.root.Annotations.Domains[:])
+
+        # Ensure sorted by coordinate - TODO: move this to DA import function
+        domains['start'] = domains['Coords'].apply(lambda c:
+                                                   int(c.split(b':')[0]))
+        domains.sort_values(['EntryNr', 'start'], inplace=True)
+        domains = domains[['EntryNr', 'DomainId']]
+
+        # Merge domains / entry-hog tables. Keep entries with no domains
+        # so that we can count the size of the HOGs.
+        df = pd.merge(df, domains, on='EntryNr', how='left')
+
+        # Gather entry-domain for each HOG.
+        hog_das = []
+        for (hog_id, hdf) in df.groupby('OmaHOG'):
+            size = len(set(hdf['EntryNr']))
+            hdf = hdf[~hdf['DomainId'].isnull()]
+            cov = len(set(hdf['EntryNr']))  # Coverage with any DA
+
+            if len(hdf) > 0 and cov > 1:
+                # There are some annotations
+                da = defaultdict(list)
+                for (enum, edf) in hdf.groupby('EntryNr'):
+                    d = edf['DomainId']
+                    d = tuple(d) if (type(d) != bytes) else (d,)
+                    da[d].append(enum)
+
+                da = sorted(da.items(), key=lambda i: len(i[1]), reverse=True)
+                c = len(da[0][1])  # Count of prev. DA
+                if c > 1:
+                    # DA exists in more than one member.
+                    hog_das.append((hog_id,               # HOG ID
+                                    da[0][0],             # Consensus DA
+                                    da[0][1][0],          # Representative entry
+                                    (100 * (c / size))))  # Prevalence
+
+        # Create tables in file -- done this way as these end up being pretty
+        # small tables (<25MB)
+        tab = self.h5.create_table('/HOGAnnotations',
+                                   'DomainArchPrevalence',
+                                   tablefmt.HOGDomainArchPrevalenceTable,
+                                   createparents=True,
+                                   expectedrows=len(hog_das))
+        self._write_to_table(tab, [(x[0], x[2], x[3]) for x in hog_das])
+        tab.flush()  # Required?
+
+        # HOG <-> Domain table
+        tab = self.h5.create_table('/HOGAnnotations',
+                                   'Domains',
+                                   tablefmt.HOGDomainPresenceTable,
+                                   createparents=True,
+                                   expectedrows=len(hog_das))
+        self._write_to_table(tab, [(i, d)
+                                   for (i, x) in enumerate(hog_das)
+                                   for d in x[1]])
+        tab.flush()  # Required?
 
 
 def download_url_if_not_present(url):
@@ -1308,6 +1390,7 @@ def main(name="OmaServer.h5"):
         PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
     x.add_canonical_id()
     x.add_group_metadata()
+    x.add_hog_domain_prevalence()
     x.close()
 
     x = DarwinExporter(name, logger=log)

@@ -790,11 +790,15 @@ class DarwinExporter(object):
         # Check that protein entries / domains are added already to the DB
         assert True  # TODO
 
+        # Used later
+        hl_tab = self.h5.get_node('/HogLevel')
+
         # Load the HOG -> Entry table to memory
         prot_tab = self.h5.root.Protein.Entries
-        df = pd.DataFrame.from_records(((z['EntryNr'], z['OmaHOG'])
+        # TODO: work out how to do this in a neater way
+        df = pd.DataFrame.from_records(((z['EntryNr'], z['OmaHOG'], z['SeqBufferLength'])
                                         for z in prot_tab.iterrows()),
-                                       columns=['EntryNr', 'OmaHOG'])
+                                       columns=['EntryNr', 'OmaHOG', 'SeqBufferLength'])
         # Strip singletons
         df = df[~(df['OmaHOG'] == b'')]
 
@@ -818,6 +822,7 @@ class DarwinExporter(object):
         hog_das = []
         for (hog_id, hdf) in df.groupby('OmaHOG'):
             size = len(set(hdf['EntryNr']))
+
             hdf = hdf[~hdf['DomainId'].isnull()]
             cov = len(set(hdf['EntryNr']))  # Coverage with any DA
 
@@ -833,9 +838,15 @@ class DarwinExporter(object):
                 c = len(da[0][1])  # Count of prev. DA
                 if c > 1:
                     # DA exists in more than one member.
+                    tl = hl_tab.read_wherewhere('Fam == {}'.format(hog_id))[0]['Level']
+                    rep_len = hdf[hdf['EntryNr'] == da[0][1][0]]['SeqBufferLength']
+
                     hog_das.append((hog_id,               # HOG ID
                                     da[0][0],             # Consensus DA
                                     da[0][1][0],          # Representative entry
+                                    rep_len,              # Repr. entry length
+                                    tl,                   # Top level of HOG
+                                    size,                 # HOG size
                                     (100 * (c / size))))  # Prevalence
 
         # Create tables in file -- done this way as these end up being pretty
@@ -845,7 +856,7 @@ class DarwinExporter(object):
                                    tablefmt.HOGDomainArchPrevalenceTable,
                                    createparents=True,
                                    expectedrows=len(hog_das))
-        self._write_to_table(tab, [(x[0], x[2], x[3]) for x in hog_das])
+        self._write_to_table(tab, [(x[0], *x[2:]) for x in hog_das])
         tab.flush()  # Required?
 
         # HOG <-> Domain table

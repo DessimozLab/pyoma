@@ -6,7 +6,7 @@ import shutil
 name = 'pyoma'
 
 req_packages = ['numpy', 'tables>=3.2', 'future',
-                'tqdm', 'pyoma', 'pandas']
+                'tqdm', 'pyopa', 'pandas']
 if sys.version_info < (3, 3):
     req_packages.extend(['mock', 'functools32'])
 

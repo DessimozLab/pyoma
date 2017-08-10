@@ -2,8 +2,11 @@ future>=0.14.3
 numpy>=1.9.2
 numexpr>=2.4
 tables>=3.2.2
+cython
 PySAIS
 tqdm
+pandas
+--no-binary pyopa pyoma
 
 -e git+ssh://gitolite@lab.dessimoz.org:2222/family-analyzer@master#egg=familyanalyzer
 -e .

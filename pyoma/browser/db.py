@@ -491,6 +491,9 @@ class Database(object):
         sim_fams_df.sort_values('sim', inplace=True, ascending=False)
         sim_fams_df.reset_index(drop=True, inplace=True)
 
+        # Prevalence
+        sim_fams_df['Prev'] = 100 * (sim_fams_df['PrevCount'] / sim_fams_df['FamSize'])
+
         return (fam_row, sim_fams_df)
 
 

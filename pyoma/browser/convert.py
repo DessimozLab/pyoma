@@ -852,12 +852,12 @@ class DarwinExporter(object):
 
                     # Save required information about this group for the web
                     # view.
-                    hog2info.append((hog_id,               # HOG ID
-                                     repr_entry,           # Repr. entry
-                                     rep_len,              # Repr. entry length
-                                     tl,                   # Top level of HOG
-                                     size,                 # HOG size
-                                     (100 * (c / size))))  # Prevalence
+                    hog2info.append((hog_id,      # HOG ID
+                                     repr_entry,  # Repr. entry
+                                     rep_len,     # Repr. entry length
+                                     tl,          # Top level of HOG
+                                     size,        # HOG size
+                                     c))          # Prevalence
 
         # Create tables in file -- done this way as these end up being pretty
         # small tables (<25MB)

@@ -466,7 +466,7 @@ class Database(object):
         domprev_tab = self.db.get_node('/HOGAnnotations/DomainArchPrevalence')
         dom2hog_tab = self.db.get_node('/HOGAnnotations/Domains')
 
-        fam_row = domprev_tab.read_where('Fam == {}'.format(fam))
+        fam_row = domprev_tab.read_where('Fam == {}'.format(fam))[0]
         if len(fam_row) == 0:
             return (None, None)
 

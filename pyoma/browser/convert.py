@@ -7,6 +7,7 @@ from future.builtins import super
 from future.standard_library import hooks
 from collections import defaultdict
 from tempfile import NamedTemporaryFile
+from tqdm import tqdm
 import csv
 import resource
 import tables
@@ -819,14 +820,15 @@ class DarwinExporter(object):
         df = pd.merge(df, domains, on='EntryNr', how='left')
 
         # Gather entry-domain for each HOG.
-        hog_das = []
-        for (hog_id, hdf) in df.groupby('OmaHOG'):
+        hog2dom = []
+        hog2info = []
+        for (hog_id, hdf) in tqdm(df.groupby('OmaHOG')):
             size = len(set(hdf['EntryNr']))
 
             hdf = hdf[~hdf['DomainId'].isnull()]
             cov = len(set(hdf['EntryNr']))  # Coverage with any DA
 
-            if len(hdf) > 0 and cov > 1:
+            if (size > 2) and (cov > 1):
                 # There are some annotations
                 da = defaultdict(list)
                 for (enum, edf) in hdf.groupby('EntryNr'):
@@ -838,16 +840,24 @@ class DarwinExporter(object):
                 c = len(da[0][1])  # Count of prev. DA
                 if c > 1:
                     # DA exists in more than one member.
-                    tl = hl_tab.read_wherewhere('Fam == {}'.format(hog_id))[0]['Level']
-                    rep_len = hdf[hdf['EntryNr'] == da[0][1][0]]['SeqBufferLength']
+                    cons_da = da[0][0]
+                    repr_entry = da[0][1][0]
+                    tl = hl_tab.read_where('Fam == {}'.format(hog_id))[0]['Level'].decode('ascii')
+                    rep_len = hdf[hdf['EntryNr'] == repr_entry]['SeqBufferLength']
+                    rep_len = int(rep_len if len(rep_len) == 1 else list(rep_len)[0])
 
-                    hog_das.append((hog_id,               # HOG ID
-                                    da[0][0],             # Consensus DA
-                                    da[0][1][0],          # Representative entry
-                                    rep_len,              # Repr. entry length
-                                    tl,                   # Top level of HOG
-                                    size,                 # HOG size
-                                    (100 * (c / size))))  # Prevalence
+                    # Save the consensus DA
+                    off = len(hog2info)  # Offset in the information table.
+                    hog2dom += [(off, d) for d in cons_da]
+
+                    # Save required information about this group for the web
+                    # view.
+                    hog2info.append((hog_id,               # HOG ID
+                                     repr_entry,           # Repr. entry
+                                     rep_len,              # Repr. entry length
+                                     tl,                   # Top level of HOG
+                                     size,                 # HOG size
+                                     (100 * (c / size))))  # Prevalence
 
         # Create tables in file -- done this way as these end up being pretty
         # small tables (<25MB)
@@ -855,8 +865,8 @@ class DarwinExporter(object):
                                    'DomainArchPrevalence',
                                    tablefmt.HOGDomainArchPrevalenceTable,
                                    createparents=True,
-                                   expectedrows=len(hog_das))
-        self._write_to_table(tab, [(x[0], *x[2:]) for x in hog_das])
+                                   expectedrows=len(hog2info))
+        self._write_to_table(tab, hog2info)
         tab.flush()  # Required?
 
         # HOG <-> Domain table
@@ -864,10 +874,8 @@ class DarwinExporter(object):
                                    'Domains',
                                    tablefmt.HOGDomainPresenceTable,
                                    createparents=True,
-                                   expectedrows=len(hog_das))
-        self._write_to_table(tab, [(i, d)
-                                   for (i, x) in enumerate(hog_das)
-                                   for d in x[1]])
+                                   expectedrows=len(hog2dom))
+        self._write_to_table(tab, hog2dom)
         tab.flush()  # Required?
 
 

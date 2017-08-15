@@ -128,7 +128,7 @@ class DomainDescriptionTable(tables.IsDescription):
 class HOGDomainArchPrevalenceTable(tables.IsDescription):
     Fam = tables.UInt32Col(pos=0)
     ReprEntryNr = tables.UInt32Col(pos=1)
-    ReprLength = tables.UInt32Col(pos=2)
+    ReprEntryLength = tables.UInt32Col(pos=2)
     TopLevel = tables.StringCol(255, pos=3)
     FamSize = tables.UInt32Col(pos=4)
     Prevalence = tables.Float16Col(pos=5)

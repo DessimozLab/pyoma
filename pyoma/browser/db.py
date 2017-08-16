@@ -1017,7 +1017,7 @@ class Taxonomy(object):
                 t = ",".join(children)
                 return '(' + t + ')' + newick_enc(node['Name'].decode())
 
-        return _rec_newick(self._get_root_taxon())
+        return _rec_newick(self._get_root_taxon()) + ';'
 
     def as_dict(self):
         """Encode the Taxonomy as a nested dict.

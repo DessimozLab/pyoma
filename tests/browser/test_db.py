@@ -198,7 +198,7 @@ class TaxonomyTest(unittest.TestCase):
         member = frozenset([self.tax._taxon_from_numeric(x)['Name']
                             for x in self.tax.tax_table['NCBITaxonId']])
         phylo = self.tax.get_induced_taxonomy(member, collapse=True)
-        expected = '(((Ashbya gossypii [strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056],Saccharomyces cerevisiae [strain ATCC 204508 / S288c])Saccharomycetaceae,Schizosaccharomyces pombe [strain 972 / ATCC 24843])Ascomycota,Plasmodium falciparum [isolate 3D7])Eukaryota'
+        expected = '(((Ashbya gossypii [strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056],Saccharomyces cerevisiae [strain ATCC 204508 / S288c])Saccharomycetaceae,Schizosaccharomyces pombe [strain 972 / ATCC 24843])Ascomycota,Plasmodium falciparum [isolate 3D7])Eukaryota;'
         expected = expected.replace(' ', '_')
         self.assertEqual(expected, phylo.newick())
 

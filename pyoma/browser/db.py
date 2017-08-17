@@ -439,6 +439,38 @@ class Database(object):
         except StopIteration:
             raise InvalidId('invalid group nr')
 
+    def get_nr_oma_groups(self):
+        """returns the number of OMA Groups in the database"""
+        tab = self.db.get_node('/Protein/Entries')
+        try:
+            idx = tab.colindexes['OmaGroup'][-1]
+            return int(tab[idx]['OmaGroup'])
+        except KeyError:
+            hist = self.group_size_histogram('oma')
+            return int(hist['Count'].sum())
+
+    def get_nr_toplevel_hogs(self):
+        """returns the number of toplevel hogs, i.e. roothogs"""
+        hist = self.group_size_histogram('hog')
+        return int(hist['Count'].sum())
+
+    def group_size_histogram(self, typ=None):
+        """returns a table with two columns, e.g. Size and Count.
+
+        if typ is set to 'oma' or not set, then the data for the
+        oma groups is returned. if it is set to 'hog', the data for
+        the rootlevel hogs is returned.
+
+        :param typ: either 'oma' or 'hog', defaults to 'oma'"""
+        if typ is None or typ.lower() == 'oma':
+            tabname = 'OmaGroup'
+        elif typ.lower() == 'hog':
+            tabname = 'OmaHOG'
+        else:
+            raise ValueError('{} is not a valid group typ'.format(typ))
+        tab = self.db.get_node('/Summary/{}_size_hist'.format(tabname))
+        return tab.read()
+
     def get_sequence(self, entry):
         """get the protein sequence of a given entry as a string
 

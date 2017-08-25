@@ -8,7 +8,6 @@ import itertools
 import time
 from Bio.UniProt import GOA
 from bisect import bisect_left
-from collections import Counter
 import dateutil
 import pandas as pd
 import pyopa
@@ -686,7 +685,7 @@ class SequenceSearch(object):
         coverage = (0.0 if coverage is None else coverage)
 
         # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
-        c = Counter()
+        c = collections.Counter()
         for z in map(lambda kmer: numpy.unique(self.kmer_lookup[int(kmer)],
                                                return_counts=True),
                          self.encoder.decompose(seq)):
@@ -731,6 +730,44 @@ class SequenceSearch(object):
         t.join()
         assert (len(aligned) > 0), 'Alignment thread crashed.'
         return zip(matches, aligned)
+
+    def get_prevalent_domains(self, fam):
+        # Gets the prevalent domains for a particular top level HOG / family.
+        # returns: (family_row, similar_families)
+        # family_row contains: family ID, representative entry, DA prevalence.
+        # similar_families contains: same, with similarity score. Ordered.
+        domprev_tab = self.db.get_node('/HOGAnnotations/DomainArchPrevalence')
+        dom2hog_tab = self.db.get_node('/HOGAnnotations/Domains')
+
+        fam_row = domprev_tab.read_where('Fam == {}'.format(fam))[0]
+        if len(fam_row) == 0:
+            return (None, None)
+
+        # Get the family's consensus DA and count them...
+        fam_da = collections.Counter(self.get_domains(int(fam_row['ReprEntryNr']))['DomainId'])
+
+        # Retrieve the relevant other families...
+        sim_fams = collections.defaultdict(collections.Counter)
+        for d in fam_da:
+            for off in dom2hog_tab.read_where('DomainId == {}'.format(d))['Offset']:
+                sim_fams[off][d] += 1
+
+        if len(sim_fams) == 0:
+            return fam_row, None
+
+        # Now get similar families and order them by similarity
+        sim_fams_df = pd.DataFrame(domprev_tab[list(sim_fams.keys())])
+        sim_fams_df['sim'] = list(map(lambda i: sum((sim_fams[i] & fam_da).values()),
+                                      sim_fams.keys()))
+
+        # Sort by similarity
+        sim_fams_df.sort_values('sim', inplace=True, ascending=False)
+        sim_fams_df.reset_index(drop=True, inplace=True)
+
+        # Prevalence
+        sim_fams_df['Prev'] = 100 * (sim_fams_df['PrevCount'] / sim_fams_df['FamSize'])
+
+        return fam_row, sim_fams_df
 
 
 class OmaIdMapper(object):

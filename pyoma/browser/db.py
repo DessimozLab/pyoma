@@ -509,9 +509,11 @@ class Database(object):
         domprev_tab = self.db.get_node('/HOGAnnotations/DomainArchPrevalence')
         dom2hog_tab = self.db.get_node('/HOGAnnotations/Domains')
 
-        fam_row = domprev_tab.read_where('Fam == {}'.format(fam))[0]
+        fam_row = domprev_tab.read_where('Fam == {}'.format(fam))
         if len(fam_row) == 0:
-            return (None, None)
+            return None, None
+        else:
+            fam_row = fam_row[0]
 
         # Get the family's consensus DA and count them...
         fam_da = collections.Counter(self.get_domains(int(fam_row['ReprEntryNr']))['DomainId'])
@@ -519,8 +521,8 @@ class Database(object):
         # Retrieve the relevant other families...
         sim_fams = collections.defaultdict(collections.Counter)
         for d in fam_da:
-            for off in dom2hog_tab.read_where('DomainId == {}'.format(d))['Offset']:
-                sim_fams[off][d] += 1
+            for hog_with_domain in dom2hog_tab.where('DomainId == {}'.format(d)):
+                sim_fams[hog_with_domain['Offset']][d] += 1
 
         if len(sim_fams) == 0:
             return fam_row, None

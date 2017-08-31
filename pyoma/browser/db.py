@@ -44,6 +44,14 @@ def count_elements(iterable):
     return next(counter)
 
 
+_first_cap_re = re.compile('(.)([A-Z][a-z]+)')
+_all_cap_re = re.compile('([a-z0-9])([A-Z])')
+def to_snail_case(name):
+    """function to convert from CamelCase to snail_case"""
+    s1 = _first_cap_re.sub(r'\1_\2', name)
+    return _all_cap_re.sub(r'\1_\2', s1).lower()
+
+
 class Database(object):
     """This is the main interface to the oma database. Queries
     will typically be issued by methods of this object. Typically
@@ -501,6 +509,26 @@ class Database(object):
         except ValueError as e:
             raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
 
+    def get_representative_entry_of_hog(self, fam):
+        """Get the information of the representative entry for a given family (roothog).
+
+        For each family we select a represenative entry that has the most prevalent
+        domain architecture. This method returns the entry_nr that we selected, together
+        with the domain architecture and its prevalence. In case no representative entry
+        has been found, the method raises an :class:`NoReprEntry` Exception.
+
+        :param int fam: The numeric family number."""
+        domprev_tab = self.db.get_node('/HOGAnnotations/DomainArchPrevalence')
+        try:
+            row = next(domprev_tab.where('Fam == {:d}'.format(fam)))
+            fields = (to_snail_case(z) for z in domprev_tab.dtype.names)
+            res = dict(zip(fields, row.fetch_all_fields()))
+            res['domains'] = self.get_domains(int(row['ReprEntryNr']))
+            res['prevalence'] = 100.0 * res['prev_count'] / res['fam_size']
+            return res
+        except StopIteration:
+            raise NoReprEntry()
+
     def get_prevalent_domains(self, fam):
         # Gets the prevalent domains for a particular top level HOG / family.
         # returns: (family_row, similar_families)
@@ -509,14 +537,13 @@ class Database(object):
         domprev_tab = self.db.get_node('/HOGAnnotations/DomainArchPrevalence')
         dom2hog_tab = self.db.get_node('/HOGAnnotations/Domains')
 
-        fam_row = domprev_tab.read_where('Fam == {}'.format(fam))
-        if len(fam_row) == 0:
+        try:
+            fam_row = self.get_representative_entry_of_hog(fam)
+        except NoReprEntry:
             return None, None
-        else:
-            fam_row = fam_row[0]
 
         # Get the family's consensus DA and count them...
-        fam_da = collections.Counter(self.get_domains(int(fam_row['ReprEntryNr']))['DomainId'])
+        fam_da = collections.Counter(fam_row['domains']['DomainId'])
 
         # Retrieve the relevant other families...
         sim_fams = collections.defaultdict(collections.Counter)
@@ -532,12 +559,12 @@ class Database(object):
         sim_fams_df['sim'] = list(map(lambda i: sum((sim_fams[i] & fam_da).values()),
                                       sim_fams.keys()))
 
-        # Sort by similarity
-        sim_fams_df.sort_values('sim', inplace=True, ascending=False)
+        # Sort by similarity & family size
+        sim_fams_df.sort_values(['sim', 'FamSize'], inplace=True, ascending=False)
         sim_fams_df.reset_index(drop=True, inplace=True)
 
         # Prevalence
-        sim_fams_df['Prev'] = 100 * (sim_fams_df['PrevCount'] / sim_fams_df['FamSize'])
+        sim_fams_df['Prev'] = 100.0 * (sim_fams_df['PrevCount'] / sim_fams_df['FamSize'])
 
         return fam_row, sim_fams_df
 
@@ -1140,6 +1167,10 @@ class Singleton(Exception):
     def __init__(self, entry, msg=None):
         super(Singleton, self).__init__(msg)
         self.entry = entry
+
+
+class NoReprEntry(Exception):
+    pass
 
 
 class IdMapperFactory(object):

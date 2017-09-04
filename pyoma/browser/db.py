@@ -413,7 +413,7 @@ class Database(object):
                 raise InvalidId('Invalid fingerprint for an OMA Group')
             group_meta_tab = self.db.get_node('/OmaGroups/MetaData')
             try:
-                e = next(group_meta_tab.where('(Fingerprints == {!r})'
+                e = next(group_meta_tab.where('(Fingerprint == {!r})'
                                               .format(group_id)))
                 group_nr = e['GroupNr']
             except StopIteration:
@@ -922,7 +922,7 @@ class IDResolver(object):
     def _from_numeric(self, e_id):
         nr = int(e_id)
         if not 0 < nr <= self.max_entry_nr:
-            raise InvalidId('{0:d} out of protein range: {1:s}'.format(nr, e_id))
+            raise InvalidId('{0:d} out of protein range: {1:}'.format(nr, e_id))
         return nr
 
     def _from_omaid(self, e_id):

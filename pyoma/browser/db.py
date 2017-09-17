@@ -668,10 +668,8 @@ class SequenceSearch(object):
         self.kmer_lookup = self.db_idx.root.Protein.KmerLookup
 
     def get_entry_length(self, ii):
-        '''
-            Get lenght of a particular entry.
-        '''
-        return (self.db.root.Protein.Entries[ii - 1]['SeqBufferLength'] - 1)
+        """Get length of a particular entry."""
+        return self.db.root.Protein.Entries[ii - 1]['SeqBufferLength'] - 1
 
     @LazyProperty
     def entry_idx(self):
@@ -713,7 +711,7 @@ class SequenceSearch(object):
         else:
             return ('exact', m)
 
-    def exact_search(self, seq, is_sanitised=None):
+    def exact_search(self, seq, only_full_length=True, is_sanitised=None):
         '''
             Performs an exact match search using the suffix array.
         '''
@@ -737,7 +735,7 @@ class SequenceSearch(object):
                     jj += 1
 
                 # Find entry numbers and filter to remove incorrect entries
-                return list(filter(lambda e: self.get_entry_length(e) == nn,
+                return list(filter(lambda e: (not only_full_length) or self.get_entry_length(e) == nn,
                                    self.get_entrynr(self.seq_idx[ii:jj])))
 
         # Nothing found.

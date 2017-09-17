@@ -707,9 +707,9 @@ class SequenceSearch(object):
             # Do approximate search
             m = self.approx_search(seq, n=n, coverage=coverage, is_sanitised=True)
             # TODO: taxonomic filtering.
-            return (('approx', m) if m is not None else None)
+            return ('approx', m) if m is not [] else None
         else:
-            return ('exact', m)
+            return 'exact', m
 
     def exact_search(self, seq, only_full_length=True, is_sanitised=None):
         '''
@@ -772,6 +772,7 @@ class SequenceSearch(object):
                            for (m, a) in self._align_entries(seq, c)],
                           key=lambda z: z[1]['score'],
                       reverse=True)
+        return []
 
     def _align_entries(self, seq, matches):
         # Does the alignment for the approximate search

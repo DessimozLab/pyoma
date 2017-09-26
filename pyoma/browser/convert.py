@@ -1495,8 +1495,10 @@ def main(name="OmaServer.h5", k=6, idx_name=None):
     x.add_proteins()
     x.add_hogs()
     x.add_xrefs()
-    x.add_domain_info(only_pfam_or_cath_domains(
-        iter_domains('http://download.cathdb.info/gene3d/CURRENT_RELEASE/mdas.csv.gz')))
+    x.add_domain_info(only_pfam_or_cath_domains(itertools.chain(
+        iter_domains('http://download.cathdb.info/gene3d/CURRENT_RELEASE/mdas.csv.gz'),
+        iter_domains('file://{}/additional_domains.mdas.csv.gz'.format(os.getenv('DARWIN_BROWSERDATA_PATH', '')))
+    )))
     x.add_domainname_info(itertools.chain(
         CathDomainNameParser('http://download.cathdb.info/cath/releases/latest-release/'
                              'cath-classification-data/cath-names.txt').parse(),

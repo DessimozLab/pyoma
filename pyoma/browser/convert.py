@@ -5,7 +5,9 @@ from future.builtins import range
 from future.builtins import object
 from future.builtins import super
 from future.standard_library import hooks
+from PySAIS import sais
 from tempfile import NamedTemporaryFile
+from tqdm import tqdm
 import csv
 import resource
 import tables
@@ -26,10 +28,12 @@ import hashlib
 import itertools
 import operator
 import fileinput
+import pandas as pd
 
 from .. import common
 from . import locus_parser
 from . import tablefmt
+from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
 from .geneontology import GeneOntology, OntologyParser
 
@@ -597,6 +601,13 @@ class DarwinExporter(object):
         domtab = self.h5.get_node('/Annotations/Domains')
         domtab.cols.EntryNr.create_csindex()
 
+        self.logger.info('creating indexes for HOG to prevalent domains '
+                         '(Fam and DomainId)')
+        dom2hog_tab = self.h5.get_node('/HOGAnnotations/Domains')
+        dom2hog_tab.cols.DomainId.create_csindex()
+        domprev_tab = self.h5.get_node('/HOGAnnotations/DomainArchPrevalence')
+        domprev_tab.cols.Fam.create_csindex()
+
     def _iter_canonical_xref(self):
         """extract one canonical xref id for each protein.
 
@@ -777,6 +788,189 @@ class DarwinExporter(object):
                 sizes[grp][grp_size] += 1
         return sizes
 
+    def add_sequence_suffix_array(self, k=6, fn=None, sa=None):
+        '''
+            Adds the sequence suffix array to the database. NOTE: this
+            (obviously) requires A LOT of memory for large DBs.
+        '''
+        # Ensure we're run in correct order...
+        assert ('Protein' in self.h5.root), 'Add proteins before calc. SA!'
+        idx_compr = tables.Filters(complevel=6, complib='blosc', fletcher32=True)
+
+        # Add to separate file if fn is set.
+        if fn is None:
+            db = self.h5
+        else:
+            fn = os.path.normpath(os.path.join(
+                    os.getenv('DARWIN_BROWSERDATA_PATH', ''),
+                    fn))
+            db = tables.open_file(fn, 'w', filters=idx_compr)
+            db.create_group('/', 'Protein')
+            db.root._f_setattr('conversion_start', time.strftime("%c"))
+            self.logger.info('opened {}'.format(db.filename))
+
+        # Load sequence buffer to memory - this is required to calculate the SA.
+        # Do it here (instead of in PySAIS) so that we can use it for computing
+        # the split points later.
+        seqs = self.h5.get_node('/Protein/SequenceBuffer')[:].tobytes()
+        n = len(self.h5.get_node('/Protein/Entries'))
+
+        # Compute & save the suffix array to DB. TODO: work out what compression
+        # works best!
+        if sa is None:
+            sa = sais(seqs)
+            sa[:n].sort()  # Sort delimiters by position.
+        db.create_carray('/Protein',
+                         name='SequenceIndex',
+                         title='concatenated protein sequences suffix array',
+                         obj=sa,
+                         filters=idx_compr)
+
+        # Create lookup table for fa2go
+        dtype = (numpy.uint32 if (n < numpy.iinfo(numpy.uint32).max) else
+                 numpy.uint64)
+        idx = numpy.zeros(sa.shape, dtype=dtype)
+        mask = numpy.zeros(sa.shape, dtype=numpy.bool)
+
+        # Compute mask and entry index for sequence buff
+        for i in range(n):
+            s = (sa[i - 1] if i > 0 else -1) + 1
+            e = (sa[i] + 1)
+            idx[s:e] = i + 1
+            mask[(e - k):e] = True  # (k-1) invalid and delim.
+
+        # Mask off those we don't want...
+        sa = sa[~mask[sa]]
+
+        # Reorder the necessary elements of entry index
+        idx = idx[sa]
+
+        # Initialise lookup array
+        atom = (tables.UInt32Atom if dtype is numpy.uint32 else tables.UInt64Atom)
+        kmers = KmerEncoder(k, is_protein=True)
+        z = db.create_vlarray('/Protein',
+                              name='KmerLookup',
+                              atom=atom(shape=()),
+                              title='kmer entry lookup table',
+                              filters=idx_compr,
+                              expectedrows=len(kmers))
+        z._f_setattr('k', k)
+
+        # Now find the split points and construct lookup ragged array.
+        ii = 0
+        for kk in tqdm(range(len(kmers)), desc='Constructing kmer lookup'):
+            kmer = kmers.encode(kk)
+            if (ii < len(sa)) and (seqs[sa[ii]:(sa[ii] + k)] == kmer):
+                jj = ii + 1
+                while (jj < len(sa)) and (seqs[sa[jj]:(sa[jj] + k)] == kmer):
+                    jj += 1
+                z.append(idx[ii:jj])
+            else:
+                # End or not found
+                z.append([])
+
+            # New start
+            ii = jj
+
+        if db.filename != self.h5.filename:
+            self.logger.info('storing external links to SequenceIndex and KmerLookup')
+            self.h5.create_external_link('/Protein', 'KmerLookup', z)
+            self.h5.create_external_link('/Protein', 'SequenceIndex', db.root.Protein.SequenceIndex)
+            db.root._f_setattr('conversion_end', time.strftime("%c"))
+            db.close()
+            self.logger.info('closed {}'.format(db.filename))
+
+    def add_hog_domain_prevalence(self):
+        # Check that protein entries / domains are added already to the DB
+        assert True  # TODO
+
+        # Used later
+        hl_tab = self.h5.get_node('/HogLevel')
+
+        # Load the HOG -> Entry table to memory
+        prot_tab = self.h5.root.Protein.Entries
+        # TODO: work out how to do this in a neater way
+        df = pd.DataFrame.from_records(((z['EntryNr'], z['OmaHOG'], z['SeqBufferLength'])
+                                        for z in prot_tab.iterrows()),
+                                       columns=['EntryNr', 'OmaHOG', 'SeqBufferLength'])
+        # Strip singletons
+        df = df[~(df['OmaHOG'] == b'')]
+
+        # Reformat HOG ID to plain-integer for top-level grouping only
+        df['OmaHOG'] = df['OmaHOG'].apply(lambda i: int(i[4:].split(b'.')[0]))
+
+        # Load domains
+        domains = pd.DataFrame.from_records(self.h5.root.Annotations.Domains[:])
+
+        # Ensure sorted by coordinate - TODO: move this to DA import function
+        domains['start'] = domains['Coords'].apply(lambda c:
+                                                   int(c.split(b':')[0]))
+        domains.sort_values(['EntryNr', 'start'], inplace=True)
+        domains = domains[['EntryNr', 'DomainId']]
+
+        # Merge domains / entry-hog tables. Keep entries with no domains
+        # so that we can count the size of the HOGs.
+        df = pd.merge(df, domains, on='EntryNr', how='left')
+
+        # Gather entry-domain for each HOG.
+        hog2dom = []
+        hog2info = []
+        for (hog_id, hdf) in tqdm(df.groupby('OmaHOG')):
+            size = len(set(hdf['EntryNr']))
+
+            hdf = hdf[~hdf['DomainId'].isnull()]
+            cov = len(set(hdf['EntryNr']))  # Coverage with any DA
+
+            if (size > 2) and (cov > 1):
+                # There are some annotations
+                da = collections.defaultdict(list)
+                for (enum, edf) in hdf.groupby('EntryNr'):
+                    d = edf['DomainId']
+                    d = tuple(d) if (type(d) != bytes) else (d,)
+                    da[d].append(enum)
+
+                da = sorted(da.items(), key=lambda i: len(i[1]), reverse=True)
+                c = len(da[0][1])  # Count of prev. DA
+                if c > 1:
+                    # DA exists in more than one member.
+                    cons_da = da[0][0]
+                    repr_entry = da[0][1][0]
+                    tl = hl_tab.read_where('Fam == {}'.format(hog_id))[0]['Level'].decode('ascii')
+                    rep_len = hdf[hdf['EntryNr'] == repr_entry]['SeqBufferLength']
+                    rep_len = int(rep_len if len(rep_len) == 1 else list(rep_len)[0])
+
+                    # Save the consensus DA
+                    off = len(hog2info)  # Offset in the information table.
+                    hog2dom += [(off, d) for d in cons_da]
+
+                    # Save required information about this group for the web
+                    # view.
+                    hog2info.append((hog_id,      # HOG ID
+                                     repr_entry,  # Repr. entry
+                                     rep_len,     # Repr. entry length
+                                     tl,          # Top level of HOG
+                                     size,        # HOG size
+                                     c))          # Prevalence
+
+        # Create tables in file -- done this way as these end up being pretty
+        # small tables (<25MB)
+        tab = self.h5.create_table('/HOGAnnotations',
+                                   'DomainArchPrevalence',
+                                   tablefmt.HOGDomainArchPrevalenceTable,
+                                   createparents=True,
+                                   expectedrows=len(hog2info))
+        self._write_to_table(tab, hog2info)
+        tab.flush()  # Required?
+
+        # HOG <-> Domain table
+        tab = self.h5.create_table('/HOGAnnotations',
+                                   'Domains',
+                                   tablefmt.HOGDomainPresenceTable,
+                                   createparents=True,
+                                   expectedrows=len(hog2dom))
+        self._write_to_table(tab, hog2dom)
+        tab.flush()  # Required?
+
 
 def download_url_if_not_present(url):
     tmpfolder = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH', '/tmp'), "Browser", "xref")
@@ -901,7 +1095,6 @@ class OmaGroupMetadataLoader(object):
         fn1 = os.path.join(rootdir, self.keyword_name)
         fn2 = os.path.join(rootdir, self.finger_name)
         return os.path.exists(fn1) and os.path.exists(fn2)
-
 
 
 class DescriptionManager(object):
@@ -1290,7 +1483,9 @@ def getDebugLogger():
     return log
 
 
-def main(name="OmaServer.h5"):
+def main(name="OmaServer.h5", k=6, idx_name=None):
+    idx_name = (name + '.idx') if idx_name is None else idx_name
+
     log = getDebugLogger()
     x = DarwinExporter(name, logger=log)
     x.add_version()
@@ -1300,17 +1495,21 @@ def main(name="OmaServer.h5"):
     x.add_proteins()
     x.add_hogs()
     x.add_xrefs()
-    x.add_domain_info(only_pfam_or_cath_domains(
-        iter_domains('http://download.cathdb.info/gene3d/CURRENT_RELEASE/mdas.csv.gz')))
+    x.add_domain_info(only_pfam_or_cath_domains(itertools.chain(
+        iter_domains('http://download.cathdb.info/gene3d/CURRENT_RELEASE/mdas.csv.gz'),
+        iter_domains('file://{}/additional_domains.mdas.csv.gz'.format(os.getenv('DARWIN_BROWSERDATA_PATH', '')))
+    )))
     x.add_domainname_info(itertools.chain(
         CathDomainNameParser('http://download.cathdb.info/cath/releases/latest-release/'
                              'cath-classification-data/cath-names.txt').parse(),
         PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
     x.add_canonical_id()
     x.add_group_metadata()
+    x.add_hog_domain_prevalence()
     x.close()
 
     x = DarwinExporter(name, logger=log)
     x.create_indexes()
+    x.add_sequence_suffix_array(k=k, fn=idx_name)
     x.update_summary_stats()
     x.close()

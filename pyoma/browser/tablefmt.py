@@ -79,6 +79,9 @@ class XRefTable(tables.IsDescription):
                      'ORF Name', 'Ordered Locus Name']),
         'n/a', base='uint8', pos=2)
     XRefId = tables.StringCol(50, pos=3)
+    #Verification = tables.EnumCol(
+    #    tables.Enum({'exact': 0, 'modified': 1, 'unchecked': 2}),
+    #    'unchecked', base='uint8', pos=4)
 
 
 class GeneOntologyTable(tables.IsDescription):
@@ -120,6 +123,20 @@ class DomainDescriptionTable(tables.IsDescription):
     DomainId = tables.StringCol(20, pos=0)
     Source = tables.StringCol(11, pos=1)
     Description = tables.StringCol(150, pos=2)
+
+
+class HOGDomainArchPrevalenceTable(tables.IsDescription):
+    Fam = tables.UInt32Col(pos=0)
+    ReprEntryNr = tables.UInt32Col(pos=1)
+    ReprEntryLength = tables.UInt32Col(pos=2)
+    TopLevel = tables.StringCol(255, pos=3)
+    FamSize = tables.UInt32Col(pos=4)
+    PrevCount = tables.UInt32Col(pos=5)
+
+
+class HOGDomainPresenceTable(tables.IsDescription):
+    Offset = tables.UInt32Col(pos=0)
+    DomainId = tables.StringCol(20, pos=1)
 
 
 class GroupsizeHistogram(tables.IsDescription):

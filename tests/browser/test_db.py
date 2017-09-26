@@ -1,3 +1,4 @@
+import random
 import types
 import unittest
 import numpy
@@ -9,7 +10,7 @@ class TestHelperFunctions(unittest.TestCase):
     def test_counter(self):
         self.assertEqual(0, count_elements([]))
         self.assertEqual(3, count_elements('abc'))
-        recarray = numpy.zeros(2, dtype=[('A','i4'),('B','f8')])
+        recarray = numpy.zeros(2, dtype=[('A', 'i4'),('B', 'f8')])
         self.assertEqual(2, count_elements(recarray))
 
 
@@ -99,6 +100,28 @@ class DatabaseTests(unittest.TestCase):
         for root in ('YEAST', 'ASHGO'):
             order = self.db.id_mapper['OMA'].species_ordering(root)
             self.assertEqual(order[root], 0, '{} should be first genome, but comes at {}'.format(root, order[root]))
+    
+    def test_exact_search(self):
+        # Test for 10 random 
+        for _ in range(10):
+            i = random.randint(1, len(self.db.db.root.Protein.Entries))
+            s = self.db.get_sequence(i)
+            self.assertTrue((i in set(self.db.seq_search.search(s, is_sanitised=True)[1])),
+                            'exact search for entry {} failed.'.format(i))
+
+    def test_approx_search(self):
+        # Test for random subsequence of 10 random sequences.
+        min_length = 10 
+        for _ in range(10):
+            i = random.randint(1, len(self.db.db.root.Protein.Entries))
+            elen = self.db.db.root.Protein.Entries[i]['SeqBufferLength']
+
+            ii = random.randint(0, elen - min_length)
+            jj = random.randint(ii + min_length, elen)
+
+            s = self.db.get_sequence(i)[ii:jj]
+            self.assertTrue((i in {z[0] for z in self.db.seq_search.search(s, is_sanitised=True)[1]}),
+                            'exact search for entry {} failed.'.format(i))
 
     def test_oma_group_from_numeric_id(self):
         group_id = 5
@@ -106,6 +129,9 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(4, len(grp))
         for e in grp:
             self.assertEqual(group_id, e['OmaGroup'])
+
+    def test_fingerprint(self):
+        fingerprint = 'ADRIANA'
 
 
 class XRefDatabaseMock(Database):
@@ -172,7 +198,7 @@ class TaxonomyTest(unittest.TestCase):
         member = frozenset([self.tax._taxon_from_numeric(x)['Name']
                             for x in self.tax.tax_table['NCBITaxonId']])
         phylo = self.tax.get_induced_taxonomy(member, collapse=True)
-        expected = '(((Ashbya gossypii [strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056],Saccharomyces cerevisiae [strain ATCC 204508 / S288c])Saccharomycetaceae,Schizosaccharomyces pombe [strain 972 / ATCC 24843])Ascomycota,Plasmodium falciparum [isolate 3D7])Eukaryota'
+        expected = '(((Ashbya gossypii [strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056],Saccharomyces cerevisiae [strain ATCC 204508 / S288c])Saccharomycetaceae,Schizosaccharomyces pombe [strain 972 / ATCC 24843])Ascomycota,Plasmodium falciparum [isolate 3D7])Eukaryota;'
         expected = expected.replace(' ', '_')
         self.assertEqual(expected, phylo.newick())
 

@@ -5,7 +5,14 @@ from builtins import object
 from builtins import zip
 import itertools
 
+import time
+from Bio.UniProt import GOA
+from bisect import bisect_left
+import dateutil
+import pandas as pd
+import pyopa
 import tables
+import threading
 import numpy
 import numpy.lib.recfunctions
 import re
@@ -13,10 +20,17 @@ import json
 import os
 import collections
 import logging
-from .models import LazyProperty
-from .geneontology import GeneOntology, OntologyParser, AnnotationParser
+from .KmerEncoder import KmerEncoder
+from .models import LazyProperty, KeyWrapper
+from .geneontology import GeneOntology, OntologyParser, AnnotationParser, GOAspect
 
 logger = logging.getLogger(__name__)
+
+# Raise stack limit for PyOPA ~400MB
+threading.stack_size(4096*100000)
+
+# Global initialisations
+GAF_VERSION = '2.1'
 
 
 def count_elements(iterable):
@@ -28,6 +42,14 @@ def count_elements(iterable):
     counter = itertools.count()
     collections.deque(zip(iterable, counter), maxlen=0)  # (consume at C speed)
     return next(counter)
+
+
+_first_cap_re = re.compile('(.)([A-Z][a-z]+)')
+_all_cap_re = re.compile('([a-z0-9])([A-Z])')
+def to_snail_case(name):
+    """function to convert from CamelCase to snail_case"""
+    s1 = _first_cap_re.sub(r'\1_\2', name)
+    return _all_cap_re.sub(r'\1_\2', s1).lower()
 
 
 class Database(object):
@@ -55,6 +77,7 @@ class Database(object):
             raise DBVersionError('Unsupported database version: {} != {} ({})'
                                  .format(db_version, self.EXPECTED_DB_SCHEMA, self.db.filename))
 
+        self.seq_search = SequenceSearch(self)
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
         self.tax = Taxonomy(self.db.root.Taxonomy.read())
@@ -65,7 +88,7 @@ class Database(object):
     @LazyProperty
     def gene_ontology(self):
         try:
-            fp = io.StringIO(self.db.get_node('/Ontologies/GO').read().tobytes().decode())
+            fp = io.StringIO(self.db.root.Ontologies.GO.read().tobytes().decode('utf-8'))
         except tables.NoSuchNodeError:
             p = os.path.join(os.path.dirname(self.db.filename), 'go-basic.obo')
             fp = open(p, 'rt')
@@ -77,6 +100,10 @@ class Database(object):
     def get_hdf5_handle(self):
         """return the handle to the database hdf5 file"""
         return self.db
+
+    def get_conversion_date(self):
+        """return the conversion end date from the DB attributes"""
+        return dateutil.parser.parse(self.db.root._v_attrs['conversion_end'])
 
     def ensure_entry(self, entry):
         """This method allows to use an entry or an entry_nr.
@@ -386,7 +413,7 @@ class Database(object):
                 raise InvalidId('Invalid fingerprint for an OMA Group')
             group_meta_tab = self.db.get_node('/OmaGroups/MetaData')
             try:
-                e = next(group_meta_tab.where('(Fingerprints == {!r})'
+                e = next(group_meta_tab.where('(Fingerprint == {!r})'
                                               .format(group_id)))
                 group_nr = e['GroupNr']
             except StopIteration:
@@ -419,6 +446,38 @@ class Database(object):
         except StopIteration:
             raise InvalidId('invalid group nr')
 
+    def get_nr_oma_groups(self):
+        """returns the number of OMA Groups in the database"""
+        tab = self.db.get_node('/Protein/Entries')
+        try:
+            idx = tab.colindexes['OmaGroup'][-1]
+            return int(tab[idx]['OmaGroup'])
+        except KeyError:
+            hist = self.group_size_histogram('oma')
+            return int(hist['Count'].sum())
+
+    def get_nr_toplevel_hogs(self):
+        """returns the number of toplevel hogs, i.e. roothogs"""
+        hist = self.group_size_histogram('hog')
+        return int(hist['Count'].sum())
+
+    def group_size_histogram(self, typ=None):
+        """returns a table with two columns, e.g. Size and Count.
+
+        if typ is set to 'oma' or not set, then the data for the
+        oma groups is returned. if it is set to 'hog', the data for
+        the rootlevel hogs is returned.
+
+        :param typ: either 'oma' or 'hog', defaults to 'oma'"""
+        if typ is None or typ.lower() == 'oma':
+            tabname = 'OmaGroup'
+        elif typ.lower() == 'hog':
+            tabname = 'OmaHOG'
+        else:
+            raise ValueError('{} is not a valid group typ'.format(typ))
+        tab = self.db.get_node('/Summary/{}_size_hist'.format(tabname))
+        return tab.read()
+
     def get_sequence(self, entry):
         """get the protein sequence of a given entry as a string
 
@@ -450,11 +509,296 @@ class Database(object):
         except ValueError as e:
             raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
 
-    def get_gene_ontology_annotations(self, entry_nr):
+    def get_representative_entry_of_hog(self, fam):
+        """Get the information of the representative entry for a given family (roothog).
+
+        For each family we select a represenative entry that has the most prevalent
+        domain architecture. This method returns the entry_nr that we selected, together
+        with the domain architecture and its prevalence. In case no representative entry
+        has been found, the method raises an :class:`NoReprEntry` Exception.
+
+        :param int fam: The numeric family number."""
+        domprev_tab = self.db.get_node('/HOGAnnotations/DomainArchPrevalence')
         try:
-            return self.db.root.Annotations.GeneOntology.read_where('EntryNr == {:d}'.format(entry_nr))
+            row = next(domprev_tab.where('Fam == {:d}'.format(fam)))
+            fields = (to_snail_case(z) for z in domprev_tab.dtype.names)
+            res = dict(zip(fields, row.fetch_all_fields()))
+            res['domains'] = self.get_domains(int(row['ReprEntryNr']))
+            res['prevalence'] = 100.0 * res['prev_count'] / res['fam_size']
+            return res
+        except StopIteration:
+            raise NoReprEntry()
+
+    def get_prevalent_domains(self, fam):
+        # Gets the prevalent domains for a particular top level HOG / family.
+        # returns: (family_row, similar_families)
+        # family_row contains: family ID, representative entry, DA prevalence.
+        # similar_families contains: same, with similarity score. Ordered.
+        domprev_tab = self.db.get_node('/HOGAnnotations/DomainArchPrevalence')
+        dom2hog_tab = self.db.get_node('/HOGAnnotations/Domains')
+
+        try:
+            fam_row = self.get_representative_entry_of_hog(fam)
+        except NoReprEntry:
+            return None, None
+
+        # Get the family's consensus DA and count them...
+        fam_da = collections.Counter(fam_row['domains']['DomainId'])
+
+        # Retrieve the relevant other families...
+        sim_fams = collections.defaultdict(collections.Counter)
+        for d in fam_da:
+            for hog_with_domain in dom2hog_tab.where('DomainId == {}'.format(d)):
+                sim_fams[hog_with_domain['Offset']][d] += 1
+
+        if len(sim_fams) == 0:
+            return fam_row, None
+
+        # Now get similar families and order them by similarity
+        sim_fams_df = pd.DataFrame(domprev_tab[list(sim_fams.keys())])
+        sim_fams_df['sim'] = list(map(lambda i: sum((sim_fams[i] & fam_da).values()),
+                                      sim_fams.keys()))
+
+        # Sort by similarity & family size
+        sim_fams_df.sort_values(['sim', 'FamSize'], inplace=True, ascending=False)
+        sim_fams_df.reset_index(drop=True, inplace=True)
+
+        # Prevalence
+        sim_fams_df['Prev'] = 100.0 * (sim_fams_df['PrevCount'] / sim_fams_df['FamSize'])
+
+        return fam_row, sim_fams_df
+
+    def get_gene_ontology_annotations(self, entry_nr, as_dataframe=False, as_gaf=False):
+        # function to check if an annotation term is obsolete
+        def filter_obsolete_terms(term):
+            try:
+                self.gene_ontology.term_by_id(term)
+                return True
+            except (KeyError, ValueError):
+                return False
+        try:
+            annots = self.db.root.Annotations.GeneOntology.read_where('EntryNr == {:d}'.format(entry_nr))
+
+            # for test database we also have some obsolete terms. we need to filter those
+            if len(annots) > 0:
+                not_obsolete = numpy.vectorize(filter_obsolete_terms)(annots['TermNr'])
+                annots = annots[not_obsolete]
         except ValueError as e:
             raise InvalidId('require a numeric entry id, got {}'.format(entry_nr))
+        if not as_dataframe and not as_gaf:
+            return annots
+
+        # early return if no annotations available
+        if len(annots) == 0:
+            return '!gaf-version: {}\n'.format(GAF_VERSION) if as_gaf else None
+
+        df = pd.DataFrame(annots)
+
+        # 1R DB
+        df['DB'] = 'OMA'
+        # 2R DB Object ID
+        df['DB_Object_ID'] = df['EntryNr'].apply(self.id_mapper['Oma'].map_entry_nr)
+        # 3R DB Object Symbol
+        df['DB_Object_Symbol'] = df['DB_Object_ID']
+        # 4O Qualifier
+        df['Qualifier'] = ''
+        # 5R GO ID
+        df['GO_ID'] = df['TermNr'].apply(lambda t: 'GO:{:07d}'.format(t))
+        # 6R DB:Reference
+        df['DB:Reference'] = df['Reference'].apply(lambda x: x.decode('ascii'))
+        # 7R Evidence code
+        df['Evidence'] = df['Evidence'].apply(lambda x: x.decode('ascii'))
+        # 8O With (or) From
+        df['With'] = ''
+        # 9R Aspect
+        df['Aspect'] = df['GO_ID'].apply(lambda t: GOAspect.to_char(self.gene_ontology.term_by_id(t).aspect))
+        # 10O DB Object Name
+        df['DB_Object_Name'] = ''
+        # 11O DB Object Synonym (|Synonym)
+        df['Synonym'] = ''
+        # 12R DB Object Type
+        df['DB_Object_Type'] = 'protein'
+        # 13R Taxon (|taxon)
+        df['Taxon_ID'] = df['EntryNr'].apply(lambda e: 'taxon:{:d}'
+                                             .format(self.id_mapper['Oma'].genome_of_entry_nr(e)['NCBITaxonId']))
+        # 14R Date
+        df['Date'] = self.get_conversion_date().strftime('%Y%m%d')
+        # 15R Assigned by - TODO: FIX FOR NON OMA!!!
+        df['Assigned_By'] = df['DB']
+        # 16O Annotation Extension
+        df['Annotation_Extension'] = ''
+        # 17O Gene Product Form ID
+        df['Gene_Product_Form_ID'] = ''
+
+        df = df[GOA.GAF20FIELDS]
+        return (df if not as_gaf else
+                ('!gaf-version: {}\n'.format(GAF_VERSION) +
+                 '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) +
+                 '\n'))
+
+
+class SequenceSearch(object):
+    '''
+        Contains all the methods for searching the sequence
+
+        TODO: implement taxonomic filtering.
+    '''
+    from .KmerEncoder import DIGITS_AA
+    PROTEIN_CHARS = frozenset(map(lambda x: x.decode(), DIGITS_AA))
+    PAM100 = pyopa.generate_env(pyopa.load_default_environments()['log_pam1'],
+                                100)
+
+    def __init__(self, db):
+        # Backup reference to used DB method.
+        self.get_sequence = db.get_sequence
+
+        # Assume the index is stored in the main DB if there is no .idx file
+        self.db = db.get_hdf5_handle()
+        self.db_idx = (db if not os.path.isfile(self.db.filename + '.idx') else
+                       tables.open_file(self.db.filename + '.idx', 'r'))
+
+        # Protein search arrays.
+        try:
+            self.seq_idx = self.db_idx.root.Protein.SequenceIndex
+        except AttributeError:
+            raise DBConsistencyError("Suffix index for protein sequences is not available")
+        self.seq_buff = self.db.root.Protein.SequenceBuffer
+        self.n_entries = len(self.db.root.Protein.Entries)
+
+        # Kmer lookup arrays / kmer setup
+        self.k = self.db_idx.get_node_attr('/Protein/KmerLookup', 'k')
+        self.encoder = KmerEncoder(self.k)
+        self.kmer_lookup = self.db_idx.root.Protein.KmerLookup
+
+    def get_entry_length(self, ii):
+        """Get length of a particular entry."""
+        return self.db.root.Protein.Entries[ii - 1]['SeqBufferLength'] - 1
+
+    @LazyProperty
+    def entry_idx(self):
+        '''
+            Caches the index lookup part of the SA.
+        '''
+        return self.seq_idx[:self.n_entries]
+
+    def get_entrynr(self, ii):
+        '''
+            Get the entry number(s) corresponding to a location in the sequence
+            buffer.
+        '''
+        return (numpy.searchsorted(self.entry_idx, ii) + 1)
+
+    def _sanitise_seq(self, seq):
+        '''
+            Sanitise a string protein sequence. Deletes "invalid" characters.
+            TODO: add functionality for biopython sequence / skbio sequence.
+        '''
+        assert type(seq) == str
+        return ''.join(filter(lambda c: c in self.PROTEIN_CHARS,
+                              seq.upper())).encode('ascii')
+
+    def search(self, seq, n=None, coverage=None, is_sanitised=None):
+        '''
+            Searches the database for entries that match. If can't find an exact
+            match performs a kmer + local alignment approach to approximate
+            search.
+        '''
+        seq = (self._sanitise_seq(seq) if not is_sanitised else seq)
+        m = self.exact_search(seq, is_sanitised=True)
+        # TODO: taxonomic filtering.
+        if len(m) == 0:
+            # Do approximate search
+            m = self.approx_search(seq, n=n, coverage=coverage, is_sanitised=True)
+            # TODO: taxonomic filtering.
+            return ('approx', m) if m is not [] else None
+        else:
+            return 'exact', m
+
+    def exact_search(self, seq, only_full_length=True, is_sanitised=None):
+        '''
+            Performs an exact match search using the suffix array.
+        '''
+        # TODO: work out whether to just use the approximate search and then
+        # check if any are actually exact matches. Do the counting and then
+        # do an equality checking on any of the sequences that have the correct
+        # number of kmer matches.
+        seq = (seq if is_sanitised else self._sanitise_seq(seq))
+        nn = len(seq)
+        if nn > 0:
+            z = KeyWrapper(self.seq_idx,
+                           key=lambda i:
+                           self.seq_buff[i:(i + nn)].tobytes())
+            ii = bisect_left(z, seq, lo=self.n_entries)
+
+            if ii and (z[ii] == seq):
+                # Left most found.
+                jj = ii + 1
+                while (jj < len(z)) and (z[jj] == seq):
+                    # zoom to end -> -> ->
+                    jj += 1
+
+                # Find entry numbers and filter to remove incorrect entries
+                return list(filter(lambda e: (not only_full_length) or self.get_entry_length(e) == nn,
+                                   self.get_entrynr(self.seq_idx[ii:jj])))
+
+        # Nothing found.
+        return []
+
+    def approx_search(self, seq, n=None, is_sanitised=None, coverage=None):
+        '''
+            Performs an exact match search using the suffix array.
+        '''
+        seq = (seq if is_sanitised else self._sanitise_seq(seq))
+        n = (n if n is not None else 50)
+        coverage = (0.0 if coverage is None else coverage)
+
+        # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
+        c = collections.Counter()
+        for z in map(lambda kmer: numpy.unique(self.kmer_lookup[int(kmer)],
+                                               return_counts=True),
+                         self.encoder.decompose(seq)):
+            c.update(dict(zip(*z)))
+
+        # 2. Filter to top n if necessary
+        z = len(seq) - self.k + 1
+        cut_off = coverage * z
+        c = [(x[0], (x[1] / z)) for x in c.items() if x[1] >= cut_off]
+        c = (sorted(c,
+                    reverse=True,
+                    key=lambda x: x[1])[:n] if n > 0 else c)
+
+        # 3. Do local alignments and return count / score / alignment
+        if len(c) > 0:
+            return sorted([(m[0], {'kmer_coverage': m[1],
+                                   'score': a[0],
+                                   'alignment': a[1]})
+                           for (m, a) in self._align_entries(seq, c)],
+                          key=lambda z: z[1]['score'],
+                      reverse=True)
+        return []
+
+    def _align_entries(self, seq, matches):
+        # Does the alignment for the approximate search
+        def align(s1, s2s, env, aligned):
+            for s2 in s2s:
+                z = pyopa.align_double(s1, s2, env, False, False, True)
+                a = pyopa.align_strings(s1, s2, env, False, z)
+                aligned.append((z[0], ((a[0].convert_readable(),
+                                        (z[3], z[1])),
+                                       (a[1].convert_readable(),
+                                        (z[4], z[2])))))
+
+        aligned = []
+        query = pyopa.Sequence(seq.decode('ascii'))
+        entries = list(map(lambda m:
+                           pyopa.Sequence(self.get_sequence(int(m[0])).decode('ascii')),
+                           matches))
+        t = threading.Thread(target=align,
+                             args=(query, entries, self.PAM100, aligned))
+        t.start()
+        t.join()
+        assert (len(aligned) > 0), 'Alignment thread crashed.'
+        return zip(matches, aligned)
 
 
 class OmaIdMapper(object):
@@ -580,7 +924,7 @@ class IDResolver(object):
     def _from_numeric(self, e_id):
         nr = int(e_id)
         if not 0 < nr <= self.max_entry_nr:
-            raise InvalidId('{0:d} out of protein range: {1:s}'.format(nr, e_id))
+            raise InvalidId('{0:d} out of protein range: {1:}'.format(nr, e_id))
         return nr
 
     def _from_omaid(self, e_id):
@@ -773,7 +1117,7 @@ class Taxonomy(object):
                 t = ",".join(children)
                 return '(' + t + ')' + newick_enc(node['Name'].decode())
 
-        return _rec_newick(self._get_root_taxon())
+        return _rec_newick(self._get_root_taxon()) + ';'
 
     def as_dict(self):
         """Encode the Taxonomy as a nested dict.
@@ -825,6 +1169,10 @@ class Singleton(Exception):
     def __init__(self, entry, msg=None):
         super(Singleton, self).__init__(msg)
         self.entry = entry
+
+
+class NoReprEntry(Exception):
+    pass
 
 
 class IdMapperFactory(object):
@@ -1024,3 +1372,71 @@ class DomainNameIdMapper(object):
         info = self._get_dominfo(domain_id)
         return {'name': info['Description'].decode(), 'source': info['Source'].decode(),
                 'domainid': domain_id.decode()}
+
+
+class FastMapper(object):
+    """GO Function projection to sequences from OMA hdf5 file"""
+
+    def __init__(self, db):
+        self.db = db
+
+    def iter_projected_goannotations(self, records):
+        # gene ontology fast mapping, uses exact / approximate search.
+        # todo: implement taxonomic restriction.
+        # Input: iterable of biopython SeqRecords
+
+        for rec in records:
+            logger.debug('projecting function to {}'.format(rec))
+            r = self.db.seq_search.search(str(rec.seq))
+            if r is not None:
+                logger.debug(str(r))
+                if r[0] == 'exact':
+                    tdfs1 = []
+                    for enum in r[1]:
+                        df = self.db.get_gene_ontology_annotations(enum, as_dataframe=True)
+                        if df is not None:
+                            df['With'] = 'Exact:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(enum))
+                            tdfs1.append(df)
+                    go_df = pd.concat(tdfs1, ignore_index=True)
+
+                else:
+                    # Take best match. TODO: remove those below some level of match.
+                    match_enum = r[1][0][0]
+                    match_score = r[1][0][1]['score']
+                    logger.debug('match: enum: {}, score:{}'.format(match_enum, match_score))
+                    go_df = self.db.get_gene_ontology_annotations(match_enum, as_dataframe=True)
+                    if go_df is not None:
+                        go_df['With'] = 'Approx:{}:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(match_enum),
+                                                        match_score)
+                if go_df is not None:
+                    go_df['DB'] = 'OMA_FastMap'
+                    go_df['Assigned_By'] = go_df['DB']
+                    go_df['DB_Object_ID'] = rec.id
+                    go_df['DB_Object_Symbol'] = go_df['DB_Object_ID']
+                    go_df['Evidence'] = 'IEA'
+                    go_df['DB:Reference'] = 'OMA_Fun:002'
+                    go_df['Taxon_ID'] = 'taxon:-1'
+                    len_with_dupl = len(go_df)
+                    go_df.drop_duplicates(inplace=True)
+                    logger.debug('cleaning duplicates: from {} to {} annotations'.format(len_with_dupl, len(go_df)))
+                    for row in go_df.to_dict('records'):
+                        yield row
+
+    def write_annotations(self, file, seqrecords):
+        """Project annotations and write them to file
+
+        This method takes a filehandle and an iterable of BioPython
+        SeqRecords objects as input. The function computes the
+        projected annotations and writes them to the file in gaf
+        format.
+
+        :param file: filehandle to write annotations to
+        :param seqrecords: input sequencs to project functions to
+        """
+
+        file.write('!gaf-version: {}\n'.format(GAF_VERSION))
+        file.write('!Project Name: OMA Fast Function Projection\n')
+        file.write('!Date created: {}\n'.format(time.strftime("%c")))
+        file.write('!Contact Email: contact@omabrowser.org\n')
+        for anno in self.iter_projected_goannotations(seqrecords):
+            GOA.writerec(anno, file, GOA.GAF20FIELDS)

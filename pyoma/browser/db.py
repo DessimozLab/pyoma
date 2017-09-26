@@ -658,7 +658,10 @@ class SequenceSearch(object):
                        tables.open_file(self.db.filename + '.idx', 'r'))
 
         # Protein search arrays.
-        self.seq_idx = self.db_idx.root.Protein.SequenceIndex
+        try:
+            self.seq_idx = self.db_idx.root.Protein.SequenceIndex
+        except AttributeError:
+            raise DBConsistencyError("Suffix index for protein sequences is not available")
         self.seq_buff = self.db.root.Protein.SequenceBuffer
         self.n_entries = len(self.db.root.Protein.Entries)
 

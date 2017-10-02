@@ -76,13 +76,19 @@ class Singleton(type):
 
 class ProteinEntry(object):
     def __init__(self, db, e):
-        self._entry = e
+        self._stored_entry = e
         self._db = db
+
+    @LazyProperty
+    def _entry(self):
+        return (self._db.entry_by_entry_nr(self._stored_entry)
+                if type(self._stored_entry) is int
+                else self._stored_entry)
 
     @classmethod
     def from_entry_nr(cls, db, eNr):
-        e = db.entry_by_entry_nr(eNr)
-        return cls(db, e)
+        # e = db.entry_by_entry_nr(eNr)
+        return cls(db, eNr)
 
     @property
     def entry_nr(self):

@@ -262,6 +262,14 @@ class Database(object):
         idx = res['EntryNr'].searchsorted(entry_nr)
         return res, idx
 
+    def parse_hog_id(self, hog_id):
+        hog_id = hog_id if isinstance(hog_id, bytes) else hog_id.encode('ascii')
+        m = self._re_fam.match(hog_id)
+        if m is not None:
+            return int(m.group('fam'))
+        else:
+            raise ValueError('invalid hog id format')
+
     def hog_family(self, entry):
         entry = self.ensure_entry(entry)
         m = self._re_fam.match(entry['OmaHOG'])
@@ -354,11 +362,26 @@ class Database(object):
         :param entry: an entry or entry_nr of a query protein
         :param level: the taxonomic level of interest"""
         query = self.ensure_entry(entry)
-        queryFam = self.hog_family(query)
+        members = self.hog_members_from_hog_id(query['OmaHOG'], level)
+        if query not in members:
+            raise ValueError(u"Level '{0:s}' undefined for query gene".format(level))
+
+    def hog_members_from_hog_id(self, hog_id, level):
+        """get hog members with respect to a given taxonomic level.
+
+        The method will return a list of protein entries that are all
+        member of the same hog with respect to the taxonomic range
+        of interest.
+
+        :param bytes hog_id: the query hog id
+        :param str level: the taxonomic level of interest"""
+        if isinstance(hog_id, str):
+            hog_id = hog_id.encode('ascii')
+        query_fam = self.parse_hog_id(hog_id)
         hoglev = None
         for hog_candidate in self.db.root.HogLevel.where(
-                '(Fam == {:d}) & (Level == {!r})'.format(queryFam, level.encode('ascii'))):
-            if query['OmaHOG'].startswith(hog_candidate['ID']):
+                '(Fam == {:d}) & (Level == {!r})'.format(query_fam, level.encode('ascii'))):
+            if hog_id.startswith(hog_candidate['ID']):
                 hoglev = hog_candidate
                 break
         if hoglev is None:
@@ -369,8 +392,6 @@ class Database(object):
             # last, we need to filter the proteins to the tax range of interest
             members = [x for x in members if level.encode('ascii') in self.tax.get_parent_taxa(
                 self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
-            if query not in members:
-                raise ValueError(u"Level '{0:s}' undefined for query gene".format(level))
         return members
 
     def get_orthoxml(self, fam):
@@ -928,7 +949,7 @@ class IDResolver(object):
         return nr
 
     def _from_omaid(self, e_id):
-        return self._db.id_mapper['OMA'].omaid_to_entry_nr(e_id)
+        return int(self._db.id_mapper['OMA'].omaid_to_entry_nr(e_id))
 
     def search_xrefs(self, e_id):
         """search for all xrefs. TODO: what happens if xref is ambiguous?"""

@@ -82,7 +82,7 @@ class ProteinEntry(object):
     @LazyProperty
     def _entry(self):
         return (self._db.entry_by_entry_nr(self._stored_entry)
-                if type(self._stored_entry) is int
+                if isinstance(self._stored_entry, int)
                 else self._stored_entry)
 
     @classmethod

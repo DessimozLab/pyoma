@@ -949,7 +949,7 @@ class IDResolver(object):
         return nr
 
     def _from_omaid(self, e_id):
-        return self._db.id_mapper['OMA'].omaid_to_entry_nr(e_id)
+        return int(self._db.id_mapper['OMA'].omaid_to_entry_nr(e_id))
 
     def search_xrefs(self, e_id):
         """search for all xrefs. TODO: what happens if xref is ambiguous?"""

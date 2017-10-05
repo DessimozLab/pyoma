@@ -88,7 +88,7 @@ class ProteinEntry(object):
     @classmethod
     def from_entry_nr(cls, db, eNr):
         # e = db.entry_by_entry_nr(eNr)
-        return cls(db, eNr)
+        return cls(db, int(eNr))
 
     @property
     def entry_nr(self):

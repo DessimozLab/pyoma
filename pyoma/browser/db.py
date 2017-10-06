@@ -21,7 +21,7 @@ import os
 import collections
 import logging
 from .KmerEncoder import KmerEncoder
-from .models import LazyProperty, KeyWrapper
+from .models import LazyProperty, KeyWrapper, ProteinEntry
 from .geneontology import GeneOntology, OntologyParser, AnnotationParser, GOAspect
 
 logger = logging.getLogger(__name__)
@@ -345,6 +345,22 @@ class Database(object):
                 self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
 
         return memb
+
+    def iter_members_of_hog_id(self, hog_id):
+        """iterates over all proteins that belong to a specific hog_id.
+
+        A hog_id might be an ID of the following form: HOG:0000212.1a
+        This method will yield all proteins in the form of
+        :class:`ProteinEntry` instances that are part of this hog_id.
+
+        :param str hog_id: the requested HOG ID.
+        :return: :py:class:`ProteinEntry` objects
+        :rtype: iter(:class:`ProteinEntry`)"""
+        hog_range = self._hog_lex_range(hog_id)
+        it = self.db.root.Protein.Entries.where(
+            '({!r} <= OmaHOG) & (OmaHOG < {!r})'.format(*hog_range))
+        for row in it:
+            yield ProteinEntry(self, row.fetch_all_fields())
 
     def member_of_fam(self, fam):
         """returns an array of protein entries which belong to a given fam"""

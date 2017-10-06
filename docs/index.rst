@@ -19,6 +19,7 @@ Contents:
     inference
     browser-convert
     browser-query
+    models
 
 Indices and tables
 ==================

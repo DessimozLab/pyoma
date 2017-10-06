@@ -75,6 +75,15 @@ class Singleton(type):
 
 
 class ProteinEntry(object):
+    """Model for a protein object
+
+    This class provides an easy to use interface for a given protein
+    form the database.
+
+    If instantiated with an entry_nr only, no data is loaded until a
+    property or method is accessed. Properties that need to access
+    additional data or loaded lazily and are cached in the object
+    (but not kept after deletion of object)."""
     def __init__(self, db, e):
         self._stored_entry = e
         self._db = db
@@ -88,7 +97,7 @@ class ProteinEntry(object):
     @classmethod
     def from_entry_nr(cls, db, eNr):
         # e = db.entry_by_entry_nr(eNr)
-        return cls(db, eNr)
+        return cls(db, int(eNr))
 
     @property
     def entry_nr(self):

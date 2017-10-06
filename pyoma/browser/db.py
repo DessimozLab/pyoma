@@ -365,6 +365,7 @@ class Database(object):
         members = self.hog_members_from_hog_id(query['OmaHOG'], level)
         if query not in members:
             raise ValueError(u"Level '{0:s}' undefined for query gene".format(level))
+        return members
 
     def hog_members_from_hog_id(self, hog_id, level):
         """get hog members with respect to a given taxonomic level.

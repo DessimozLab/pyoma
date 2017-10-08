@@ -712,6 +712,17 @@ class DarwinExporter(object):
             data = sorted(group_sizes[group_type].items())
             grp_size_tab.append(data)
 
+        cov_fracs = self.add_domain_covered_sites_counts()
+        cov_hist, bins = numpy.histogram(cov_fracs[cov_fracs > 0], bins=numpy.linspace(0, 1, 51))
+        cov_hist_data = numpy.zeros(50, dtype=[('BinEndValue', 'f4'), ('Counts', 'i4')])
+        cov_hist_data['BinEndValue'] = bins[1:]
+        cov_hist_data['Counts'] = cov_hist
+        dom_cov_hist_tab = self.create_table_if_needed(summary, 'Domain_coverage_hist',
+                 drop_data=True, obj=cov_hist_data)
+        dom_cov_hist_tab.set_attr('frac_genes_w_domain', len(cov_fracs[cov_fracs > 0]) / len(cov_fracs))
+        dom_cov_hist_tab.set_attr('mean_coverage_overall', numpy.mean(cov_fracs))
+        dom_cov_hist_tab.set_attr('mean_coverage_w_domain', numpy.mean(cov_fracs[cov_fracs > 0]))
+
     def count_gene_ontology_summary(self):
         go_tab = self.h5.get_node('/Annotations/GeneOntology')
         prot_tab = self.h5.get_node('/Protein/Entries')
@@ -787,6 +798,39 @@ class DarwinExporter(object):
             for grp_size in memb_cnts[grp].values():
                 sizes[grp][grp_size] += 1
         return sizes
+
+    def add_domain_covered_sites_counts(self):
+        """Stores the number of AA covered by a DomainAnnotation.
+
+        This method adds to the hdf5 file a /Protein/DomainCoverage array that
+        contains the number of AA sites covered by a domain. The position
+        corresponds to the protein entry numbers in /Protein/Entries.
+
+        :Note: The method assumes that the domains are all non-overlapping.
+            If they are not, the reported coverage will be too high!
+
+        :return: covered fractions by domains for each protein
+        :rtype: numpy.array"""
+        prot_tab = self.h5.get_node('/Protein/Entries')
+        dom_tab = self.h5.get_node('/Annotations/Domains')
+        cov_sites = numpy.zeros(len(prot_tab), dtype=numpy.uint32)
+        for row in dom_tab:
+            assert prot_tab[row['EntryNr']-1]['EntryNr'] == row['EntryNr']
+            doms = [int(pos) for pos in row['Coords'].split(b':')]
+            cov_sites[row['EntryNr']-1] += sum((doms[i + 1]-doms[i] + 1 for i in range(0, len(doms), 2)))
+        create_node = False
+        try:
+            dom_cov_tab = self.h5.get_node('/Protein/CoveredSitesByDomains')
+            if len(dom_cov_tab) != len(cov_sites):
+                self.h5.remove_node('/Protein/CoveredSitesByDomains')
+                create_node = True
+        except tables.NoSuchNodeError:
+            create_node = True
+        if create_node:
+            dom_cov_tab = self.h5.create_carray('/Protein', 'CoveredSitesByDomains',
+                                                tables.UInt32Atom(), (len(cov_sites),))
+        dom_cov_tab[0:len(cov_sites)] = cov_sites
+        return cov_sites / (prot_tab.col('SeqBufferLength') - 1)
 
     def add_sequence_suffix_array(self, k=6, fn=None, sa=None):
         '''

@@ -724,6 +724,7 @@ class DarwinExporter(object):
         dom_cov_hist_tab.set_attr('mean_coverage_w_domain', numpy.mean(cov_fracs[cov_fracs > 0]))
 
     def count_gene_ontology_summary(self):
+        self.logger.info('Bulding gene ontology annotations summary info')
         go_tab = self.h5.get_node('/Annotations/GeneOntology')
         prot_tab = self.h5.get_node('/Protein/Entries')
         exp_codes = frozenset([b'EXP', b'IDA', b'IPI', b'IMP', b'IGI' b'IEP'])
@@ -753,6 +754,7 @@ class DarwinExporter(object):
         return cnts
 
     def count_xref_summary(self):
+        self.logger.info('Building cross-ref summary info')
         xref_tab = self.h5.get_node('/XRef')
         prot_tab_iter = iter(self.h5.get_node('/Protein/Entries'))
         source = xref_tab.get_enum('XRefSource')
@@ -777,6 +779,7 @@ class DarwinExporter(object):
         return cnts
 
     def collect_group_sizes(self):
+        self.logger.info("Building grouping size histograms")
         groupings = ('OmaHOG', 'OmaGroup')
         memb_cnts = {grp: collections.defaultdict(int) for grp in groupings}
         fam_re = re.compile(br'([A-Z]+:)?(?P<fam>[0-9]+).*')
@@ -811,10 +814,11 @@ class DarwinExporter(object):
 
         :return: covered fractions by domains for each protein
         :rtype: numpy.array"""
+        self.logger.info("Counting covered sites by domains")
         prot_tab = self.h5.get_node('/Protein/Entries')
         dom_tab = self.h5.get_node('/Annotations/Domains')
         cov_sites = numpy.zeros(len(prot_tab), dtype=numpy.uint32)
-        for row in dom_tab:
+        for row in tqdm(dom_tab, 'Parsing domain annotations'):
             assert prot_tab[row['EntryNr']-1]['EntryNr'] == row['EntryNr']
             doms = [int(pos) for pos in row['Coords'].split(b':')]
             cov_sites[row['EntryNr']-1] += sum((doms[i + 1]-doms[i] + 1 for i in range(0, len(doms), 2)))

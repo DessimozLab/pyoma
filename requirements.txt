@@ -4,6 +4,7 @@ numexpr>=2.4
 tables>=3.2.2
 cython
 PySAIS
+biopython
 tqdm
 pandas
 --no-binary pyopa pyoma

@@ -757,7 +757,7 @@ class SequenceSearch(object):
             Performs an exact match search using the suffix array.
         '''
         # TODO: work out whether to just use the approximate search and then
-        # check if any are actually exact matches. Do the counting and then
+        # check if any are actually exact matches. Do the counting and then
         # do an equality checking on any of the sequences that have the correct
         # number of kmer matches.
         seq = (seq if is_sanitised else self._sanitise_seq(seq))

@@ -1,9 +1,5 @@
-from __future__ import division
-from future.builtins import str
-from future.builtins import chr
-from future.builtins import range
-from future.builtins import object
-from future.builtins import super
+from __future__ import division, print_function
+from builtins import str, chr, range, object, super, bytes
 from future.standard_library import hooks
 from PySAIS import sais
 from tempfile import NamedTemporaryFile

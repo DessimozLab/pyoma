@@ -1,10 +1,7 @@
+from __future__ import division, print_function
+from builtins import chr, range, object, zip, bytes
 import io
-from builtins import chr
-from builtins import range
-from builtins import object
-from builtins import zip
 import itertools
-
 import time
 from Bio.UniProt import GOA
 from bisect import bisect_left

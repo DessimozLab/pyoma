@@ -104,23 +104,25 @@ class DatabaseTests(unittest.TestCase):
     def test_exact_search(self):
         # Test for 10 random 
         for _ in range(10):
-            i = random.randint(1, len(self.db.db.root.Protein.Entries))
-            s = self.db.get_sequence(i)
-            self.assertTrue((i in set(self.db.seq_search.search(s, is_sanitised=True)[1])),
+            i = random.randint(0, len(self.db.db.root.Protein.Entries))
+            enr = i+1
+            s = self.db.get_sequence(enr)
+            self.assertTrue((enr in set(self.db.seq_search.search(s, is_sanitised=True)[1])),
                             'exact search for entry {} failed.'.format(i))
 
     def test_approx_search(self):
         # Test for random subsequence of 10 random sequences.
         min_length = 10 
         for _ in range(10):
-            i = random.randint(1, len(self.db.db.root.Protein.Entries))
-            elen = self.db.db.root.Protein.Entries[i]['SeqBufferLength']
+            i = random.randint(0, len(self.db.db.root.Protein.Entries))
+            elen = self.db.db.root.Protein.Entries[i]['SeqBufferLength']-1
+            enr = i+1
 
             ii = random.randint(0, elen - min_length)
             jj = random.randint(ii + min_length, elen)
 
-            s = self.db.get_sequence(i)[ii:jj]
-            self.assertTrue((i in {z[0] for z in self.db.seq_search.search(s, is_sanitised=True)[1]}),
+            s = self.db.get_sequence(enr)[ii:jj]
+            self.assertTrue((enr in {z[0] for z in self.db.seq_search.search(s, is_sanitised=True)[1]}),
                             'exact search for entry {} failed.'.format(i))
 
     def test_oma_group_from_numeric_id(self):

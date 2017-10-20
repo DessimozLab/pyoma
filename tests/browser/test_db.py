@@ -2,6 +2,7 @@ import random
 import types
 import unittest
 import numpy
+import os
 from pyoma.browser.db import *
 from pyoma.browser import tablefmt
 
@@ -14,12 +15,29 @@ class TestHelperFunctions(unittest.TestCase):
         self.assertEqual(2, count_elements(recarray))
 
 
+def find_path_to_test_db(dbfn="TestDb.h5"):
+    """We try to load the dbfn first from the same directory, and afterwards from
+    the path given by the PYOMA_DB_PATH environment variable.
+
+    :returns: path to database
+    :rtype: str
+    :raises IOError: if db does not exist."""
+    path1 = os.path.join(os.path.dirname(__file__), dbfn)
+    if os.path.isfile(path1):
+        return path1
+    path2 = os.path.abspath(os.path.join(os.getenv("PYOMA_DB_PATH", "./"), dbfn))
+    if os.path.isfile(path2):
+        return path2
+    else:
+        raise IOError('cannot access {}. (Tried {} and {})'.format(dbfn, path1, path2))
+
+
 class DatabaseTests(unittest.TestCase):
     db = None
 
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        path = find_path_to_test_db('TestDb.h5')
         cls.db = Database(path)
 
     @classmethod
@@ -31,7 +49,7 @@ class DatabaseTests(unittest.TestCase):
             vps = self.db.get_vpairs(entry_nr)
             self.assertTrue(isinstance(vps, numpy.ndarray))
             self.assertEqual(exp_vps_cnt, len(vps))
-            self.assertEqual(sorted(['EntryNr1', 'EntryNr2', 'RelType','Distance','Score']),
+            self.assertEqual(sorted(['EntryNr1', 'EntryNr2', 'RelType', 'Distance', 'Score']),
                              sorted(vps.dtype.fields.keys()))
 
     def test_neighborhood_close_to_boundary(self):
@@ -181,7 +199,7 @@ class TaxonomyTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        path = find_path_to_test_db('TestDb.h5')
         h5 = tables.open_file(path)
         cls.tax_input = h5.root.Taxonomy.read()
         h5.close()
@@ -228,7 +246,7 @@ class DBMock(object):
 class GenomeIdResolverTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        path = find_path_to_test_db('TestDb.h5')
         cls.db = DBMock(tables.open_file(path))
 
     @classmethod

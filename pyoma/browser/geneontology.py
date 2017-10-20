@@ -1,4 +1,4 @@
-from builtins import int, bytes
+from builtins import int, bytes, str
 import collections
 import csv
 import logging

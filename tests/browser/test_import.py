@@ -1,4 +1,4 @@
-from __future__ import absolute_import, unicode_literals, print_function, division
+from __future__ import absolute_import, print_function, division
 
 import csv
 import gzip
@@ -216,7 +216,8 @@ class H5HelpersTests(ImportDummyBase):
 
     def setUp(self):
         super(H5HelpersTests, self).setUp()
-        self.darwin_exporter.h5.create_table('/', 'Example', obj=self.get_table_data())
+        data = self.get_table_data()
+        self.darwin_exporter.h5.create_table('/', 'Example', obj=data)
 
     def test_create_table_if_needed_without_existing_table(self):
         self.darwin_exporter.create_table_if_needed('/', 'XRef2', description=self.get_table_data().dtype)

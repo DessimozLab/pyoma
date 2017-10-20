@@ -1,5 +1,5 @@
 from __future__ import division, print_function
-from builtins import chr, bytes, range, zip
+from builtins import chr, bytes
 import random
 import types
 import unittest
@@ -238,6 +238,7 @@ class TaxonomyTest(unittest.TestCase):
                       {"id":36329, "name": "Plasmodium falciparum (isolate 3D7)"}]}
         self.assertEqual(expected, phylo.as_dict())
 
+
 class DBMock(object):
     def __init__(self, h5):
         self.h5 = h5
@@ -272,9 +273,8 @@ class GenomeIdResolverTest(unittest.TestCase):
     def test_resolve_taxon_id(self):
         expected = b'PLAF7'
         for query in (36329, b'36329', "36329"):
-            with self.subTest(query=query):
-                g = self.OmaIdMapper.identify_genome(query)
-                self.assertEqual(g['UniProtSpeciesCode'], expected)
+            g = self.OmaIdMapper.identify_genome(query)
+            self.assertEqual(g['UniProtSpeciesCode'], expected, "failed for {} (type {})".format(query, type(query)))
 
     def test_resolve_nonexisting_code(self):
         with self.assertRaises(UnknownSpecies):

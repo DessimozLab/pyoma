@@ -38,6 +38,7 @@ class DatabaseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         path = find_path_to_test_db('TestDb.h5')
+        logger.info("Loading {} for DatabaseTests".format(path))
         cls.db = Database(path)
 
     @classmethod

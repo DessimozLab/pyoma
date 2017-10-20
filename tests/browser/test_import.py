@@ -89,7 +89,7 @@ class GenomeDirectImportTest(ImportIntegrationBase):
         gstab = self.darwin_exporter.h5.get_node('/Genome')
         self.assertEqual(len(gstab), len(data['GS']), 'unexpected number of genomes')
         for genome in data['GS']:
-            gs = gstab.read_where('UniProtSpeciesCode == {}'.format(genome[1].encode('utf-8')))
+            gs = gstab.read_where('UniProtSpeciesCode == {!r}'.format(genome[1].encode('utf-8')))
             for key in ((2, 'TotEntries'), (3, 'TotAA'), (0, 'NCBITaxonId'), (5, 'SciName')):
                 expected = genome[key[0]]
                 if isinstance(expected, str):
@@ -137,7 +137,7 @@ class ProteinImportViaJson(ImportIntegrationBase):
         version = self.darwin_exporter.get_version()
         self.assertIn('Test', version)
         self.darwin_exporter.add_version()
-        self.assertEqual(version, self.darwin_exporter.h5.get_node_attr('/','oma_version'))
+        self.assertEqual(version, self.darwin_exporter.h5.get_node_attr('/', 'oma_version'))
 
     def test_add_orthologs_from_darwin(self):
         pass

@@ -1139,7 +1139,7 @@ class Taxonomy(object):
         Note: as many newick parsers do not support quoted labels,
         the method instead replaces spaces with underscores."""
         def newick_enc(s):
-            return s.translate({ord(' '): '_', ord('('): '[', ord(')'): ']'})
+            return s.translate({ord(' '): u'_', ord('('): u'[', ord(')'): u']'})
 
         def _rec_newick(node):
             children = []

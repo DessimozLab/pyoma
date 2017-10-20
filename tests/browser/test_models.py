@@ -1,3 +1,4 @@
+from builtins import bytes, range
 from pyoma.browser import models, db
 from future.utils import with_metaclass
 import sys

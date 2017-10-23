@@ -166,6 +166,31 @@ class Database(object):
             return
         raise DBConsistencyError('no protein in a hog')
 
+    def main_isoforms(self, genome):
+        """returns the proteins that are the main isoforms of a genome.
+
+        The main isoform is in this context the isoform that we used in OMA to
+        infer the orthologs. It is the one variant that has the most alignment
+        matches to all other gnomes.
+
+        The genome parameter should be the UniProtSpeciesCode of the species of
+        interest. If it is a numeric value, the genome parameter is interpreted
+        as the protein entrynr. The method returns then the main isoforms for
+        the species to which this protein belongs.
+
+        :Note: OMA only predicts orthologs for the main isoform, so there is no
+        difference if you work with only the main isoforms or all proteins of
+        a genome in terms of orthologs.
+
+        :param genome: UniProtSpeciesCode of the genome of interest, or a gene
+                       number (EntryNr) from the genome of interest.
+        """
+        rng = self.id_mapper['OMA'].genome_range(genome)
+        prot_tab = self.get_hdf5_handle().get_node('/Protein/Entries')
+        return prot_tab.read_where(
+            '(EntryNr >= {}) & (EntryNr <= {}) & ((AltSpliceVariant == EntryNr) | (AltSpliceVariant == 0))'
+            .format(rng[0], rng[1]))
+
     def _get_vptab(self, entry_nr):
         return self._get_pw_tab(entry_nr, 'VPairs')
 

@@ -121,6 +121,12 @@ class DatabaseTests(unittest.TestCase):
         for root in ('YEAST', 'ASHGO'):
             order = self.db.id_mapper['OMA'].species_ordering(root)
             self.assertEqual(order[root], 0, '{} should be first genome, but comes at {}'.format(root, order[root]))
+
+    def test_main_isoform_from_species_id(self):
+        query = 'PLAF7'
+        rng = self.db.id_mapper['OMA'].genome_range(query)
+        mains = self.db.main_isoforms(query)
+        self.assertGreaterEqual(rng[1]-rng[0]+1, len(mains))
     
     def test_exact_search(self):
         # Test for 10 random 

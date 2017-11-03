@@ -697,6 +697,37 @@ class Database(object):
                  '\n'))
 
 
+class SuffixSearcher(object):
+    def __init__(self, suffix_index_node, buffer=None, lookup=None):
+        if isinstance(suffix_index_node, tables.Group):
+            self.buffer_arr = buffer if buffer else suffix_index_node._f_get_child('buffer')
+            self.suffix_arr = suffix_index_node._f_get_child('suffix')
+            self.lookup_arr = lookup if lookup else suffix_index_node._f_get_child('offset')
+        else:
+            self.buffer_arr = buffer
+            self.suffix_arr = suffix_index_node
+            self.lookup_arr = lookup
+        self.lookup_arr = self.lookup_arr[:]
+
+    def find(self, query):
+        n = len(query)
+        if n > 0:
+            slicer = KeyWrapper(self.suffix_arr,
+                                key=lambda i:
+                                self.buffer_arr[i:(i + n)].tobytes())
+            ii = bisect_left(slicer, query)
+            if ii and (slicer[ii] == query):
+                # Left most found.
+                jj = ii + 1
+                while (jj < len(slicer)) and (slicer[jj] == query):
+                    # zoom to end -> -> ->
+                    jj += 1
+
+                # Find entry numbers and filter to remove incorrect entries
+                return numpy.searchsorted(self.lookup_arr, self.suffix_arr[ii:jj]+1) - 1
+        return []
+
+
 class SequenceSearch(object):
     '''
         Contains all the methods for searching the sequence
@@ -1261,6 +1292,7 @@ class XrefIdMapper(object):
         self.xref_tab = db.get_hdf5_handle().get_node('/XRef')
         self.xrefEnum = self.xref_tab.get_enum('XRefSource')
         self.idtype = frozenset(list(self.xrefEnum._values.keys()))
+        self.xref_index = SuffixSearcher(db.get_hdf5_handle().get_node('/XRef_Index'))
 
     def map_entry_nr(self, entry_nr):
         """returns the XRef entries associated with the query protein.
@@ -1313,7 +1345,7 @@ class XrefIdMapper(object):
             mapped_junks,
             usemask=False)
 
-    def search_xref(self, xref, is_prefix=False):
+    def search_xref(self, xref, is_prefix=False, match_any_substring=False):
         """identify proteins associcated with `xref`.
 
         The crossreferences are limited to the types in the class
@@ -1329,13 +1361,17 @@ class XrefIdMapper(object):
         :param str xref: an xref to be located
         :param bool is_prefix: treat xref as a prefix and return
                      potentially several matching xrefs"""
-        if is_prefix:
-            up = xref[:-1] + chr(ord(xref[-1])+1)
-            cond = '(XRefId >= {!r}) & (XRefId < {!r})'.format(
-                xref.encode('utf-8'), up.encode('utf-8'))
+        if match_any_substring:
+            query = xref.encode('utf-8').lower()
+            res = self.xref_tab[self.xref_index.find(query)]
         else:
-            cond = 'XRefId=={!r}'.format(xref.encode('utf-8'))
-        res = self.xref_tab.read_where(cond)
+            if is_prefix:
+                up = xref[:-1] + chr(ord(xref[-1])+1)
+                cond = '(XRefId >= {!r}) & (XRefId < {!r})'.format(
+                    xref.encode('utf-8'), up.encode('utf-8'))
+            else:
+                cond = 'XRefId=={!r}'.format(xref.encode('utf-8'))
+            res = self.xref_tab.read_where(cond)
         if len(res) > 0 and len(self.idtype) < len(self.xrefEnum):
             res = res[numpy.in1d(res['XRefSource'], list(self.idtype))]
         return res

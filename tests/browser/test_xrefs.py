@@ -80,7 +80,7 @@ class DescriptionManagerTest(unittest.TestCase):
                                   driver_core_backing_store=0)
         nr_rows = 3
         data = numpy.zeros(nr_rows, dtype=tables.dtype_from_descr(pyoma.tablefmt.ProteinTable))
-        data['EntryNr'] = numpy.arange(1,nr_rows + 1)
+        data['EntryNr'] = numpy.arange(1, nr_rows + 1)
         h5file.create_table('/', 'Entries', pyoma.tablefmt.ProteinTable, obj=data)
         self.h5 = h5file
 
@@ -146,6 +146,12 @@ class GeneOntologyManagerTest(unittest.TestCase):
         self.assertEqual(7610, res[0]['TermNr'])
         self.assertEqual(b"IDA", res[0]['Evidence'])
         self.assertEqual(b"PMID:2167836", res[0]["Reference"])
+
+    def test_obo_version_set(self):
+        self.store_and_retrieve_data(2, "")
+        go_node = self.h5file.get_node('/obo')
+        vers = go_node.attrs['ontology_release']
+        self.assertEqual("dummy-test/2017-04-18", vers)
 
     def test_add_obsolete_term_is_skipped(self):
         import sys

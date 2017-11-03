@@ -1,7 +1,10 @@
+from __future__ import division, print_function
+from builtins import chr, bytes
 import random
 import types
 import unittest
 import numpy
+import os
 from pyoma.browser.db import *
 from pyoma.browser import tablefmt
 
@@ -14,12 +17,30 @@ class TestHelperFunctions(unittest.TestCase):
         self.assertEqual(2, count_elements(recarray))
 
 
+def find_path_to_test_db(dbfn="TestDb.h5"):
+    """We try to load the dbfn first from the same directory, and afterwards from
+    the path given by the PYOMA_DB_PATH environment variable.
+
+    :returns: path to database
+    :rtype: str
+    :raises IOError: if db does not exist."""
+    path1 = os.path.join(os.path.dirname(__file__), dbfn)
+    if os.path.isfile(path1):
+        return path1
+    path2 = os.path.abspath(os.path.join(os.getenv("PYOMA_DB_PATH", "./"), dbfn))
+    if os.path.isfile(path2):
+        return path2
+    else:
+        raise IOError('cannot access {}. (Tried {} and {})'.format(dbfn, path1, path2))
+
+
 class DatabaseTests(unittest.TestCase):
     db = None
 
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        path = find_path_to_test_db('TestDb.h5')
+        logger.info("Loading {} for DatabaseTests".format(path))
         cls.db = Database(path)
 
     @classmethod
@@ -31,7 +52,7 @@ class DatabaseTests(unittest.TestCase):
             vps = self.db.get_vpairs(entry_nr)
             self.assertTrue(isinstance(vps, numpy.ndarray))
             self.assertEqual(exp_vps_cnt, len(vps))
-            self.assertEqual(sorted(['EntryNr1', 'EntryNr2', 'RelType','Distance','Score']),
+            self.assertEqual(sorted(['EntryNr1', 'EntryNr2', 'RelType', 'Distance', 'Score']),
                              sorted(vps.dtype.fields.keys()))
 
     def test_neighborhood_close_to_boundary(self):
@@ -100,6 +121,12 @@ class DatabaseTests(unittest.TestCase):
         for root in ('YEAST', 'ASHGO'):
             order = self.db.id_mapper['OMA'].species_ordering(root)
             self.assertEqual(order[root], 0, '{} should be first genome, but comes at {}'.format(root, order[root]))
+
+    def test_main_isoform_from_species_id(self):
+        query = 'PLAF7'
+        rng = self.db.id_mapper['OMA'].genome_range(query)
+        mains = self.db.main_isoforms(query)
+        self.assertGreaterEqual(rng[1]-rng[0]+1, len(mains))
     
     def test_exact_search(self):
         # Test for 10 random 
@@ -181,7 +208,7 @@ class TaxonomyTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        path = find_path_to_test_db('TestDb.h5')
         h5 = tables.open_file(path)
         cls.tax_input = h5.root.Taxonomy.read()
         h5.close()
@@ -217,6 +244,7 @@ class TaxonomyTest(unittest.TestCase):
                       {"id":36329, "name": "Plasmodium falciparum (isolate 3D7)"}]}
         self.assertEqual(expected, phylo.as_dict())
 
+
 class DBMock(object):
     def __init__(self, h5):
         self.h5 = h5
@@ -228,7 +256,7 @@ class DBMock(object):
 class GenomeIdResolverTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        path = find_path_to_test_db('TestDb.h5')
         cls.db = DBMock(tables.open_file(path))
 
     @classmethod
@@ -251,9 +279,8 @@ class GenomeIdResolverTest(unittest.TestCase):
     def test_resolve_taxon_id(self):
         expected = b'PLAF7'
         for query in (36329, b'36329', "36329"):
-            with self.subTest(query=query):
-                g = self.OmaIdMapper.identify_genome(query)
-                self.assertEqual(g['UniProtSpeciesCode'], expected)
+            g = self.OmaIdMapper.identify_genome(query)
+            self.assertEqual(g['UniProtSpeciesCode'], expected, "failed for {} (type {})".format(query, type(query)))
 
     def test_resolve_nonexisting_code(self):
         with self.assertRaises(UnknownSpecies):

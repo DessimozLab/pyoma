@@ -1,8 +1,10 @@
+from builtins import bytes, range
 from pyoma.browser import models, db
 from future.utils import with_metaclass
 import sys
 import os
 import unittest
+from .test_db import find_path_to_test_db
 
 
 class ProteinEntryTests(unittest.TestCase):
@@ -10,7 +12,7 @@ class ProteinEntryTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        fn = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        fn = find_path_to_test_db('TestDb.h5')
         cls.db = db.Database(fn)
 
     @classmethod
@@ -58,7 +60,7 @@ class GeneOntologyAnnotationTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        fn = os.path.join(os.path.dirname(__file__), 'TestDb.h5')
+        fn = find_path_to_test_db('TestDb.h5')
         cls.db = db.Database(fn)
 
     @classmethod

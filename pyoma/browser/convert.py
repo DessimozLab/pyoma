@@ -1227,7 +1227,7 @@ class GeneOntologyManager(object):
 
     def _get_obo_version(self, obo_arr):
         header = obo_arr[0:1000].tobytes()
-        rel_info = re.search(rb'data-version:\s*(?P<version>[\w/_ -]+)', header)
+        rel_info = re.search(b'data-version:\s*(?P<version>[\w/_ -]+)', header)
         if rel_info is not None:
             rel_info = rel_info.group('version').decode()
         return rel_info

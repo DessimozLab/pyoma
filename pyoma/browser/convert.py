@@ -892,13 +892,13 @@ class DarwinExporter(object):
         # Initialise lookup array
         atom = (tables.UInt32Atom if dtype is numpy.uint32 else tables.UInt64Atom)
         kmers = KmerEncoder(k, is_protein=True)
-        z = db.create_vlarray('/Protein',
+        kmer_lookup_arr = db.create_vlarray('/Protein',
                               name='KmerLookup',
                               atom=atom(shape=()),
                               title='kmer entry lookup table',
                               filters=idx_compr,
                               expectedrows=len(kmers))
-        z._f_setattr('k', k)
+        kmer_lookup_arr._f_setattr('k', k)
 
         # Now find the split points and construct lookup ragged array.
         ii = 0
@@ -908,21 +908,27 @@ class DarwinExporter(object):
                 jj = ii + 1
                 while (jj < len(sa)) and (seqs[sa[jj]:(sa[jj] + k)] == kmer):
                     jj += 1
-                z.append(idx[ii:jj])
+                kmer_lookup_arr.append(idx[ii:jj])
             else:
                 # End or not found
-                z.append([])
+                kmer_lookup_arr.append([])
 
             # New start
             ii = jj
 
         if db.filename != self.h5.filename:
             self.logger.info('storing external links to SequenceIndex and KmerLookup')
-            self.h5.create_external_link('/Protein', 'KmerLookup', z)
-            self.h5.create_external_link('/Protein', 'SequenceIndex', db.root.Protein.SequenceIndex)
+            self.h5.create_external_link('/Protein', 'KmerLookup',
+                                         self._relative_path_to_external_node(kmer_lookup_arr))
+            self.h5.create_external_link('/Protein', 'SequenceIndex',
+                                         self._relative_path_to_external_node(db.root.Protein.SequenceIndex))
             db.root._f_setattr('conversion_end', time.strftime("%c"))
             db.close()
             self.logger.info('closed {}'.format(db.filename))
+
+    def _relative_path_to_external_node(self, node):
+        rel_path = os.path.relpath(node._v_file.filename, os.path.dirname(self.h5.filename))
+        return str(rel_path + ":" + node._v_pathname)
 
     def add_hog_domain_prevalence(self):
         # Check that protein entries / domains are added already to the DB

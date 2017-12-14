@@ -74,7 +74,11 @@ class Database(object):
             raise DBVersionError('Unsupported database version: {} != {} ({})'
                                  .format(db_version, self.EXPECTED_DB_SCHEMA, self.db.filename))
 
-        self.seq_search = SequenceSearch(self)
+        try:
+            self.seq_search = SequenceSearch(self)
+        except DBConsistencyError as e:
+            logger.exception("Cannot load SequenceSearch. Any future call to seq_search will fail!")
+            self.seq_search = object()
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
         self.tax = Taxonomy(self.db.root.Taxonomy.read())
@@ -714,14 +718,16 @@ class SequenceSearch(object):
 
         # Assume the index is stored in the main DB if there is no .idx file
         self.db = db.get_hdf5_handle()
-        self.db_idx = (db if not os.path.isfile(self.db.filename + '.idx') else
+        self.db_idx = (self.db if not os.path.isfile(self.db.filename + '.idx') else
                        tables.open_file(self.db.filename + '.idx', 'r'))
 
         # Protein search arrays.
         try:
             self.seq_idx = self.db_idx.root.Protein.SequenceIndex
-        except AttributeError:
-            raise DBConsistencyError("Suffix index for protein sequences is not available")
+            if isinstance(self.seq_idx, tables.link.ExternalLink):
+                self.seq_idx = self.seq_idx()
+        except (AttributeError, OSError) as e:
+            raise DBConsistencyError("Suffix index for protein sequences is not available: "+str(e))
         self.seq_buff = self.db.root.Protein.SequenceBuffer
         self.n_entries = len(self.db.root.Protein.Entries)
 
@@ -729,6 +735,7 @@ class SequenceSearch(object):
         self.k = self.db_idx.get_node_attr('/Protein/KmerLookup', 'k')
         self.encoder = KmerEncoder(self.k)
         self.kmer_lookup = self.db_idx.root.Protein.KmerLookup
+        logger.info('KmerLookup of size k={} loaded'.format(self.k))
 
     def get_entry_length(self, ii):
         """Get length of a particular entry."""

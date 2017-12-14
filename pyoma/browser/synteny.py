@@ -1,6 +1,10 @@
 import pandas
 import tables
 import logging
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = lambda x, **kwargs: x
 logger = logging.getLogger(__name__)
 
 
@@ -53,7 +57,7 @@ class SyntenyScorer(object):
 
     def compute_scores(self):
         res = []
-        for idx, rel in self.relations_df.iterrows():
+        for idx, rel in tqdm(self.relations_df.iterrows(), total=len(self.relations_df)):
             try:
                 res.append(self.score_of_pair(rel['EntryNr1'], rel['EntryNr2']))
             except TooSmallChromosome as e:

@@ -1368,27 +1368,27 @@ class XRefImporter(object):
 
         xrefEnum = tablefmt.XRefTable.columns.get('XRefSource').enum
         tag_to_enums = {
-            'GI': xrefEnum['GI'],
-            'EntrezGene': xrefEnum['EntrezGene'],
-            'WikiGene': xrefEnum['WikiGene'],
-            'IPI': xrefEnum['IPI'],
-            'Refseq_ID': xrefEnum['RefSeq'],
-            'SwissProt': xrefEnum['UniProtKB/SwissProt'],
-            'GeneName': xrefEnum['Gene Name'],
-            'ORFNames': xrefEnum['ORF Name'],
-            'OrderedLocusNames': xrefEnum['Ordered Locus Name'],
-            'ProtName': xrefEnum['Protein Name'],
-            'Synonyms': xrefEnum['Synonym'],
-            'HGNC_Id': xrefEnum['HGNC'],
-            'PMP': xrefEnum['PMP'],
-            'EMBL': xrefEnum['EMBL'],
-            'ID': xrefEnum['SourceID'],
-            'AC': xrefEnum['SourceAC']
+            'GI': (xrefEnum['GI'], 'exact'),
+            'EntrezGene': (xrefEnum['EntrezGene'], 'exact'),
+            'WikiGene': (xrefEnum['WikiGene'], 'unchecked'),
+            'IPI': (xrefEnum['IPI'], 'unchecked'),
+            'Refseq_ID': (xrefEnum['RefSeq'], 'exact'),
+            'SwissProt': (xrefEnum['UniProtKB/SwissProt'], 'exact'),
+            'GeneName': (xrefEnum['Gene Name'], 'unchecked'),
+            'ORFNames': (xrefEnum['ORF Name'], 'unchecked'),
+            'OrderedLocusNames': (xrefEnum['Ordered Locus Name'], 'unchecked'),
+            'ProtName': (xrefEnum['Protein Name'], 'unchecked'),
+            'Synonyms': (xrefEnum['Synonym'], 'unchecked'),
+            'HGNC_Id': (xrefEnum['HGNC'], 'unchecked'),
+            'PMP': (xrefEnum['PMP'], 'exact'),
+            'EMBL': (xrefEnum['EMBL'], 'unchecked'),
+            'ID': (xrefEnum['SourceID'], 'exact'),
+            'AC': (xrefEnum['SourceAC'], 'exact'),
         }
         for tag, enumval in tag_to_enums.items():
             db_parser.add_tag_handler(
                 tag,
-                lambda key, enr, typ=enumval: self.multi_key_handler(key, enr, typ))
+                lambda key, enr, typ=enumval: self.multi_key_handler(key, enr, typ[0], typ[1]))
         db_parser.add_tag_handler('DE',
                                   lambda key, enr: self.description_handler(key, enr))
         db_parser.add_tag_handler('GO', self.go_handler)
@@ -1417,25 +1417,25 @@ class XRefImporter(object):
             self.ec_tab.append(self.ec)
             self.ec = []
 
-    def _add_to_xrefs(self, eNr, enum_nr, key):
+    def _add_to_xrefs(self, eNr, enum_nr, key, verif='unchecked'):
         if not isinstance(eNr, int):
             raise ValueError('eNr is of wrong type:' + str(eNr))
-        self.xrefs.append((eNr, enum_nr, key.encode('utf-8'),))
+        self.xrefs.append((eNr, enum_nr, key.encode('utf-8'), self.verif_enum[verif], ))
         if len(self.xrefs) > 5e6:
             self.flush_buffers()
 
-    def key_value_handler(self, key, eNr, enum_nr):
+    def key_value_handler(self, key, eNr, enum_nr, verif='unchecked'):
         """basic handler that simply adds a key (the xref) under a given enum_nr"""
-        self._add_to_xrefs(eNr, enum_nr, key)
+        self._add_to_xrefs(eNr, enum_nr, key, verif)
 
-    def multi_key_handler(self, multikey, eNr, enum_nr):
+    def multi_key_handler(self, multikey, eNr, enum_nr, verif='unchecked'):
         """try to split the myltikey field using '; ' as a delimiter and add each
         part individually under the passed enum_nr id type."""
         for key in multikey.split('; '):
             pos = key.find('.Rep')
             if pos > 0:
                 key = key[0:pos]
-            self._add_to_xrefs(eNr, enum_nr, key)
+            self._add_to_xrefs(eNr, enum_nr, key, verif)
 
     def assign_source_handler(self, multikey, eNr):
         """handler that splits the multikey field at '; ' locations and
@@ -1453,13 +1453,13 @@ class XRefImporter(object):
                     enum_nr = self.xrefEnum['Ensembl Transcript']
                 common.package_logger.debug(
                     'ensembl: ({}, {}, {})'.format(key, typ, enum_nr))
-                self._add_to_xrefs(eNr, enum_nr, key)
+                self._add_to_xrefs(eNr, enum_nr, key, 'exact')
 
             for enum, regex in {'FlyBase': self.FB_RE, 'NCBI': self.NCBI_RE}.items():
                 match = regex.match(key)
                 if match is not None:
                     enum_nr = self.xrefEnum[enum]
-                    self._add_to_xrefs(eNr, enum_nr, key)
+                    self._add_to_xrefs(eNr, enum_nr, key, 'unchecked')
 
     def go_handler(self, gos, enr):
         self.go_manager.add_annotations(enr, gos)
@@ -1481,9 +1481,9 @@ class XRefImporter(object):
         for key in multikey.split('; '):
             pos = key.find('_')
             if pos > 0:
-                self._add_to_xrefs(eNr, enum_nr, key[0:pos])
+                self._add_to_xrefs(eNr, enum_nr, key[0:pos], 'exact')
             else:
-                self._add_to_xrefs(eNr, enum_nr, key)
+                self._add_to_xrefs(eNr, enum_nr, key, 'exact')
 
 
 class DarwinDbEntryParser:

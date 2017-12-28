@@ -1479,7 +1479,7 @@ class XRefImporter(object):
 
     def _build_lowercase_xref_buffer(self, buf, off):
         cur_pos = 0
-        for xref_row in self.xref_tab:
+        for xref_row in tqdm(self.xref_tab):
             lc_ref = xref_row['XRefId'].lower()
             ref = numpy.ndarray((len(lc_ref),), buffer=lc_ref, dtype=tables.StringAtom(1))
             buf.append(ref)

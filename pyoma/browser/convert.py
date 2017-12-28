@@ -32,6 +32,7 @@ from . import tablefmt
 from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
 from .geneontology import GeneOntology, OntologyParser
+from .synteny import SyntenyScorer
 
 with hooks():
     import urllib.request
@@ -389,6 +390,39 @@ class DarwinExporter(object):
                     data = self._convert_to_numpyarray(data, ss_tab)
                 self._write_to_table(ss_tab, data)
                 ss_tab.cols.EntryNr1.create_csindex()
+
+    def add_synteny_scores(self):
+        """add synteny scores of pairwise relations to database.
+
+        Current implementation only computes synteny scores for
+        homoeologs, but easy to extend. Question is rather if we
+        need synteny scores for all genome pairs, and if not, how
+        to select.
+
+        The computations of the scores are done using :mod:`synteny`
+        module of this package."""
+        # TODO: compute for non-homoeologs relation as well.
+        self.logger.info("Adding synteny scores for polyploid genomes")
+        polyploid_genomes = self.h5.root.Genome.where('IsPolyploid==True')
+        for genome in polyploid_genomes:
+            self.logger.info('compute synteny score for {}'
+                             .format(genome['UniProtSpeciesCode'].decode()))
+            synteny_scorer = SyntenyScorer(self.h5, genome['UniProtSpeciesCode'].decode())
+            rels = synteny_scorer.compute_scores()
+            self._callback_store_synteny_scores(genome['UniProtSpeciesCode'].decode(), rels)
+
+    def _callback_store_synteny_scores(self, genome, rels):
+        tab = self.h5.get_node('/PairwiseRelation/{}/within'.format(genome))
+        try:
+            rels_iter = rels.iterrows()
+            idx, cur_rel = next(rels_iter)
+            for row in tab:
+                if row['EntryNr1'] == cur_rel['entry_nr1'] and row['EntryNr2'] == cur_rel['entry_nr2']:
+                    row['SyntenyConservationLocal'] = cur_rel['mean_synteny_score']
+                    row.update()
+                    idx, cur_rel = next(rels_iter)
+        except StopIteration:
+            pass
 
     def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):
         # add ' ' after each sequence (Ascii is smaller than
@@ -1545,6 +1579,7 @@ def main(name="OmaServer.h5", k=6, idx_name=None):
     x.add_proteins()
     x.add_hogs()
     x.add_xrefs()
+    x.add_synteny_scores()
     x.add_domain_info(only_pfam_or_cath_domains(itertools.chain(
         iter_domains('http://download.cathdb.info/gene3d/CURRENT_RELEASE/mdas.csv.gz'),
         iter_domains('file://{}/additional_domains.mdas.csv.gz'.format(os.getenv('DARWIN_BROWSERDATA_PATH', '')))

@@ -13,11 +13,17 @@ class SyntenyScorer(object):
         self.h5_handle = h5_handle
         self.genome = genome
         self.windowsize = windowsize
+        if isinstance(h5_handle, tables.File):
+            self.h5_handle = h5_handle
+        elif isinstance(h5_handle, (str, bytes)):
+            self.h5_handle = tables.open_file(h5_handle, 'r')
+        else:
+            raise TypeError("expected h5_handle to be either h5-file handle or a path to file")
 
-        genome_row = next(h5_handle.root.Genome.where('UniProtSpeciesCode == genome'))
+        genome_row = next(self.h5_handle.root.Genome.where('UniProtSpeciesCode == genome'))
         self.genome_range = (int(genome_row['EntryOff']) + 1,
                              int(genome_row['EntryOff'] + genome_row['TotEntries']))
-        genome_df = pandas.DataFrame(h5_handle.root.Protein.Entries.read_where(
+        genome_df = pandas.DataFrame(self.h5_handle.root.Protein.Entries.read_where(
             '(EntryNr >= {}) & (EntryNr <= {})'.format(*self.genome_range)))
         self.genome_df = genome_df[(genome_df['AltSpliceVariant'] == 0) | (genome_df['AltSpliceVariant'] == genome_df['EntryNr'])]
         self.genome_df.reset_index(inplace=True)
@@ -87,7 +93,6 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     scorer = SyntenyScorer(tables.open_file(h5file_path), args.genome)
-    scorer.get_neighbor_genes(-2+scorer.genome_range[1])
     data = scorer.compute_scores()
     columns = ['entry_nr1', 'chr1', 'nr_genes_window1', 'entry_nr2', 'chr2', 'nr_genes_window2', 'synteny_score_1',
                'synteny_score_2', 'mean_synteny_score']

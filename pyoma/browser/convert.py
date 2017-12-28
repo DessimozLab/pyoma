@@ -221,6 +221,23 @@ def compute_ortholog_types(data, genome_offs):
         g0 = g1
 
 
+def get_or_create_tables_node(h5, path, desc=None):
+    """return the node of a given path from the h5 file
+
+    If the node does not yet exist, it is created (including potential
+    inexistant internal nodes).
+
+    :param h5: Handle to the hdf5 object
+    :param str path: Path of the node to return
+    :param str desc: Description to be added to the node"""
+    try:
+        grp = h5.get_node(path)
+    except tables.NoSuchNodeError:
+        base, name = os.path.split(path)
+        grp = h5.create_group(base, name, title=desc, createparents=True)
+    return grp
+
+
 class DarwinExporter(object):
     DB_SCHEMA_VERSION = '3.1'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
@@ -243,12 +260,7 @@ class DarwinExporter(object):
         return callDarwinExport(func, self.DRW_CONVERT_FILE)
 
     def _get_or_create_node(self, path, desc=None):
-        try:
-            grp = self.h5.get_node(path)
-        except tables.NoSuchNodeError:
-            base, name = os.path.split(path)
-            grp = self.h5.create_group(base, name, title=desc, createparents=True)
-        return grp
+        return get_or_create_tables_node(self.h5, path, desc)
 
     def create_table_if_needed(self, parent, name, drop_data=False, **kwargs):
         """create a table if needed.
@@ -443,10 +455,7 @@ class DarwinExporter(object):
         gsNode = self.h5.get_node('/Genome')
         nrProt = sum(gsNode.cols.TotEntries)
         nrAA = sum(gsNode.cols.TotAA)
-        try:
-            protGrp = self.h5.get_node('/Protein')
-        except tables.NoSuchNodeError:
-            protGrp = self.h5.create_group('/', 'Protein')
+        protGrp = self._get_or_create_node('/Protein', "Root node for protein (oma entries) information")
         protTab = self.h5.create_table(protGrp, 'Entries', tablefmt.ProteinTable,
                                        expectedrows=nrProt)
         seqArr = self.h5.create_earray(protGrp, 'SequenceBuffer',
@@ -590,6 +599,7 @@ class DarwinExporter(object):
             dbs_iter = fileinput.input(files=files)
             db_parser.parse_entrytags(dbs_iter)
             xref_importer.flush_buffers()
+            xref_importer.build_suffix_index()
 
     def add_group_metadata(self):
         m = OmaGroupMetadataLoader(self.h5)
@@ -1484,6 +1494,37 @@ class XRefImporter(object):
                 self._add_to_xrefs(eNr, enum_nr, key[0:pos], 'exact')
             else:
                 self._add_to_xrefs(eNr, enum_nr, key, 'exact')
+
+    def build_suffix_index(self, force=False):
+        parent, name = os.path.split(self.xref_tab._v_pathname)
+        file_ = self.xref_tab._v_file
+        idx_node = get_or_create_tables_node(file_, os.path.join(parent, "{}_Index".format(name)))
+        for arr_name, typ in (('buffer', tables.StringAtom(1)), ('offset', tables.UInt32Atom())):
+            try:
+                n = idx_node._f_get_child(arr_name)
+                if not force:
+                    raise tables.NodeError("Suffix index for xrefs does already exist. Use 'force' to overwrite")
+                n.remove()
+            except tables.NoSuchNodeError:
+                pass
+            file_.create_earray(idx_node, arr_name, typ, (0,), expectedrows=100e6)
+        buf, off = (idx_node._f_get_child(node) for node in ('buffer', 'offset'))
+        self._build_lowercase_xref_buffer(buf, off)
+        sa = sais(buf)
+        try:
+            idx_node._f_get_child('suffix').remove()
+        except tables.NoSuchNodeError:
+            pass
+        file_.create_carray(idx_node, 'suffix', obj=sa)
+
+    def _build_lowercase_xref_buffer(self, buf, off):
+        cur_pos = 0
+        for xref_row in tqdm(self.xref_tab):
+            lc_ref = xref_row['XRefId'].lower()
+            ref = numpy.ndarray((len(lc_ref),), buffer=lc_ref, dtype=tables.StringAtom(1))
+            buf.append(ref)
+            off.append([cur_pos])
+            cur_pos += len(lc_ref)
 
 
 class DarwinDbEntryParser:

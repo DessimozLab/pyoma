@@ -76,21 +76,57 @@ GetGenomeData := proc()
     StoreResults(json(tab));
 end:
 
+RefinedMatches := proc(ms)
+    global __matches;
+    if __reverse=false then  i1 := 1; i2 := 2;  else i1 := 2; i2 := 1; fi:
+    for m in ms do
+        if member([m[i1],m[i2]], __keep) then
+            sum_len := m[5,2]-m[5,1]+1 + m[6,2]-m[6,1]+1;
+            overlap := min(1, sum_len/(2*max(__lens1[m[i1]], __lens2[m[i2]])));
+            rel := __matches[ [m[i1],m[i2]] ]:
+            rel[4] := m[3];
+            rel[5] := m[4];
+            rel[6] := overlap;
+        fi;
+    od;
+end:
+
 GetVPsForGenome := proc(g)
-    global DB;
+    global DB, __matches, __keep, __reverse, __lens1, __lens2;
+    aadir := getenv('DARWIN_ALLALL_PATH');
     ReadDb(ddir.'/ServerVPs.db');
     gNr := SearchArray(g,genomes);
-    vptab := []:
+    vps := [seq(table(), NS)];
     for i from Goff[gNr]+1 to Goff[gNr+1] do
         for vp in parse(SearchTag('VP',Entry(i))) do
-            vptab := append(vptab, [i, vp, 'n/a'])
+            gNr2 := SearchOrderedArray(vp-1, Goff);
+            vps[gNr2, [i-Goff[gNr], vp-Goff[gNr2]]] := [i,vp,'n/a', -1, -1, -1];
+            #vptab := append(vptab, [i, vp, 'n/a', -1, -1, -1])
         od:
     od:
+    for gNr2 to NS do
+        g1 := g: g2 := genomes[gNr2]:
+        __keep := Indices(vps[gNr2]);
+        __matches := vps[gNr2];
+        __lens1 := GS[g1,EntryLengths]: __lens2 := GS[g2,EntryLengths]:
+        if GS[g1,TotEntries] < GS[g2,TotEntries] or (GS[g1,TotEntries] = GS[g2,TotEntries] and g1<g2) then
+            __reverse := false:
+        else
+            t := g1; g1 := g2; g2 := t:
+            __reverse := true;
+        fi:
+        ReadProgram(aadir.'/'.g1.'/'.g2);
+    od:
+    vptab := []:
+    for gNr2 to NS do for key in Indices(vps[gNr2]) do
+        vptab := append(vptab, vps[gNr2, key]);
+    od od:
+    vptab := sort(vptab);
     StoreResults(json(vptab)):
 end:
 
 GetSameSpeciesRelations := proc(g)
-    global DB;
+    global DB, __matches;
     ReadDb(ddir.'/ServerVPs.db');
     gNr := SearchArray(g, genomes);
     ssTab :=  []:

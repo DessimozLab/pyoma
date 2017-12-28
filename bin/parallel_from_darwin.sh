@@ -6,7 +6,7 @@ overwrite="${3:-true}"
 echo "Running with $NProc procs, doVPS=$doVPS"
 
 
-mkdir -p ${DARWIN_NETWORK_SCRATCH_PATH}/pyoma/{prots,cps}/
+mkdir -p ${DARWIN_NETWORK_SCRATCH_PATH}/pyoma/{prots,cps,vps}/
 for i in $(eval echo {1..${NProc}}) ; do
     darwin -E -q << EOF &
     NR_PROCESSES := $NProc;

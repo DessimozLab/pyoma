@@ -61,8 +61,9 @@ GetGenomeData := proc()
     for gNr to NS do 
         g := genomes[gNr];
         gs := append(gs, [parse(GS[g,TAXONID]), g, GS[g,TotEntries], 
-            GS[g,TotAA], Goff[gNr], GS[g,SCINAME], GS[g,DBRELEASE],
-            SubGenome[g]<>0]);
+            GS[g,TotAA], Goff[gNr],
+            GS[g,SCINAME], GS[g,COMMONNAME], GS[g, SYNNAME],
+            GS[g,DBRELEASE], GS[g,URL], GS[g,SOURCE], SubGenome[g]<>0]);
     od:
     
     _parents := []: _next_new_taxid := -1:

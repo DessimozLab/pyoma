@@ -611,18 +611,19 @@ class DarwinExporter(object):
         self.logger.info('closed {}'.format(self.h5.filename))
 
     def create_indexes(self):
-        self.logger.info('creating indexes for HOGs')
+        self.logger.info('creating indexes for HogLevel table')
         hogTab = self.h5.get_node('/HogLevel')
-        hogTab.cols.Fam.create_csindex()
-        hogTab.cols.ID.create_index()
-        hogTab.cols.Level.create_csindex()
+        for col in ('Fam', 'ID', 'Level'):
+            if not hogTab.colindexed[col]:
+                hogTab.colinstances[col].create_csindex()
         orthoxmlTab = self.h5.get_node('/OrthoXML/Index')
         orthoxmlTab.cols.Fam.create_csindex()
-        entryTab = self.h5.get_node('/Protein/Entries')
-        entryTab.cols.OmaHOG.create_csindex()
 
-        self.logger.info('creating indexes for OMA Groups')
-        entryTab.cols.OmaGroup.create_csindex()
+        self.logger.info('creating missing indexes for Entries table')
+        entryTab = self.h5.get_node('/Protein/Entries')
+        for col in ('EntryNr', 'OmaHOG', 'OmaGroup', 'MD5ProteinHash'):
+            if not entryTab.colindexed[col]:
+                entryTab.colinstances[col].create_csindex()
 
         self.logger.info('creating index for xrefs (EntryNr and XRefId)')
         xrefTab = self.h5.get_node('/XRef')
@@ -981,6 +982,8 @@ class DarwinExporter(object):
 
         # Used later
         hl_tab = self.h5.get_node('/HogLevel')
+        if not hl_tab.colindexed['Fam']:
+            hl_tab.colinstances['Fam'].create_csindex()
 
         # Load the HOG -> Entry table to memory
         prot_tab = self.h5.root.Protein.Entries

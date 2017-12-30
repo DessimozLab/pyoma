@@ -1380,6 +1380,7 @@ class XRefImporter(object):
         self.go_manager = go_manager
         self.desc_manager = desc_manager
 
+        self.verif_enum = tablefmt.XRefTable.columns.get('Verification').enum
         xrefEnum = tablefmt.XRefTable.columns.get('XRefSource').enum
         tag_to_enums = {
             'GI': (xrefEnum['GI'], 'exact'),

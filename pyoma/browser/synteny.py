@@ -35,6 +35,9 @@ class SyntenyScorer(object):
 
     def get_neighbor_genes(self, query):
         q = self.genome_df[self.genome_df['EntryNr'] == query]
+        if len(q) == 0:
+            logger.error("querying neighbor genes for non-primary variant (EntryNr: {})".format(query))
+            return []
         query_chr = q['Chromosome']
         neighbor = self.genome_df[max(0, q.index.item() - self.windowsize // 2): q.index.item() + self.windowsize//2 + 1]
         return neighbor[neighbor['Chromosome'] == query_chr.item()]

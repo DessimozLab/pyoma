@@ -15,7 +15,7 @@ shutil.copyfile('bin/importdata.py', 'bin/oma2hdf')
 
 setup(
     name=name,
-    version='0.4.4',
+    version='0.4.5',
     author='Adrian Altenhoff',
     author_email='adrian.altenhoff@inf.ethz.ch',
     description='todoc',

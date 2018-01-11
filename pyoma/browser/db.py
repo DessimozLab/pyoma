@@ -975,6 +975,12 @@ class OmaIdMapper(object):
         return {g.decode(): v for v, g in enumerate(sorted_genomes)}
 
 
+class AmbiguousID(Exception):
+    def __init__(self, message, candidates):
+        super(self, AmbiguousID).__init__(message, candidates)
+        self.candidates = candidates
+
+
 class IDResolver(object):
     def __init__(self, db):
         entry_nr_col = db.get_hdf5_handle().root.Protein.Entries.cols.EntryNr
@@ -996,7 +1002,13 @@ class IDResolver(object):
         if len(res) == 0:
             raise InvalidId(e_id)
         elif len(res) > 1:
-            raise NotImplemented('Cross-ref "{}" is ambiguous'.format(e_id))
+            # check whether its only different isoforms, then return canonical isoform
+            splice_variants = set([x['AltSpliceVariant'] for x in (self._db.entry_by_entry_nr(eNr) for eNr in res)])
+            logger.info('xref {} has {} entries, {} splice variants'.format(e_id, len(res), len(splice_variants)))
+            if len(splice_variants) > 1 or 0 in splice_variants:
+                raise AmbiguousID('Cross-ref "{}" is ambiguous'.format(e_id), res)
+            else:
+                res = splice_variants
         return int(res.pop())
 
     def resolve(self, e_id):

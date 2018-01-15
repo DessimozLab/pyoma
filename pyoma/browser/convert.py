@@ -32,6 +32,7 @@ from . import tablefmt
 from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
 from .geneontology import GeneOntology, OntologyParser
+from .synteny import SyntenyScorer
 
 with hooks():
     import urllib.request
@@ -220,8 +221,25 @@ def compute_ortholog_types(data, genome_offs):
         g0 = g1
 
 
+def get_or_create_tables_node(h5, path, desc=None):
+    """return the node of a given path from the h5 file
+
+    If the node does not yet exist, it is created (including potential
+    inexistant internal nodes).
+
+    :param h5: Handle to the hdf5 object
+    :param str path: Path of the node to return
+    :param str desc: Description to be added to the node"""
+    try:
+        grp = h5.get_node(path)
+    except tables.NoSuchNodeError:
+        base, name = os.path.split(path)
+        grp = h5.create_group(base, name, title=desc, createparents=True)
+    return grp
+
+
 class DarwinExporter(object):
-    DB_SCHEMA_VERSION = '3.0'
+    DB_SCHEMA_VERSION = '3.1'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
 
     def __init__(self, path, logger=None, mode=None):
@@ -242,12 +260,7 @@ class DarwinExporter(object):
         return callDarwinExport(func, self.DRW_CONVERT_FILE)
 
     def _get_or_create_node(self, path, desc=None):
-        try:
-            grp = self.h5.get_node(path)
-        except tables.NoSuchNodeError:
-            base, name = os.path.split(path)
-            grp = self.h5.create_group(base, name, title=desc, createparents=True)
-        return grp
+        return get_or_create_tables_node(self.h5, path, desc)
 
     def create_table_if_needed(self, parent, name, drop_data=False, **kwargs):
         """create a table if needed.
@@ -390,6 +403,39 @@ class DarwinExporter(object):
                 self._write_to_table(ss_tab, data)
                 ss_tab.cols.EntryNr1.create_csindex()
 
+    def add_synteny_scores(self):
+        """add synteny scores of pairwise relations to database.
+
+        Current implementation only computes synteny scores for
+        homoeologs, but easy to extend. Question is rather if we
+        need synteny scores for all genome pairs, and if not, how
+        to select.
+
+        The computations of the scores are done using :mod:`synteny`
+        module of this package."""
+        # TODO: compute for non-homoeologs relation as well.
+        self.logger.info("Adding synteny scores for polyploid genomes")
+        polyploid_genomes = self.h5.root.Genome.where('IsPolyploid==True')
+        for genome in polyploid_genomes:
+            self.logger.info('compute synteny score for {}'
+                             .format(genome['UniProtSpeciesCode'].decode()))
+            synteny_scorer = SyntenyScorer(self.h5, genome['UniProtSpeciesCode'].decode())
+            rels = synteny_scorer.compute_scores()
+            self._callback_store_synteny_scores(genome['UniProtSpeciesCode'].decode(), rels)
+
+    def _callback_store_synteny_scores(self, genome, rels):
+        tab = self.h5.get_node('/PairwiseRelation/{}/within'.format(genome))
+        try:
+            rels_iter = rels.iterrows()
+            idx, cur_rel = next(rels_iter)
+            for row in tab:
+                if row['EntryNr1'] == cur_rel['entry_nr1'] and row['EntryNr2'] == cur_rel['entry_nr2']:
+                    row['SyntenyConservationLocal'] = cur_rel['mean_synteny_score']
+                    row.update()
+                    idx, cur_rel = next(rels_iter)
+        except StopIteration:
+            pass
+
     def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):
         # add ' ' after each sequence (Ascii is smaller than
         # any AA, allows to build PAT array with split between
@@ -409,10 +455,7 @@ class DarwinExporter(object):
         gsNode = self.h5.get_node('/Genome')
         nrProt = sum(gsNode.cols.TotEntries)
         nrAA = sum(gsNode.cols.TotAA)
-        try:
-            protGrp = self.h5.get_node('/Protein')
-        except tables.NoSuchNodeError:
-            protGrp = self.h5.create_group('/', 'Protein')
+        protGrp = self._get_or_create_node('/Protein', "Root node for protein (oma entries) information")
         protTab = self.h5.create_table(protGrp, 'Entries', tablefmt.ProteinTable,
                                        expectedrows=nrProt)
         seqArr = self.h5.create_earray(protGrp, 'SequenceBuffer',
@@ -556,6 +599,7 @@ class DarwinExporter(object):
             dbs_iter = fileinput.input(files=files)
             db_parser.parse_entrytags(dbs_iter)
             xref_importer.flush_buffers()
+            xref_importer.build_suffix_index()
 
     def add_group_metadata(self):
         m = OmaGroupMetadataLoader(self.h5)
@@ -567,17 +611,19 @@ class DarwinExporter(object):
         self.logger.info('closed {}'.format(self.h5.filename))
 
     def create_indexes(self):
-        self.logger.info('creating indexes for HOGs')
+        self.logger.info('creating indexes for HogLevel table')
         hogTab = self.h5.get_node('/HogLevel')
-        hogTab.cols.Fam.create_index()
-        hogTab.cols.ID.create_index()
+        for col in ('Fam', 'ID', 'Level'):
+            if not hogTab.colindexed[col]:
+                hogTab.colinstances[col].create_csindex()
         orthoxmlTab = self.h5.get_node('/OrthoXML/Index')
         orthoxmlTab.cols.Fam.create_csindex()
-        entryTab = self.h5.get_node('/Protein/Entries')
-        entryTab.cols.OmaHOG.create_csindex()
 
-        self.logger.info('creating indexes for OMA Groups')
-        entryTab.cols.OmaGroup.create_csindex()
+        self.logger.info('creating missing indexes for Entries table')
+        entryTab = self.h5.get_node('/Protein/Entries')
+        for col in ('EntryNr', 'OmaHOG', 'OmaGroup', 'MD5ProteinHash'):
+            if not entryTab.colindexed[col]:
+                entryTab.colinstances[col].create_csindex()
 
         self.logger.info('creating index for xrefs (EntryNr and XRefId)')
         xrefTab = self.h5.get_node('/XRef')
@@ -892,13 +938,13 @@ class DarwinExporter(object):
         # Initialise lookup array
         atom = (tables.UInt32Atom if dtype is numpy.uint32 else tables.UInt64Atom)
         kmers = KmerEncoder(k, is_protein=True)
-        z = db.create_vlarray('/Protein',
+        kmer_lookup_arr = db.create_vlarray('/Protein',
                               name='KmerLookup',
                               atom=atom(shape=()),
                               title='kmer entry lookup table',
                               filters=idx_compr,
                               expectedrows=len(kmers))
-        z._f_setattr('k', k)
+        kmer_lookup_arr._f_setattr('k', k)
 
         # Now find the split points and construct lookup ragged array.
         ii = 0
@@ -908,21 +954,27 @@ class DarwinExporter(object):
                 jj = ii + 1
                 while (jj < len(sa)) and (seqs[sa[jj]:(sa[jj] + k)] == kmer):
                     jj += 1
-                z.append(idx[ii:jj])
+                kmer_lookup_arr.append(idx[ii:jj])
             else:
                 # End or not found
-                z.append([])
+                kmer_lookup_arr.append([])
 
             # New start
             ii = jj
 
         if db.filename != self.h5.filename:
             self.logger.info('storing external links to SequenceIndex and KmerLookup')
-            self.h5.create_external_link('/Protein', 'KmerLookup', z)
-            self.h5.create_external_link('/Protein', 'SequenceIndex', db.root.Protein.SequenceIndex)
+            self.h5.create_external_link('/Protein', 'KmerLookup',
+                                         self._relative_path_to_external_node(kmer_lookup_arr))
+            self.h5.create_external_link('/Protein', 'SequenceIndex',
+                                         self._relative_path_to_external_node(db.root.Protein.SequenceIndex))
             db.root._f_setattr('conversion_end', time.strftime("%c"))
             db.close()
             self.logger.info('closed {}'.format(db.filename))
+
+    def _relative_path_to_external_node(self, node):
+        rel_path = os.path.relpath(node._v_file.filename, os.path.dirname(self.h5.filename))
+        return str(rel_path + ":" + node._v_pathname)
 
     def add_hog_domain_prevalence(self):
         # Check that protein entries / domains are added already to the DB
@@ -930,6 +982,8 @@ class DarwinExporter(object):
 
         # Used later
         hl_tab = self.h5.get_node('/HogLevel')
+        if not hl_tab.colindexed['Fam']:
+            hl_tab.colinstances['Fam'].create_csindex()
 
         # Load the HOG -> Entry table to memory
         prot_tab = self.h5.root.Protein.Entries
@@ -1326,29 +1380,30 @@ class XRefImporter(object):
         self.go_manager = go_manager
         self.desc_manager = desc_manager
 
+        self.verif_enum = tablefmt.XRefTable.columns.get('Verification').enum
         xrefEnum = tablefmt.XRefTable.columns.get('XRefSource').enum
         tag_to_enums = {
-            'GI': xrefEnum['GI'],
-            'EntrezGene': xrefEnum['EntrezGene'],
-            'WikiGene': xrefEnum['WikiGene'],
-            'IPI': xrefEnum['IPI'],
-            'Refseq_ID': xrefEnum['RefSeq'],
-            'SwissProt': xrefEnum['UniProtKB/SwissProt'],
-            'GeneName': xrefEnum['Gene Name'],
-            'ORFNames': xrefEnum['ORF Name'],
-            'OrderedLocusNames': xrefEnum['Ordered Locus Name'],
-            'ProtName': xrefEnum['Protein Name'],
-            'Synonyms': xrefEnum['Synonym'],
-            'HGNC_Id': xrefEnum['HGNC'],
-            'PMP': xrefEnum['PMP'],
-            'EMBL': xrefEnum['EMBL'],
-            'ID': xrefEnum['SourceID'],
-            'AC': xrefEnum['SourceAC']
+            'GI': (xrefEnum['GI'], 'exact'),
+            'EntrezGene': (xrefEnum['EntrezGene'], 'exact'),
+            'WikiGene': (xrefEnum['WikiGene'], 'unchecked'),
+            'IPI': (xrefEnum['IPI'], 'unchecked'),
+            'Refseq_ID': (xrefEnum['RefSeq'], 'exact'),
+            'SwissProt': (xrefEnum['UniProtKB/SwissProt'], 'exact'),
+            'GeneName': (xrefEnum['Gene Name'], 'unchecked'),
+            'ORFNames': (xrefEnum['ORF Name'], 'unchecked'),
+            'OrderedLocusNames': (xrefEnum['Ordered Locus Name'], 'unchecked'),
+            'ProtName': (xrefEnum['Protein Name'], 'unchecked'),
+            'Synonyms': (xrefEnum['Synonym'], 'unchecked'),
+            'HGNC_Id': (xrefEnum['HGNC'], 'unchecked'),
+            'PMP': (xrefEnum['PMP'], 'exact'),
+            'EMBL': (xrefEnum['EMBL'], 'unchecked'),
+            'ID': (xrefEnum['SourceID'], 'exact'),
+            'AC': (xrefEnum['SourceAC'], 'exact'),
         }
         for tag, enumval in tag_to_enums.items():
             db_parser.add_tag_handler(
                 tag,
-                lambda key, enr, typ=enumval: self.multi_key_handler(key, enr, typ))
+                lambda key, enr, typ=enumval: self.multi_key_handler(key, enr, typ[0], typ[1]))
         db_parser.add_tag_handler('DE',
                                   lambda key, enr: self.description_handler(key, enr))
         db_parser.add_tag_handler('GO', self.go_handler)
@@ -1377,25 +1432,25 @@ class XRefImporter(object):
             self.ec_tab.append(self.ec)
             self.ec = []
 
-    def _add_to_xrefs(self, eNr, enum_nr, key):
+    def _add_to_xrefs(self, eNr, enum_nr, key, verif='unchecked'):
         if not isinstance(eNr, int):
             raise ValueError('eNr is of wrong type:' + str(eNr))
-        self.xrefs.append((eNr, enum_nr, key.encode('utf-8'),))
+        self.xrefs.append((eNr, enum_nr, key.encode('utf-8'), self.verif_enum[verif], ))
         if len(self.xrefs) > 5e6:
             self.flush_buffers()
 
-    def key_value_handler(self, key, eNr, enum_nr):
+    def key_value_handler(self, key, eNr, enum_nr, verif='unchecked'):
         """basic handler that simply adds a key (the xref) under a given enum_nr"""
-        self._add_to_xrefs(eNr, enum_nr, key)
+        self._add_to_xrefs(eNr, enum_nr, key, verif)
 
-    def multi_key_handler(self, multikey, eNr, enum_nr):
+    def multi_key_handler(self, multikey, eNr, enum_nr, verif='unchecked'):
         """try to split the myltikey field using '; ' as a delimiter and add each
         part individually under the passed enum_nr id type."""
         for key in multikey.split('; '):
             pos = key.find('.Rep')
             if pos > 0:
                 key = key[0:pos]
-            self._add_to_xrefs(eNr, enum_nr, key)
+            self._add_to_xrefs(eNr, enum_nr, key, verif)
 
     def assign_source_handler(self, multikey, eNr):
         """handler that splits the multikey field at '; ' locations and
@@ -1413,13 +1468,13 @@ class XRefImporter(object):
                     enum_nr = self.xrefEnum['Ensembl Transcript']
                 common.package_logger.debug(
                     'ensembl: ({}, {}, {})'.format(key, typ, enum_nr))
-                self._add_to_xrefs(eNr, enum_nr, key)
+                self._add_to_xrefs(eNr, enum_nr, key, 'exact')
 
             for enum, regex in {'FlyBase': self.FB_RE, 'NCBI': self.NCBI_RE}.items():
                 match = regex.match(key)
                 if match is not None:
                     enum_nr = self.xrefEnum[enum]
-                    self._add_to_xrefs(eNr, enum_nr, key)
+                    self._add_to_xrefs(eNr, enum_nr, key, 'unchecked')
 
     def go_handler(self, gos, enr):
         self.go_manager.add_annotations(enr, gos)
@@ -1441,9 +1496,40 @@ class XRefImporter(object):
         for key in multikey.split('; '):
             pos = key.find('_')
             if pos > 0:
-                self._add_to_xrefs(eNr, enum_nr, key[0:pos])
+                self._add_to_xrefs(eNr, enum_nr, key[0:pos], 'exact')
             else:
-                self._add_to_xrefs(eNr, enum_nr, key)
+                self._add_to_xrefs(eNr, enum_nr, key, 'exact')
+
+    def build_suffix_index(self, force=False):
+        parent, name = os.path.split(self.xref_tab._v_pathname)
+        file_ = self.xref_tab._v_file
+        idx_node = get_or_create_tables_node(file_, os.path.join(parent, "{}_Index".format(name)))
+        for arr_name, typ in (('buffer', tables.StringAtom(1)), ('offset', tables.UInt32Atom())):
+            try:
+                n = idx_node._f_get_child(arr_name)
+                if not force:
+                    raise tables.NodeError("Suffix index for xrefs does already exist. Use 'force' to overwrite")
+                n.remove()
+            except tables.NoSuchNodeError:
+                pass
+            file_.create_earray(idx_node, arr_name, typ, (0,), expectedrows=100e6)
+        buf, off = (idx_node._f_get_child(node) for node in ('buffer', 'offset'))
+        self._build_lowercase_xref_buffer(buf, off)
+        sa = sais(buf)
+        try:
+            idx_node._f_get_child('suffix').remove()
+        except tables.NoSuchNodeError:
+            pass
+        file_.create_carray(idx_node, 'suffix', obj=sa)
+
+    def _build_lowercase_xref_buffer(self, buf, off):
+        cur_pos = 0
+        for xref_row in tqdm(self.xref_tab):
+            lc_ref = xref_row['XRefId'].lower()
+            ref = numpy.ndarray((len(lc_ref),), buffer=lc_ref, dtype=tables.StringAtom(1))
+            buf.append(ref)
+            off.append([cur_pos])
+            cur_pos += len(lc_ref)
 
 
 class DarwinDbEntryParser:
@@ -1539,6 +1625,7 @@ def main(name="OmaServer.h5", k=6, idx_name=None):
     x.add_proteins()
     x.add_hogs()
     x.add_xrefs()
+    x.add_synteny_scores()
     x.add_domain_info(only_pfam_or_cath_domains(itertools.chain(
         iter_domains('http://download.cathdb.info/gene3d/CURRENT_RELEASE/mdas.csv.gz'),
         iter_domains('file://{}/additional_domains.mdas.csv.gz'.format(os.getenv('DARWIN_BROWSERDATA_PATH', '')))

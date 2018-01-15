@@ -202,6 +202,17 @@ class Genome(object):
     def sciname(self):
         return self._genome['SciName'].decode()
 
+    @property
+    def common_name(self):
+        try:
+            return self._genome['CommonName'].decode()
+        except ValueError:
+            return ""
+
+    @property
+    def synonym_name(self):
+        return self._genome['SynName'].decode()
+
     @LazyProperty
     def species_and_strain_as_dict(self):
         return format_sciname(self.sciname)
@@ -211,6 +222,18 @@ class Genome(object):
 
     def strain(self):
         return self.species_and_strain_as_dict['strain']
+
+    @property
+    def url(self):
+        return self._genome['Url'].decode()
+
+    @property
+    def source(self):
+        return self._genome['Source'].decode()
+
+    @property
+    def release(self):
+        return self._genome['Release'].decode()
 
     @property
     def nr_entries(self):

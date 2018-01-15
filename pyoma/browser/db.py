@@ -53,7 +53,7 @@ class Database(object):
     """This is the main interface to the oma database. Queries
     will typically be issued by methods of this object. Typically
     the result of queries will be :py:class:`numpy.recarray` objects."""
-    EXPECTED_DB_SCHEMA = "3.0"
+    EXPECTED_DB_SCHEMA = "3.1"
 
     def __init__(self, db):
         if isinstance(db, str):
@@ -74,7 +74,11 @@ class Database(object):
             raise DBVersionError('Unsupported database version: {} != {} ({})'
                                  .format(db_version, self.EXPECTED_DB_SCHEMA, self.db.filename))
 
-        self.seq_search = SequenceSearch(self)
+        try:
+            self.seq_search = SequenceSearch(self)
+        except DBConsistencyError as e:
+            logger.exception("Cannot load SequenceSearch. Any future call to seq_search will fail!")
+            self.seq_search = object()
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
         self.tax = Taxonomy(self.db.root.Taxonomy.read())
@@ -697,6 +701,37 @@ class Database(object):
                  '\n'))
 
 
+class SuffixSearcher(object):
+    def __init__(self, suffix_index_node, buffer=None, lookup=None):
+        if isinstance(suffix_index_node, tables.Group):
+            self.buffer_arr = buffer if buffer else suffix_index_node._f_get_child('buffer')
+            self.suffix_arr = suffix_index_node._f_get_child('suffix')
+            self.lookup_arr = lookup if lookup else suffix_index_node._f_get_child('offset')
+        else:
+            self.buffer_arr = buffer
+            self.suffix_arr = suffix_index_node
+            self.lookup_arr = lookup
+        self.lookup_arr = self.lookup_arr[:]
+
+    def find(self, query):
+        n = len(query)
+        if n > 0:
+            slicer = KeyWrapper(self.suffix_arr,
+                                key=lambda i:
+                                self.buffer_arr[i:(i + n)].tobytes())
+            ii = bisect_left(slicer, query)
+            if ii and (slicer[ii] == query):
+                # Left most found.
+                jj = ii + 1
+                while (jj < len(slicer)) and (slicer[jj] == query):
+                    # zoom to end -> -> ->
+                    jj += 1
+
+                # Find entry numbers and filter to remove incorrect entries
+                return numpy.searchsorted(self.lookup_arr, self.suffix_arr[ii:jj]+1) - 1
+        return []
+
+
 class SequenceSearch(object):
     '''
         Contains all the methods for searching the sequence
@@ -714,14 +749,16 @@ class SequenceSearch(object):
 
         # Assume the index is stored in the main DB if there is no .idx file
         self.db = db.get_hdf5_handle()
-        self.db_idx = (db if not os.path.isfile(self.db.filename + '.idx') else
+        self.db_idx = (self.db if not os.path.isfile(self.db.filename + '.idx') else
                        tables.open_file(self.db.filename + '.idx', 'r'))
 
         # Protein search arrays.
         try:
             self.seq_idx = self.db_idx.root.Protein.SequenceIndex
-        except AttributeError:
-            raise DBConsistencyError("Suffix index for protein sequences is not available")
+            if isinstance(self.seq_idx, tables.link.ExternalLink):
+                self.seq_idx = self.seq_idx()
+        except (AttributeError, OSError) as e:
+            raise DBConsistencyError("Suffix index for protein sequences is not available: "+str(e))
         self.seq_buff = self.db.root.Protein.SequenceBuffer
         self.n_entries = len(self.db.root.Protein.Entries)
 
@@ -729,6 +766,7 @@ class SequenceSearch(object):
         self.k = self.db_idx.get_node_attr('/Protein/KmerLookup', 'k')
         self.encoder = KmerEncoder(self.k)
         self.kmer_lookup = self.db_idx.root.Protein.KmerLookup
+        logger.info('KmerLookup of size k={} loaded'.format(self.k))
 
     def get_entry_length(self, ii):
         """Get length of a particular entry."""
@@ -1273,6 +1311,7 @@ class XrefIdMapper(object):
         self.xref_tab = db.get_hdf5_handle().get_node('/XRef')
         self.xrefEnum = self.xref_tab.get_enum('XRefSource')
         self.idtype = frozenset(list(self.xrefEnum._values.keys()))
+        self.xref_index = SuffixSearcher(db.get_hdf5_handle().get_node('/XRef_Index'))
 
     def map_entry_nr(self, entry_nr):
         """returns the XRef entries associated with the query protein.
@@ -1325,7 +1364,7 @@ class XrefIdMapper(object):
             mapped_junks,
             usemask=False)
 
-    def search_xref(self, xref, is_prefix=False):
+    def search_xref(self, xref, is_prefix=False, match_any_substring=False):
         """identify proteins associcated with `xref`.
 
         The crossreferences are limited to the types in the class
@@ -1341,13 +1380,17 @@ class XrefIdMapper(object):
         :param str xref: an xref to be located
         :param bool is_prefix: treat xref as a prefix and return
                      potentially several matching xrefs"""
-        if is_prefix:
-            up = xref[:-1] + chr(ord(xref[-1])+1)
-            cond = '(XRefId >= {!r}) & (XRefId < {!r})'.format(
-                xref.encode('utf-8'), up.encode('utf-8'))
+        if match_any_substring:
+            query = xref.encode('utf-8').lower()
+            res = self.xref_tab[self.xref_index.find(query)]
         else:
-            cond = 'XRefId=={!r}'.format(xref.encode('utf-8'))
-        res = self.xref_tab.read_where(cond)
+            if is_prefix:
+                up = xref[:-1] + chr(ord(xref[-1])+1)
+                cond = '(XRefId >= {!r}) & (XRefId < {!r})'.format(
+                    xref.encode('utf-8'), up.encode('utf-8'))
+            else:
+                cond = 'XRefId=={!r}'.format(xref.encode('utf-8'))
+            res = self.xref_tab.read_where(cond)
         if len(res) > 0 and len(self.idtype) < len(self.xrefEnum):
             res = res[numpy.in1d(res['XRefSource'], list(self.idtype))]
         return res

@@ -79,9 +79,9 @@ class XRefTable(tables.IsDescription):
                      'ORF Name', 'Ordered Locus Name']),
         'n/a', base='uint8', pos=2)
     XRefId = tables.StringCol(50, pos=3)
-    #Verification = tables.EnumCol(
-    #    tables.Enum({'exact': 0, 'modified': 1, 'unchecked': 2}),
-    #    'unchecked', base='uint8', pos=4)
+    Verification = tables.EnumCol(
+        tables.Enum({'exact': 0, 'modified': 1, 'unchecked': 2}),
+        'unchecked', base='uint8', pos=4)
 
 
 class GeneOntologyTable(tables.IsDescription):
@@ -103,8 +103,12 @@ class GenomeTable(tables.IsDescription):
     TotAA = tables.UInt32Col(pos=3)
     EntryOff = tables.UInt32Col(pos=4)
     SciName = tables.StringCol(255, pos=5)
-    Release = tables.StringCol(255, pos=6)
-    IsPolyploid = tables.BoolCol(pos=7)
+    CommonName = tables.StringCol(64, pos=6)
+    SynName = tables.StringCol(64, pos=7)
+    Release = tables.StringCol(128, pos=8)
+    Url = tables.StringCol(255, pos=9)
+    Source = tables.StringCol(255, pos=10)
+    IsPolyploid = tables.BoolCol(pos=11)
 
 
 class TaxonomyTable(tables.IsDescription):

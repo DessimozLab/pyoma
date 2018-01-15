@@ -2,6 +2,7 @@ import random
 import unittest
 import os
 import Bio.Seq
+import Bio.Data.CodonTable
 import pyoma.browser.db as pyomadb
 
 
@@ -18,7 +19,7 @@ class DatabaseChecks(unittest.TestCase):
 
     def translated_cdna_match_protein_sequence(self, cdna, prot):
         cdna = cdna.replace('X', 'N')
-        for tab in range(1, 22):
+        for tab in Bio.Data.CodonTable.generic_by_id.keys():
             tab_ok = True
             trans = Bio.Seq.translate(cdna, table=tab)
             if not 3 >= len(trans) - len(prot) >= 0:

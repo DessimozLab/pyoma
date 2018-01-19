@@ -7,7 +7,7 @@ PySAIS
 biopython
 tqdm
 pandas
---no-binary pyopa pyoma
+--no-binary pyopa pyopa
 
 -e git+ssh://gitolite@lab.dessimoz.org:2222/family-analyzer@master#egg=familyanalyzer
 -e .

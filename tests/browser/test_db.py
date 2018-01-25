@@ -172,6 +172,9 @@ class XRefDatabaseMock(Database):
         xref['XRefSource'] = numpy.arange(10) % 5
         xref['XRefId'] = ['XA{:03}g1.4'.format(i) for i in range(10)]
         f.create_table('/', 'XRef', tablefmt.XRefTable, obj=xref)
+        f.create_group('/', 'XRef_Index')
+        for n in ('suffix', 'buffer', 'offset'):
+            f.create_carray('/XRef_Index', n, obj=numpy.ones((5,), 'i4'))
         self.db = f
 
 

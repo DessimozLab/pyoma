@@ -26,14 +26,16 @@ class XRefParsingTest(unittest.TestCase):
     def test_standard_handler(self):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get('XRefSource').enum
-        self.assertIn((1, enum.GI, b'125233342',), self.importer.xrefs)
-        self.assertIn((3, enum['UniProtKB/SwissProt'], b'ASF1_YARLI',), self.importer.xrefs)
+        verif = pyoma.tablefmt.XRefTable.columns.get('Verification').enum
+        self.assertIn((1, enum.GI, b'125233342', verif.exact), self.importer.xrefs)
+        self.assertIn((3, enum['UniProtKB/SwissProt'], b'ASF1_YARLI', verif.exact), self.importer.xrefs)
 
     def test_multi_handler(self):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get('XRefSource').enum
-        self.assertIn((2, enum.PMP, b'P21122',), self.importer.xrefs)
-        self.assertIn((2, enum.PMP, b'Q24S32',), self.importer.xrefs)
+        verif = pyoma.tablefmt.XRefTable.columns.get('Verification').enum
+        self.assertIn((2, enum.PMP, b'P21122', verif.exact), self.importer.xrefs)
+        self.assertIn((2, enum.PMP, b'Q24S32', verif.exact), self.importer.xrefs)
 
     def test_regex_of_ensembl_ids(self):
         for case in ('ENSG00000162687', 'ENSMUSP00000162687'):
@@ -43,8 +45,9 @@ class XRefParsingTest(unittest.TestCase):
     def test_uniprot_ids(self):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get('XRefSource').enum
-        self.assertIn((3, enum['UniProtKB/TrEMBL'], b'L8ECQ9',), self.importer.xrefs)
-        self.assertIn((3, enum['UniProtKB/TrEMBL'], b'Q6CI62',), self.importer.xrefs)
+        verif = pyoma.tablefmt.XRefTable.columns.get('Verification').enum
+        self.assertIn((3, enum['UniProtKB/TrEMBL'], b'L8ECQ9', verif.exact), self.importer.xrefs)
+        self.assertIn((3, enum['UniProtKB/TrEMBL'], b'Q6CI62', verif.exact), self.importer.xrefs)
 
     def test_go(self):
         self.db_parser.parse_entrytags(self.data)
@@ -58,15 +61,16 @@ class XRefParsingTest(unittest.TestCase):
     def test_disambiguate(self):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get('XRefSource').enum
-        self.assertIn((3, enum['FlyBase'], b'FBgn0218776'), self.importer.xrefs)
-        self.assertIn((3, enum['FlyBase'], b'FBtr0247427'), self.importer.xrefs)
-        self.assertIn((3, enum['SourceAC'], b'FBtr0247427'), self.importer.xrefs)
-        self.assertIn((2, enum['SourceID'], b'BLABLA22'), self.importer.xrefs)
-        self.assertIn((2, enum['SourceID'], b'BLA22'), self.importer.xrefs)
-        self.assertIn((1, enum['SourceID'], b'ENSG00000204640'), self.importer.xrefs)
-        self.assertIn((1, enum['Ensembl Gene'], b'ENSG00000204640'), self.importer.xrefs)
-        self.assertIn((1, enum['Ensembl Protein'], b'ENSP00000366061'), self.importer.xrefs)
-        self.assertIn((1, enum['Ensembl Transcript'], b'ENST00000376865'), self.importer.xrefs)
+        verif = pyoma.tablefmt.XRefTable.columns.get('Verification').enum
+        self.assertIn((3, enum['FlyBase'], b'FBgn0218776', verif.unchecked), self.importer.xrefs)
+        self.assertIn((3, enum['FlyBase'], b'FBtr0247427', verif.unchecked), self.importer.xrefs)
+        self.assertIn((3, enum['SourceAC'], b'FBtr0247427', verif.exact), self.importer.xrefs)
+        self.assertIn((2, enum['SourceID'], b'BLABLA22', verif.exact), self.importer.xrefs)
+        self.assertIn((2, enum['SourceID'], b'BLA22', verif.exact), self.importer.xrefs)
+        self.assertIn((1, enum['SourceID'], b'ENSG00000204640', verif.exact), self.importer.xrefs)
+        self.assertIn((1, enum['Ensembl Gene'], b'ENSG00000204640', verif.exact), self.importer.xrefs)
+        self.assertIn((1, enum['Ensembl Protein'], b'ENSP00000366061', verif.exact), self.importer.xrefs)
+        self.assertIn((1, enum['Ensembl Transcript'], b'ENST00000376865', verif.exact), self.importer.xrefs)
 
     def test_descriptions_passed_to_description_manager(self):
         self.db_parser.parse_entrytags(self.data)

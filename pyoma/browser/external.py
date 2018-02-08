@@ -1,5 +1,8 @@
 import collections
 import os
+
+import math
+from tqdm import tqdm
 from lxml import etree
 from .db import Database
 
@@ -102,6 +105,10 @@ class Resource(NCBILinkOutXML):
 
 
 class GenesResource(Resource):
+    DISKSIZE_HEADER = 200
+    DISKSIZE_PER_LINK = 435
+    base_name = 'resource_genes'
+
     def base_url(self):
         return "https://omabrowser.org/cgi-bin/gateway.pl/"
 
@@ -113,6 +120,10 @@ class GenesResource(Resource):
 
 
 class ProteinResource(Resource):
+    DISKSIZE_HEADER = 500
+    DISKSIZE_PER_LINK = 40
+    base_name = 'resource_protein'
+
     def base_url(self):
         return "https://omabrowser.org/oma/hogs/"
 
@@ -124,6 +135,10 @@ class ProteinResource(Resource):
 
 
 class TaxonomyResource(Resource):
+    DISKSIZE_HEADER = 200
+    DISKSIZE_PER_LINK = 435
+    base_name = 'resource_taxonomy'
+
     def database(self):
         return "taxonomy"
 
@@ -134,30 +149,55 @@ class TaxonomyResource(Resource):
         return "?f=DisplayOS&p1=" + next(iter(acc.values())),
 
 
+class LinkoutBuffer(object):
+    def __init__(self, resource, outdir, bulk_add=True, max_file_size=20*2**20):
+        self.max_records = math.floor((max_file_size - resource.DISKSIZE_HEADER) /
+                                      resource.DISKSIZE_PER_LINK)
+        self.cur_nr = 0
+        self.buf = []
+        self.bulk_add = bulk_add
+        self.resource_type = resource
+        self.outdir = outdir
+
+    def add(self, obj):
+        self.buf.append(obj)
+        if len(self.buf) >= self.max_records:
+            self.flush()
+
+    def flush(self):
+        res = self.resource_type()
+        if self.bulk_add:
+            res.add_link(self.buf)
+        else:
+            for obj in self.buf:
+                res.add_link(obj)
+        fn = os.path.join(self.outdir,
+                          '{}_{:03d}.xml'.format(res.base_name, self.cur_nr))
+        with open(fn, 'wb') as fh:
+            res.write(fh)
+        self.cur_nr += 1
+        self.buf = []
+
+
 def run(outdir='/tmp', infile='../pyomabrowser/OmaServer.h5'):
     prov = Provider()
     with open(os.path.join(outdir, 'provider.xml'), 'wb') as fh:
         prov.write(fh)
 
-    return
     db = Database(infile)
     xrefs = db.get_hdf5_handle().get_node('/XRef')
     xref_source_enum = xrefs.get_enum('XRefSource')
 
-    prots_acc = []
-    genes = GenesResource()
-    prots = ProteinResource()
-    for xref in xrefs:
+    protein_buffer = LinkoutBuffer(ProteinResource, outdir, bulk_add=True)
+    genes_buffer = LinkoutBuffer(GenesResource, outdir, bulk_add=False)
+    for xref in tqdm(xrefs):
         if xref['XRefSource'] == xref_source_enum['RefSeq']:
-            prots_acc.append(xref['XRefId'].decode())
+            protein_buffer.add(xref['XRefId'].decode())
         elif xref['XRefSource'] == xref_source_enum['EntrezGene']:
-            genes.add_link(accs={xref['XRefId'].decode(): db.id_mapper['OMA'].map_entry_nr(xref['EntryNr'])})
-    prots.add_link(prots_acc)
+            genes_buffer.add({xref['XRefId'].decode(): db.id_mapper['OMA'].map_entry_nr(xref['EntryNr'])})
+    protein_buffer.flush()
+    genes_buffer.flush()
 
-    with open(os.path.join(outdir, 'resource_genes.xml'), 'wb') as fh:
-        genes.write(fh)
-    with open(os.path.join(outdir, 'resource_protein.xml'), 'wb') as fh:
-        prots.write(fh)
     with open(os.path.join(outdir, 'resource_taxonomy.xml'), 'wb') as fh:
         taxs = TaxonomyResource()
         for row in db.id_mapper['OMA'].genome_table:

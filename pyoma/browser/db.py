@@ -71,8 +71,9 @@ class Database(object):
 
         logger.info('database version: {}'.format(db_version))
         if db_version != self.EXPECTED_DB_SCHEMA:
-            raise DBVersionError('Unsupported database version: {} != {} ({})'
-                                 .format(db_version, self.EXPECTED_DB_SCHEMA, self.db.filename))
+            #raise DBVersionError('Unsupported database version: {} != {} ({})'
+            #                     .format(db_version, self.EXPECTED_DB_SCHEMA, self.db.filename))
+            pass
 
         try:
             self.seq_search = SequenceSearch(self)

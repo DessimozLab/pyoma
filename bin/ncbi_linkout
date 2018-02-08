@@ -1,0 +1,17 @@
+#!/usr/bin/env python
+
+import pyoma.browser.external
+import logging
+logger = logging.getLogger('ncbi_linkout')
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Update the type of pairwise orthology  in all genomes pairs")
+    parser.add_argument('hdf5', help="Path to the hdf5 database")
+    parser.add_argument('--out', default="./", help="folder where to write output files")
+    conf = parser.parse_args()
+    logging.basicConfig(level=logging.INFO)
+
+    pyoma.browser.external.run(conf.out, conf.hdf5)
+
+

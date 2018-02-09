@@ -6,11 +6,11 @@ logger = logging.getLogger('ncbi_linkout')
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Update the type of pairwise orthology  in all genomes pairs")
+    parser = argparse.ArgumentParser(description="Compute (and push) xrefs for NCBI LinkOut")
     parser.add_argument('hdf5', help="Path to the hdf5 database")
     parser.add_argument('--out', default="./", help="folder where to write output files")
-    parser.add_argument('--find-links', type=bool, default=True, help="find suitable links and create xml files")
-    parser.add_argument('--push', type=bool, default=False, help="Push files to NCBI ftp host")
+    parser.add_argument('--skip-find', action='store_true', help="skip step of finding links")
+    parser.add_argument('--push', action='store_true', help="Push files to NCBI ftp host")
     parser.add_argument('-p', '--password', help="Password of NCBI ftp account")
     conf = parser.parse_args()
     logging.basicConfig(level=logging.INFO)

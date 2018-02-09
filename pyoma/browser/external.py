@@ -235,7 +235,8 @@ def run(outdir='/tmp', infile='../pyomabrowser/OmaServer.h5'):
         if xref['XRefSource'] == xref_source_enum['RefSeq']:
             protein_buffer.add(xref['XRefId'].decode())
         elif xref['XRefSource'] == xref_source_enum['EntrezGene']:
-            genes_buffer.add({xref['XRefId'].decode(): db.id_mapper['OMA'].map_entry_nr(xref['EntryNr'])})
+            genes_buffer.add(xref['XRefId'].decode(),
+                             db.id_mapper['OMA'].map_entry_nr(xref['EntryNr']))
     protein_buffer.flush()
     genes_buffer.flush()
 

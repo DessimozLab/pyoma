@@ -4,6 +4,7 @@ import os
 import logging
 import math
 import re
+import ftplib
 
 from tqdm import tqdm
 from lxml import etree
@@ -230,7 +231,7 @@ class GenesPriorizationHandler(object):
         logger.info('Skipping genes link in the following species: {}'.format(c))
 
 
-def run(outdir='/tmp', infile='../pyomabrowser/OmaServer.h5'):
+def prepare_linkout_files(outdir='/tmp', infile='../pyomabrowser/OmaServer.h5'):
     prov = Provider()
     with open(os.path.join(outdir, 'provider.xml'), 'wb') as fh:
         prov.write(fh)
@@ -258,7 +259,6 @@ def run(outdir='/tmp', infile='../pyomabrowser/OmaServer.h5'):
 
 
 def copy_to_ncbi(dir, password, host='ftp-private.ncbi.nlm.nih.gov', user='omabrow'):
-    import ftplib
     with ftplib.FTP(host, user, password) as session:
         session.cwd('/holdings')
 

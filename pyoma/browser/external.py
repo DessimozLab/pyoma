@@ -193,22 +193,32 @@ class GenesPriorizationHandler(object):
     """Adapter to LinkoutBuffer to select only a limited number of crossrefs.
     NCBI linkout caps at 10%"""
 
-    def __init__(self, max_linkouts=None, **kwargs):
-        self.max_links = int(max_linkouts) if max_linkouts else 20257436//10  # obtained in Jan2018
+    def __init__(self, max_linkouts=None, db=None, **kwargs):
+        self.max_links = int(max_linkouts) if max_linkouts else 20357436//10  # obtained in Jan2018
+        logger.info('Limiting Genes to {} links max'.format(self.max_links))
         self.genes_buffer = LinkoutBuffer(GenesResource, **kwargs)
         self.genes = []
+        self.db = db
 
     def add(self, key, value):
         self.genes.append((key, value))
+
+    def _genome_size_map(self):
+        gs = self.db.get_hdf5_handle().get_node('/Genome').read()
+        return {row['UniProtSpeciesCode'].decode(): row['TotEntries'] for row in gs}
 
     def flush(self):
         priority_prefixes = ['HUMAN', 'MOUSE', 'RATNO', 'PIGXX', 'DRO', 'SCH', 'YEAST', 'ARA',
                              'WHEAT', 'PLAF', 'ECO', 'BAC', 'PANTR', 'ORY', 'GOSHI', 'BRA',
                              'DANRE', 'CAE', 'MYC', 'STR', 'MAIZE', 'GORGO', 'PANTR', 'PONAB',
-                             'MACMU']
+                             'MACMU', 'YARLI', 'PEDHC', 'TRICA', 'XENTR', 'YERPE', 'POPTR']
         pat = re.compile(r"^({})".format('|'.join(priority_prefixes)))
         if len(self.genes) > self.max_links:
+            # final sort order will be 'priority genome', genome size and proteins within genome
             self.genes.sort(key=operator.itemgetter(1))
+            if self.db is not None:
+                genome_size = self._genome_size_map()
+                self.genes.sort(key=lambda x: genome_size[x[1][0:5]], reverse=True)
             self.genes.sort(key=lambda x: pat.match(x[1]) is None)
         for link_acc, link_target in self.genes[0:self.max_links]:
             self.genes_buffer.add({link_acc: link_target})
@@ -229,8 +239,8 @@ def run(outdir='/tmp', infile='../pyomabrowser/OmaServer.h5'):
     xrefs = db.get_hdf5_handle().get_node('/XRef')
     xref_source_enum = xrefs.get_enum('XRefSource')
 
-    protein_buffer = LinkoutBuffer(ProteinResource, outdir, bulk_add=True)
-    genes_buffer = GenesPriorizationHandler(outdir=outdir, bulk_add=False)
+    protein_buffer = LinkoutBuffer(ProteinResource, outdir=outdir, bulk_add=True)
+    genes_buffer = GenesPriorizationHandler(db=db, outdir=outdir, bulk_add=False)
     for xref in tqdm(xrefs):
         if xref['XRefSource'] == xref_source_enum['RefSeq']:
             protein_buffer.add(xref['XRefId'].decode())

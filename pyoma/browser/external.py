@@ -267,3 +267,4 @@ def copy_to_ncbi(dir, password, host='ftp-private.ncbi.nlm.nih.gov', user='omabr
                 with open(os.path.join(dir, fname), 'rb') as fh:
                     cmd = "STOR {}".format(fname)
                     session.storbinary(cmd, fp=fh)
+                logger.info('finished transfering '+fname)

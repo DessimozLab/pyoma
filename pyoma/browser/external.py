@@ -255,3 +255,15 @@ def run(outdir='/tmp', infile='../pyomabrowser/OmaServer.h5'):
         for row in db.id_mapper['OMA'].genome_table:
             taxs.add_link({str(row['NCBITaxonId']): row['UniProtSpeciesCode'].decode()})
         taxs.write(fh)
+
+
+def copy_to_ncbi(dir, password, host='ftp-private.ncbi.nlm.nih.gov', user='omabrow'):
+    import ftplib
+    with ftplib.FTP(host, user, password) as session:
+        session.cwd('/holdings')
+
+        for fname in os.listdir(dir):
+            if fname.endswith('.xml'):
+                with open(os.path.join(dir, fname), 'rb') as fh:
+                    cmd = "STOR {}".format(fname)
+                    session.storbinary(cmd, fp=fh)

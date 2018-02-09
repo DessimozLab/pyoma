@@ -15,7 +15,7 @@ if __name__ == "__main__":
     conf = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
 
-    if conf.find_links:
+    if not conf.skip_find:
         pyoma.browser.external.run(conf.out, conf.hdf5)
     if conf.push:
         pyoma.browser.external.copy_to_ncbi(conf.out, conf.password)

@@ -1,11 +1,15 @@
 import collections
+import operator
 import os
-
+import logging
 import math
+import re
+
 from tqdm import tqdm
 from lxml import etree
 from .db import Database
 
+logger = logging.getLogger(__name__)
 
 """Module to generate external data and crosslinks for NCBI.
 
@@ -57,7 +61,7 @@ class Provider(NCBILinkOutXML):
 
 class Resource(NCBILinkOutXML):
     root_node = "LinkSet"
-    lnk_nr = 1
+    link_id = 1
 
     def _add_objs(self, accs):
         objsel = etree.Element("ObjectSelector")
@@ -87,12 +91,16 @@ class Resource(NCBILinkOutXML):
 
     def add_link(self, accs):
         lnk = etree.Element("Link")
-        lnk.append(self.text_elemement('LinkId', str(self.lnk_nr)))
+        lnk.append(self.text_elemement('LinkId', str(self.link_id)))
         lnk.append(self.text_elemement('ProviderId', self.provider_id))
         lnk.append(self._add_objs(accs))
         lnk.append(self._add_url_section(accs))
         self.tree.getroot().append(lnk)
-        self.lnk_nr += 1
+        self._bump_link_id()
+
+    @classmethod
+    def _bump_link_id(cls):
+        cls.link_id += 1
 
     def database(self):
         return "not set"
@@ -121,7 +129,7 @@ class GenesResource(Resource):
 
 class ProteinResource(Resource):
     DISKSIZE_HEADER = 500
-    DISKSIZE_PER_LINK = 40
+    DISKSIZE_PER_LINK = 39
     base_name = 'resource_protein'
 
     def base_url(self):
@@ -150,7 +158,7 @@ class TaxonomyResource(Resource):
 
 
 class LinkoutBuffer(object):
-    def __init__(self, resource, outdir, bulk_add=True, max_file_size=20*2**20):
+    def __init__(self, resource, outdir='/tmp', bulk_add=True, max_file_size=20*2**20):
         self.max_records = math.floor((max_file_size - resource.DISKSIZE_HEADER) /
                                       resource.DISKSIZE_PER_LINK)
         self.cur_nr = 0
@@ -158,6 +166,8 @@ class LinkoutBuffer(object):
         self.bulk_add = bulk_add
         self.resource_type = resource
         self.outdir = outdir
+        logger.info('Setup Linkout buffer for {} with max {} records ({}bytes) per file, bulk_add={}'
+                    .format(resource.__name__, self.max_records, max_file_size, bulk_add))
 
     def add(self, obj):
         self.buf.append(obj)
@@ -172,11 +182,42 @@ class LinkoutBuffer(object):
             for obj in self.buf:
                 res.add_link(obj)
         fn = os.path.join(self.outdir,
-                          '{}_{:03d}.xml'.format(res.base_name, self.cur_nr))
+                          '{}_{:02d}.xml'.format(res.base_name, self.cur_nr))
         with open(fn, 'wb') as fh:
             res.write(fh)
         self.cur_nr += 1
         self.buf = []
+
+
+class GenesPriorizationHandler(object):
+    """Adapter to LinkoutBuffer to select only a limited number of crossrefs.
+    NCBI linkout caps at 10%"""
+
+    def __init__(self, max_linkouts=None, **kwargs):
+        self.max_links = int(max_linkouts) if max_linkouts else 20257436//10  # obtained in Jan2018
+        self.genes_buffer = LinkoutBuffer(GenesResource, **kwargs)
+        self.genes = []
+
+    def add(self, key, value):
+        self.genes.append((key, value))
+
+    def flush(self):
+        priority_prefixes = ['HUMAN', 'MOUSE', 'RATNO', 'PIGXX', 'DRO', 'SCH', 'YEAST', 'ARA',
+                             'WHEAT', 'PLAF', 'ECO', 'BAC', 'PANTR', 'ORY', 'GOSHI', 'BRA',
+                             'DANRE', 'CAE', 'MYC', 'STR', 'MAIZE', 'GORGO', 'PANTR', 'PONAB',
+                             'MACMU']
+        pat = re.compile(r"^({})".format('|'.join(priority_prefixes)))
+        if len(self.genes) > self.max_links:
+            self.genes.sort(key=operator.itemgetter(1))
+            self.genes.sort(key=lambda x: pat.match(x[1]) is None)
+        for link_acc, link_target in self.genes[0:self.max_links]:
+            self.genes_buffer.add({link_acc: link_target})
+        self.genes_buffer.flush()
+
+        c = collections.defaultdict(int)
+        for acc, target in self.genes[self.max_links:]:
+            c[target[0:5]] += 1
+        logger.info('Skipping genes link in the following species: {}'.format(c))
 
 
 def run(outdir='/tmp', infile='../pyomabrowser/OmaServer.h5'):
@@ -189,7 +230,7 @@ def run(outdir='/tmp', infile='../pyomabrowser/OmaServer.h5'):
     xref_source_enum = xrefs.get_enum('XRefSource')
 
     protein_buffer = LinkoutBuffer(ProteinResource, outdir, bulk_add=True)
-    genes_buffer = LinkoutBuffer(GenesResource, outdir, bulk_add=False)
+    genes_buffer = GenesPriorizationHandler(outdir=outdir, bulk_add=False)
     for xref in tqdm(xrefs):
         if xref['XRefSource'] == xref_source_enum['RefSeq']:
             protein_buffer.add(xref['XRefId'].decode())

@@ -41,7 +41,7 @@ class NCBILinkOutXML(object):
         return el
 
     def write(self, fh):
-        fh.write(etree.tostring(self.tree, pretty_print=True, xml_declaration=True))
+        fh.write(etree.tostring(self.tree, pretty_print=True, xml_declaration=True, encoding='utf-8'))
 
 
 class Provider(NCBILinkOutXML):
@@ -52,7 +52,7 @@ class Provider(NCBILinkOutXML):
             [("ProviderId", self.provider_id),
              ("Name", "OMA Browser: Orthologous MAtrix"),
              ("NameAbbr", "OMA"),
-             ("SubjectType", "taxonomy/phylogenetic"),
+             #("SubjectType", "taxonomy/phylogenetic"),
              ("Url", "http://omabrowser.org"),
              ("Brief", "OMA is a method and database for the inference of orthologs among complete genomes. "
                        "We provide browsable orthology predictions, APIs, flat file downloads among thousands "
@@ -70,8 +70,11 @@ class Resource(NCBILinkOutXML):
         objlst = etree.Element("ObjectList")
         objsel.append(objlst)
         for acc in accs:
-            objlst.append(self.text_elemement("ObjId", acc))
+            objlst.append(self.object_node(acc))
         return objsel
+
+    def object_node(self, acc):
+        return self.text_elemement("ObjId", acc)
 
     def _add_url_section(self, acc):
         el = etree.Element('ObjectUrl')
@@ -135,6 +138,9 @@ class ProteinResource(Resource):
 
     def base_url(self):
         return "https://omabrowser.org/oma/hogs/"
+
+    def object_node(self, acc):
+        return self.text_elemement("Query", acc)
 
     def rule_url(self, acc):
         return etree.Entity("lo.pacc"), "/vis/"

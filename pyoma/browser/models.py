@@ -178,6 +178,17 @@ class ProteinEntry(object):
             fam = 0
         return fam
 
+    @property
+    def is_main_isoform(self):
+        return (self._entry['AltSpliceVariant'] == 0 or
+                self._entry['AltSpliceVariant'] == self._entry['EntryNr'])
+
+    @LazyProperty
+    def alternative_isoforms(self):
+        return [ProteinEntry(self._db, e)
+                for e in self._db.get_splicing_variants(self._entry)
+                if e['EntryNr'] != self.entry_nr]
+
     def __repr__(self):
         return "<{}({}, {})>".format(self.__class__.__name__, self.entry_nr, self.omaid)
 

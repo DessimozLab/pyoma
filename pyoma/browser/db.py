@@ -195,6 +195,15 @@ class Database(object):
             '(EntryNr >= {}) & (EntryNr <= {}) & ((AltSpliceVariant == EntryNr) | (AltSpliceVariant == 0))'
             .format(rng[0], rng[1]))
 
+    def get_splicing_variants(self, entry):
+        e = self.ensure_entry(entry)
+        if e['AltSpliceVariant'] == 0:
+            return numpy.array([e], dtype=e.dtype)
+        # TODO: create index on AltSpliceVariant column?!
+        return self.get_hdf5_handle().get_node('/Protein/Entries').read_where(
+            '(EntryNr >= {:d}) & (EntryNr < {:d}) & (AltSpliceVariant == {:d})'
+                .format(e['EntryNr']-100, e['EntryNr']+100, e['AltSpliceVariant']))
+
     def _get_vptab(self, entry_nr):
         return self._get_pw_tab(entry_nr, 'VPairs')
 

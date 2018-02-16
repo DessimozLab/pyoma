@@ -133,7 +133,7 @@ class GenesResource(Resource):
 
 class ProteinResource(Resource):
     DISKSIZE_HEADER = 500
-    DISKSIZE_PER_LINK = 39
+    DISKSIZE_PER_LINK = 45
     base_name = 'resource_protein'
 
     def base_url(self):

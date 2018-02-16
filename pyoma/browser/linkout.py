@@ -140,7 +140,7 @@ class ProteinResource(Resource):
         return "https://omabrowser.org/oma/hogs/"
 
     def object_node(self, acc):
-        return self.text_elemement("Query", acc)
+        return self.text_elemement("Query", "{}[accn]".format(acc))
 
     def rule_url(self, acc):
         return etree.Entity("lo.pacc"), "/vis/"

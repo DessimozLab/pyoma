@@ -128,6 +128,8 @@ def import_oma_run(path, outfile, add_domains=True):
         CathDomainNameParser('ftp://ftp.biochem.ucl.ac.uk/pub/cath/latest_release/CathNames').parse(),
         PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
     x.add_canonical_id()
+    x.add_group_metadata()
+    x.add_hog_domain_prevalence()
     x.close()
 
     x = StandaloneExporter(path, outfile, logger=log)

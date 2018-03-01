@@ -162,7 +162,7 @@ class HomeologsConfidenceCalculator(object):
     def _augment_dataframe_with_all_features(self, df):
         counts = self._count_homeologs_per_entry(df)
         df['TotalCopyNr'] = df.apply(lambda x: counts[x['EntryNr1']] + counts[x['EntryNr2']], axis=1)
-        df.ix[df.SyntenyConservationLocal < 0, ['SyntenyConservationLocal']] = 0
+        df.iloc[df.SyntenyConservationLocal < 0, ['SyntenyConservationLocal']] = 0
         return df
 
     def calculate_scores(self):
@@ -170,7 +170,6 @@ class HomeologsConfidenceCalculator(object):
         df = self._load_pairwise_relations()
         df = self._augment_dataframe_with_all_features(df)
 
-        # TODO
         distanceObj, syntenyObj, total_nb_homObj, confObj = define_universe(df)
         distance = get_distance_mf(df, distanceObj)
         synteny = get_synteny_mf(df, syntenyObj)

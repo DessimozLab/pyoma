@@ -1608,6 +1608,7 @@ def augment_genomes_json_download_file(fpath, h5, backup='.bak'):
 
     :param fpath: path to genomes.json file
     :param h5: hdf5 database handle."""
+    common.package_logger.info("Augmenting genomes.json file with Nr of HOGs per level")
     # load nr of ancestral genomes at each level
     ancestral_hogs = collections.Counter()
     step = 2**15
@@ -1619,6 +1620,7 @@ def augment_genomes_json_download_file(fpath, h5, backup='.bak'):
     sorter = numpy.argsort(tax['Name'])
     with open(fpath, 'rt') as fh:
         genomes = json.load(fh)
+    os.rename(fpath, fpath + '.bak')
 
     def traverse(node):
         if 'children' not in node:
@@ -1641,7 +1643,7 @@ def augment_genomes_json_download_file(fpath, h5, backup='.bak'):
             common.package_logger.exception('Cannot identify taxonomy id')
 
     traverse(genomes)
-    with open(fpath+'.bak', 'wt') as fh:
+    with open(fpath, 'wt') as fh:
         json.dump(genomes, fh)
 
 
@@ -1688,4 +1690,8 @@ def main(name="OmaServer.h5", k=6, idx_name=None):
     x.create_indexes()
     x.add_sequence_suffix_array(k=k, fn=idx_name)
     x.update_summary_stats()
+
+    genomes_json_fname = os.path.normpath(os.path.join(
+        os.path.dirname(name), '..', 'downloads', 'genomes.json'))
+    augment_genomes_json_download_file(genomes_json_fname, x.h5)
     x.close()

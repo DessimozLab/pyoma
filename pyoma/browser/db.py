@@ -220,11 +220,17 @@ class Database(object):
             cnt = 0
         return cnt
 
-    def _get_pw_data(self, entry_nr, tab):
-        dat = tab.read_where('(EntryNr1=={:d})'.format(entry_nr))
+    def _get_pw_data(self, entry_nr, tab, typ_filter=None, extra_cols=None):
+        query = "(EntryNr1 == {:d})".format(entry_nr)
+        if typ_filter is not None:
+            query += " & (RelType == {:d})".format(typ_filter)
+        dat = tab.read_where(query)
         typ = tab.get_enum('RelType')
+        cols = ['EntryNr1', 'EntryNr2', 'Score', 'Distance']
+        if extra_cols is not None:
+            cols.extend(extra_cols)
         res = numpy.lib.recfunctions.append_fields(
-            dat[['EntryNr1', 'EntryNr2', 'Score', 'Distance']],
+            dat[cols],
             names='RelType',
             data=[typ(x) for x in dat['RelType']],
             usemask=False)
@@ -260,6 +266,13 @@ class Database(object):
         :param int entry_nr: the numeric entry_id of the query protein"""
         within_species_paralogs = self._get_pw_tab(entry_nr, 'within')
         return self._get_pw_data(entry_nr, within_species_paralogs)
+
+    def get_homoeologs(self, entry_nr):
+        within_species = self._get_pw_tab(entry_nr, 'within')
+        homolog_typ_nr = within_species.get_enum('RelType')['homeolog']
+        return self._get_pw_data(entry_nr, within_species,
+                                 typ_filter=homolog_typ_nr,
+                                 extra_cols=['SyntenyConservationLocal', 'Confidence'])
 
     def neighbour_genes(self, entry_nr, window=1):
         """Returns neighbor genes around a query gene.

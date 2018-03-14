@@ -33,6 +33,7 @@ from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
 from .geneontology import GeneOntology, OntologyParser
 from .synteny import SyntenyScorer
+from .homoeologs import HomeologsConfidenceCalculator
 
 with hooks():
     import urllib.request
@@ -448,20 +449,39 @@ class DarwinExporter(object):
         self.logger.info("Adding synteny scores for polyploid genomes")
         polyploid_genomes = self.h5.root.Genome.where('IsPolyploid==True')
         for genome in polyploid_genomes:
-            self.logger.info('compute synteny score for {}'
-                             .format(genome['UniProtSpeciesCode'].decode()))
-            synteny_scorer = SyntenyScorer(self.h5, genome['UniProtSpeciesCode'].decode())
+            genome_code = genome['UniProtSpeciesCode'].decode()
+            self.logger.info('compute synteny score for {}'.format(genome_code))
+            synteny_scorer = SyntenyScorer(self.h5, genome_code)
             rels = synteny_scorer.compute_scores()
-            self._callback_store_synteny_scores(genome['UniProtSpeciesCode'].decode(), rels)
+            self._callback_store_rel_data(
+                genome_code, rels, [('SyntenyConservationLocal', 'mean_synteny_score')])
 
-    def _callback_store_synteny_scores(self, genome, rels):
+    def add_homoeology_confidence(self):
+        """adds the homoeology confidence scores to the database.
+
+        This method should be called only after the synteny scores have
+        been computed and added to the database.
+
+        The computations are done using :mod:`homoeologs` module."""
+        self.logger.info("Adding homoeolog confidence scores")
+        polyploid_genomes = self.h5.root.Genomes.where('IsPolyploid==True')
+        for genome in polyploid_genomes:
+            genome_code = genome['UniProtSpeciesCode'].decode()
+            self.logger.info("compute homoeolog confidence for {}".format(genome_code))
+            homoeolg_scorer = HomeologsConfidenceCalculator(self.h5, genome_code)
+            rels = homoeolg_scorer.calculate_scores()
+            self._callback_store_rel_data(
+                genome_code, rels, [("Confidence", "fuzzy_confidence_scaled")])
+
+    def _callback_store_rel_data(self, genome, rels, assignments):
         tab = self.h5.get_node('/PairwiseRelation/{}/within'.format(genome))
         try:
             rels_iter = rels.iterrows()
             idx, cur_rel = next(rels_iter)
             for row in tab:
                 if row['EntryNr1'] == cur_rel['entry_nr1'] and row['EntryNr2'] == cur_rel['entry_nr2']:
-                    row['SyntenyConservationLocal'] = cur_rel['mean_synteny_score']
+                    for target, source in assignments:
+                        row[target] = cur_rel[source]
                     row.update()
                     idx, cur_rel = next(rels_iter)
         except StopIteration:
@@ -1704,6 +1724,7 @@ def main(name="OmaServer.h5", k=6, idx_name=None):
     x.add_hogs()
     x.add_xrefs()
     x.add_synteny_scores()
+    x.add_homoeology_confidence()
     x.add_domain_info(only_pfam_or_cath_domains(itertools.chain(
         iter_domains('http://download.cathdb.info/gene3d/CURRENT_RELEASE/mdas.csv.gz'),
         iter_domains('file://{}/additional_domains.mdas.csv.gz'.format(os.getenv('DARWIN_BROWSERDATA_PATH', '')))

@@ -320,8 +320,8 @@ class PairwiseRelation(object):
         return self._relation['SyntenyConservationLocal']
 
     @property
-    def synteny_conservation_chromosome(self):
-        return self._relation['SyntenyConservationChromosome']
+    def confidence(self):
+        return self._relation['Confidence']
 
     @LazyProperty
     def rel_type(self):

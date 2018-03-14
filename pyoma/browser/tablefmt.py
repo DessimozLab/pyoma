@@ -65,7 +65,7 @@ class PairwiseRelationTable(tables.IsDescription):
     Distance = tables.Float32Col(pos=4, dflt=-1)
     AlignmentOverlap = tables.Float16Col(pos=5, dflt=-1)
     SyntenyConservationLocal = tables.Float16Col(pos=6, dflt=-1)
-    SyntenyConservationChromosome = tables.Float16Col(pos=7, dflt=-1)
+    Confidence = tables.Float16Col(pos=7, dflt=-1)
 
 
 class XRefTable(tables.IsDescription):

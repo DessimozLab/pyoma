@@ -108,28 +108,31 @@ def gz_is_empty(fname):
 
 def load_tsv_to_numpy(args):
     fn, off1, off2, swap = args
-    relEnum = tablefmt.PairwiseRelationTable.columns['RelType'].enum._names
+    rel_desc = tablefmt.PairwiseRelationTable
+    # we need to get the enum as a dict to be able to extend it
+    # with the reversed labels, i.e. n:1
+    relEnum = rel_desc.columns['RelType'].enum._names
     relEnum['n:1'] = relEnum['m:1']
     relEnum['1:m'] = relEnum['1:n']
     relEnum['n:m'] = relEnum['m:n']
     read_dir = -1 if swap else 1
-    dtype = [('EntryNr1', 'i4'), ('EntryNr2', 'i4'), ('Score', 'f4'), ('RelType', 'i1'),
-             ('AlignmentOverlap', 'f2'), ('Distance', 'f4')]
+    tsv_dtype = [('EntryNr1', 'i4'), ('EntryNr2', 'i4'), ('Score', 'f4'), ('RelType', 'i1'),
+                 ('AlignmentOverlap', 'f2'), ('Distance', 'f4')]
     for curNr, curFn in enumerate([fn, fn.replace('.ext.', '.')]):
         try:
             if gz_is_empty(curFn):
-                return numpy.empty(0, dtype=tables.dtype_from_descr(tablefmt.PairwiseRelationTable))
+                return numpy.empty(0, dtype=tables.dtype_from_descr(rel_desc))
             with gzip.GzipFile(curFn) as fh:
-                augData = numpy.genfromtxt(fh, dtype=dtype,
-                                           names=[_[0] for _ in dtype],
-                                           delimiter='\t',
-                                           usecols=(0, 1, 2, 3, 4, 5),
-                                           converters={'EntryNr1': lambda nr: int(nr) + off1,
-                                                       'EntryNr2': lambda nr: int(nr) + off2,
-                                                       'RelType': lambda rel: (relEnum[rel[::read_dir].decode()]
-                                                                               if len(rel) <= 3
-                                                                               else relEnum[rel.decode()]),
-                                                       'Score': lambda score: float(score) / 100})
+                data = numpy.genfromtxt(fh, dtype=tsv_dtype,
+                                        names=[_[0] for _ in tsv_dtype],
+                                        delimiter='\t',
+                                        usecols=(0, 1, 2, 3, 4, 5),
+                                        converters={'EntryNr1': lambda nr: int(nr) + off1,
+                                                    'EntryNr2': lambda nr: int(nr) + off2,
+                                                    'RelType': lambda rel: (relEnum[rel[::read_dir].decode()]
+                                                                            if len(rel) <= 3
+                                                                            else relEnum[rel.decode()]),
+                                                    'Score': lambda score: float(score) / 100})
                 break
         except OSError as e:
             if curNr < 1:
@@ -139,12 +142,13 @@ def load_tsv_to_numpy(args):
                 raise e
 
     if swap:
-        reversed_cols = tuple(augData.dtype.names[z] for z in (1, 0, 2, 3, 4, 5))
-        augData.dtype.names = reversed_cols
-    full_table = numpy.empty(augData.size, dtype=tables.dtype_from_descr(tablefmt.PairwiseRelationTable))
-    full_table[0:] = augData
-    for col_not_in_tsv in set(full_table.dtype.names) - set(augData.dtype.names):
-        full_table[col_not_in_tsv] = -1
+        reversed_cols = tuple(data.dtype.names[z] for z in (1, 0, 2, 3, 4, 5))
+        data.dtype.names = reversed_cols
+    full_table = numpy.empty(data.size, dtype=tables.dtype_from_descr(rel_desc))
+    common_cols = list(data.dtype.names)
+    full_table[common_cols] = data[common_cols]
+    for col_not_in_tsv in set(full_table.dtype.names) - set(data.dtype.names):
+        full_table[col_not_in_tsv] = rel_desc.columns[col_not_in_tsv].dflt
     return full_table
 
 

@@ -314,7 +314,8 @@ class DarwinExporter(object):
             data = self.call_darwin_export('GetGenomeData();')
         gstab = self.h5.create_table('/', 'Genome', tablefmt.GenomeTable,
                                      expectedrows=len(data['GS']))
-        self._write_to_table(gstab, data['GS'])
+        gs_data = self._parse_date_columns(data['GS'], gstab)
+        self._write_to_table(gstab, gs_data)
         gstab.cols.NCBITaxonId.create_csindex(filters=self._compr)
         gstab.cols.UniProtSpeciesCode.create_csindex(filters=self._compr)
         gstab.cols.EntryOff.create_csindex(filters=self._compr)
@@ -323,6 +324,32 @@ class DarwinExporter(object):
                                       expectedrows=len(data['Tax']))
         self._write_to_table(taxtab, _load_taxonomy_without_ref_to_itselfs(data['Tax']))
         taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
+
+    def _parse_date_columns(self, data, tab):
+        """convert str values in a date column to epoch timestamps"""
+        time_cols = [i for i, col in enumerate(tab.colnames) if tab.coldescrs[col].kind == 'time']
+        dflts = [tab.coldflts[col] for col in tab.colnames]
+
+        def map_data(col, data):
+            try:
+                val = data[col]
+                if col in time_cols and isinstance(val, str):
+                    for fmt in ('%b %d, %Y', '%B %d, %Y', '%d.%m.%Y', '%Y%m%d'):
+                        try:
+                            date = time.strptime(val, fmt)
+                            return time.mktime(date)
+                        except ValueError:
+                            pass
+                    raise ValueError("Cannot parse date of '{}'".format(val))
+                return val
+            except IndexError:
+                return dflts[col]
+
+        arr = numpy.empty(len(data), dtype=tab.dtype)
+        for i, row in enumerate(data):
+            as_tup = tuple(map_data(c, row) for c in range(len(dflts)))
+            arr[i] = as_tup
+        return arr
 
     def _convert_to_numpyarray(self, data, tab):
         """convert a list of list dataset into a numpy rec array that

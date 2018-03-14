@@ -2,6 +2,8 @@ from __future__ import division, unicode_literals
 
 import collections
 
+import time
+
 
 def format_sciname(sci, short=False):
     p = set([sci.find(x) for x in ['(', 'serogroup', 'serotype', 'serovar',
@@ -245,6 +247,17 @@ class Genome(object):
     @property
     def release(self):
         return self._genome['Release'].decode()
+
+    @property
+    def last_modfied_timestamp(self):
+        return self._genome['Date']
+
+    @property
+    def last_modified(self):
+        return self.modification_date("%Y-%b-%d")
+
+    def modification_date(self, fmt):
+        return time.strftime(fmt, time.localtime(self.last_modfied_timestamp))
 
     @property
     def nr_entries(self):

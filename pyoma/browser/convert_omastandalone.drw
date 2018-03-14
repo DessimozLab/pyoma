@@ -116,8 +116,14 @@ GetGenomeData := proc()
         g := genomes[gNr];
         sciname := GS[g,SCINAME];
         if sciname='' then sciname := g fi:
+        last_modified = GS[g, 'DATE'];
+        if last_modified = '' then
+            fs := FileStat(GS[g,FileName]);
+            last_modified = fs['st_mtime'];
+        fi:
         gs := append(gs, [TaxonIDs[g], GS[g, '5LETTERNAME'], GS[g,TotEntries],
-            GS[g,TotAA], Goff[gNr], sciname, GS[g,DBRELEASE],
+            GS[g,TotAA], Goff[gNr], sciname ,GS[g,COMMONNAME], GS[g, SYNNAME],
+            GS[g,DBRELEASE], GS[g,URL], GS[g,SOURCE], last_modified,
             SubGenome[g]<>0]);
     od:
 

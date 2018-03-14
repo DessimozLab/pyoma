@@ -1600,6 +1600,53 @@ class PfamDomainNameParser(CathDomainNameParser):
     source = b'Pfam'
 
 
+def augment_genomes_json_download_file(fpath, h5, backup='.bak'):
+    """Augment the genomes.json file in the download section with additional info
+
+    This function stores the ncbi taxonomy identifiers of internal nodes and adds
+    the number of ancestral genes to the internal nodes.
+
+    :param fpath: path to genomes.json file
+    :param h5: hdf5 database handle."""
+    common.package_logger.info("Augmenting genomes.json file with Nr of HOGs per level")
+    # load nr of ancestral genomes at each level
+    ancestral_hogs = collections.Counter()
+    step = 2**15
+    hog_tab = h5.get_node('/HogLevel')
+    for start in range(0, len(hog_tab), step):
+        ancestral_hogs.update((l.decode() for l in hog_tab.read(start, stop=start+step, field='Level')))
+    # load taxonomy and sorter by Name
+    tax = h5.get_node('/Taxonomy').read()
+    sorter = numpy.argsort(tax['Name'])
+    with open(fpath, 'rt') as fh:
+        genomes = json.load(fh)
+    os.rename(fpath, fpath + '.bak')
+
+    def traverse(node):
+        if 'children' not in node:
+            return
+        for child in node['children']:
+            traverse(child)
+        try:
+            node['nr_hogs'] = ancestral_hogs[node['name']]
+        except KeyError as e:
+            common.package_logger.warning('no ancestral hog counts for '+node['name'])
+            node['nr_hogs'] = 0
+
+        try:
+            n = node['name'].encode('utf-8')
+            idx = numpy.searchsorted(tax['Name'], n, sorter=sorter)
+            if tax['Name'][sorter[idx]] == n:
+                node['taxid'] = int(tax['NCBITaxonId'][sorter[idx]])
+            raise ValueError('not in taxonomy: {}'.format(n))
+        except Exception:
+            common.package_logger.exception('Cannot identify taxonomy id')
+
+    traverse(genomes)
+    with open(fpath, 'wt') as fh:
+        json.dump(genomes, fh)
+
+
 def getDebugLogger():
     import logging
 
@@ -1643,4 +1690,8 @@ def main(name="OmaServer.h5", k=6, idx_name=None):
     x.create_indexes()
     x.add_sequence_suffix_array(k=k, fn=idx_name)
     x.update_summary_stats()
+
+    genomes_json_fname = os.path.normpath(os.path.join(
+        os.path.dirname(name), '..', 'downloads', 'genomes.json'))
+    augment_genomes_json_download_file(genomes_json_fname, x.h5)
     x.close()

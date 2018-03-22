@@ -486,6 +486,7 @@ class DarwinExporter(object):
                     idx, cur_rel = next(rels_iter)
         except StopIteration:
             pass
+        tab.flush()
 
     def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):
         # add ' ' after each sequence (Ascii is smaller than

@@ -1,5 +1,7 @@
 from __future__ import division, print_function
 from builtins import str, chr, range, object, super, bytes
+
+import pandas
 from future.standard_library import hooks
 from PySAIS import sais
 from tempfile import NamedTemporaryFile
@@ -473,19 +475,17 @@ class DarwinExporter(object):
             self._callback_store_rel_data(
                 genome_code, rels, [("Confidence", "fuzzy_confidence_scaled")])
 
-    def _callback_store_rel_data(self, genome, rels, assignments):
+    def _callback_store_rel_data(self, genome, rels_df, assignments):
         tab = self.h5.get_node('/PairwiseRelation/{}/within'.format(genome))
-        try:
-            rels_iter = rels.iterrows()
-            idx, cur_rel = next(rels_iter)
-            for row in tab:
-                if row['EntryNr1'] == cur_rel['entry_nr1'] and row['EntryNr2'] == cur_rel['entry_nr2']:
-                    for target, source in assignments:
-                        row[target] = cur_rel[source]
-                    row.update()
-                    idx, cur_rel = next(rels_iter)
-        except StopIteration:
-            pass
+        df_all = pandas.DataFrame(tab.read())
+        merged = pandas.merge(df_all, rels_df, how="left", left_on=['EntryNr1', 'EntryNr2'],
+                              right_on=['entry_nr1', 'entry_nr2'], validate='one_to_one')
+
+        for target, source in assignments:
+            # replace NaN in column from rels_df by the default value of the target column
+            merged.loc[merged[source].isnull(), source] = tab.coldescrs[target].dflt
+            # update the data in the target hdf5 column by the source column data
+            tab.modify_column(column=merged[source].as_matrix(), colname=target)
         tab.flush()
 
     def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):

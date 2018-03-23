@@ -155,18 +155,7 @@ class HomeologsConfidenceCalculator(object):
         df = pandas.DataFrame(
             self.h5_handle.get_node('/PairwiseRelation/{}/within'.format(self.genome)).read_where('RelType == 5'))
         df = df[df['EntryNr1'].isin(self.genome_df['EntryNr']) & df['EntryNr2'].isin(self.genome_df['EntryNr'])]
-        df = df[['EntryNr1', 'EntryNr2', 'Distance','SyntenyConservationLocal']]
-
-        #added by NG to read synteny scores from file
-        df.rename(columns={'SyntenyConservationLocal': 'SyntenyConservationLocal_old'}, inplace=True)
-        tmp_df = pandas.read_csv('/Users/nglover/DessimozRepos/pyoma/pyoma/browser/'
-                             + self.genome + 'synteny.tsv', sep='\t', index_col=0)
-        df = pandas.merge(left=df, right=tmp_df, how='left', left_on=['EntryNr1','EntryNr2'],
-                     right_on=['entry_nr1','entry_nr2'])
-        df.rename(columns={'mean_synteny_score':'SyntenyConservationLocal'}, inplace=True)
-        ######
-
-        return df[['EntryNr1', 'EntryNr2', 'SyntenyConservationLocal', 'SyntenyConservationLocal_old','Distance']]
+        return df[['EntryNr1', 'EntryNr2', 'SyntenyConservationLocal', 'Distance']]
 
     def _count_homeologs_per_entry(self, df):
         return collections.Counter(df['EntryNr1'])
@@ -174,7 +163,7 @@ class HomeologsConfidenceCalculator(object):
     def _augment_dataframe_with_all_features(self, df):
         counts = self._count_homeologs_per_entry(df)
         df['TotalCopyNr'] = df.apply(lambda x: counts[x['EntryNr1']] + counts[x['EntryNr2']], axis=1)
-        #df.iloc[df.SyntenyConservationLocal < 0, ['SyntenyConservationLocal']] = 0
+        df.loc[df.SyntenyConservationLocal < 0, 'SyntenyConservationLocal'] = 0
         return df
 
     def calculate_scores(self):

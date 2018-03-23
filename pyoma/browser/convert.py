@@ -478,8 +478,12 @@ class DarwinExporter(object):
     def _callback_store_rel_data(self, genome, rels_df, assignments):
         tab = self.h5.get_node('/PairwiseRelation/{}/within'.format(genome))
         df_all = pandas.DataFrame(tab.read())
+        if 'entry_nr1' in list(rels_df):
+            enr_col_names = ['entry_nr1', 'entry_nr2']
+        else:
+            enr_col_names = ['EntryNr1', 'EntryNr2']
         merged = pandas.merge(df_all, rels_df, how="left", left_on=['EntryNr1', 'EntryNr2'],
-                              right_on=['entry_nr1', 'entry_nr2'], validate='one_to_one')
+                              right_on=enr_col_names, validate='one_to_one')
 
         for target, source in assignments:
             # replace NaN in column from rels_df by the default value of the target column

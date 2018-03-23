@@ -108,7 +108,8 @@ class GenomeTable(tables.IsDescription):
     Release = tables.StringCol(128, pos=8)
     Url = tables.StringCol(255, pos=9)
     Source = tables.StringCol(255, pos=10)
-    IsPolyploid = tables.BoolCol(pos=11)
+    Date = tables.Time32Col(pos=11)
+    IsPolyploid = tables.BoolCol(pos=12)
 
 
 class TaxonomyTable(tables.IsDescription):

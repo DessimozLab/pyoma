@@ -780,15 +780,17 @@ class SequenceSearch(object):
             self.seq_idx = self.db_idx.root.Protein.SequenceIndex
             if isinstance(self.seq_idx, tables.link.ExternalLink):
                 self.seq_idx = self.seq_idx()
+            self.kmer_lookup = self.db_idx.root.Protein.KmerLookup
+            if isinstance(self.kmer_lookup, tables.link.ExternalLink):
+                self.kmer_lookup = self.kmer_lookup()
         except (AttributeError, OSError) as e:
             raise DBConsistencyError("Suffix index for protein sequences is not available: "+str(e))
         self.seq_buff = self.db.root.Protein.SequenceBuffer
         self.n_entries = len(self.db.root.Protein.Entries)
 
         # Kmer lookup arrays / kmer setup
-        self.k = self.db_idx.get_node_attr('/Protein/KmerLookup', 'k')
+        self.k = self.kmer_lookup._f_getattr('k')
         self.encoder = KmerEncoder(self.k)
-        self.kmer_lookup = self.db_idx.root.Protein.KmerLookup
         logger.info('KmerLookup of size k={} loaded'.format(self.k))
 
     def get_entry_length(self, ii):

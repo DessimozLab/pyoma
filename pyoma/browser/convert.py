@@ -1,5 +1,7 @@
 from __future__ import division, print_function
 from builtins import str, chr, range, object, super, bytes
+
+import pandas
 from future.standard_library import hooks
 from PySAIS import sais
 from tempfile import NamedTemporaryFile
@@ -109,28 +111,31 @@ def gz_is_empty(fname):
 
 def load_tsv_to_numpy(args):
     fn, off1, off2, swap = args
-    relEnum = tablefmt.PairwiseRelationTable.columns['RelType'].enum._names
+    rel_desc = tablefmt.PairwiseRelationTable
+    # we need to get the enum as a dict to be able to extend it
+    # with the reversed labels, i.e. n:1
+    relEnum = rel_desc.columns['RelType'].enum._names
     relEnum['n:1'] = relEnum['m:1']
     relEnum['1:m'] = relEnum['1:n']
     relEnum['n:m'] = relEnum['m:n']
     read_dir = -1 if swap else 1
-    dtype = [('EntryNr1', 'i4'), ('EntryNr2', 'i4'), ('Score', 'f4'), ('RelType', 'i1'),
-             ('AlignmentOverlap', 'f2'), ('Distance', 'f4')]
+    tsv_dtype = [('EntryNr1', 'i4'), ('EntryNr2', 'i4'), ('Score', 'f4'), ('RelType', 'i1'),
+                 ('AlignmentOverlap', 'f2'), ('Distance', 'f4')]
     for curNr, curFn in enumerate([fn, fn.replace('.ext.', '.')]):
         try:
             if gz_is_empty(curFn):
-                return numpy.empty(0, dtype=tables.dtype_from_descr(tablefmt.PairwiseRelationTable))
+                return numpy.empty(0, dtype=tables.dtype_from_descr(rel_desc))
             with gzip.GzipFile(curFn) as fh:
-                augData = numpy.genfromtxt(fh, dtype=dtype,
-                                           names=[_[0] for _ in dtype],
-                                           delimiter='\t',
-                                           usecols=(0, 1, 2, 3, 4, 5),
-                                           converters={'EntryNr1': lambda nr: int(nr) + off1,
-                                                       'EntryNr2': lambda nr: int(nr) + off2,
-                                                       'RelType': lambda rel: (relEnum[rel[::read_dir].decode()]
-                                                                               if len(rel) <= 3
-                                                                               else relEnum[rel.decode()]),
-                                                       'Score': lambda score: float(score) / 100})
+                data = numpy.genfromtxt(fh, dtype=tsv_dtype,
+                                        names=[_[0] for _ in tsv_dtype],
+                                        delimiter='\t',
+                                        usecols=(0, 1, 2, 3, 4, 5),
+                                        converters={'EntryNr1': lambda nr: int(nr) + off1,
+                                                    'EntryNr2': lambda nr: int(nr) + off2,
+                                                    'RelType': lambda rel: (relEnum[rel[::read_dir].decode()]
+                                                                            if len(rel) <= 3
+                                                                            else relEnum[rel.decode()]),
+                                                    'Score': lambda score: float(score) / 100})
                 break
         except OSError as e:
             if curNr < 1:
@@ -140,12 +145,13 @@ def load_tsv_to_numpy(args):
                 raise e
 
     if swap:
-        reversed_cols = tuple(augData.dtype.names[z] for z in (1, 0, 2, 3, 4, 5))
-        augData.dtype.names = reversed_cols
-    full_table = numpy.empty(augData.size, dtype=tables.dtype_from_descr(tablefmt.PairwiseRelationTable))
-    full_table[0:] = augData
-    for col_not_in_tsv in set(full_table.dtype.names) - set(augData.dtype.names):
-        full_table[col_not_in_tsv] = -1
+        reversed_cols = tuple(data.dtype.names[z] for z in (1, 0, 2, 3, 4, 5))
+        data.dtype.names = reversed_cols
+    full_table = numpy.empty(data.size, dtype=tables.dtype_from_descr(rel_desc))
+    common_cols = list(data.dtype.names)
+    full_table[common_cols] = data[common_cols]
+    for col_not_in_tsv in set(full_table.dtype.names) - set(data.dtype.names):
+        full_table[col_not_in_tsv] = rel_desc.columns[col_not_in_tsv].dflt
     return full_table
 
 
@@ -315,7 +321,8 @@ class DarwinExporter(object):
             data = self.call_darwin_export('GetGenomeData();')
         gstab = self.h5.create_table('/', 'Genome', tablefmt.GenomeTable,
                                      expectedrows=len(data['GS']))
-        self._write_to_table(gstab, data['GS'])
+        gs_data = self._parse_date_columns(data['GS'], gstab)
+        self._write_to_table(gstab, gs_data)
         gstab.cols.NCBITaxonId.create_csindex(filters=self._compr)
         gstab.cols.UniProtSpeciesCode.create_csindex(filters=self._compr)
         gstab.cols.EntryOff.create_csindex(filters=self._compr)
@@ -324,6 +331,32 @@ class DarwinExporter(object):
                                       expectedrows=len(data['Tax']))
         self._write_to_table(taxtab, _load_taxonomy_without_ref_to_itselfs(data['Tax']))
         taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
+
+    def _parse_date_columns(self, data, tab):
+        """convert str values in a date column to epoch timestamps"""
+        time_cols = [i for i, col in enumerate(tab.colnames) if tab.coldescrs[col].kind == 'time']
+        dflts = [tab.coldflts[col] for col in tab.colnames]
+
+        def map_data(col, data):
+            try:
+                val = data[col]
+                if col in time_cols and isinstance(val, str):
+                    for fmt in ('%b %d, %Y', '%B %d, %Y', '%d.%m.%Y', '%Y%m%d'):
+                        try:
+                            date = time.strptime(val, fmt)
+                            return time.mktime(date)
+                        except ValueError:
+                            pass
+                    raise ValueError("Cannot parse date of '{}'".format(val))
+                return val
+            except IndexError:
+                return dflts[col]
+
+        arr = numpy.empty(len(data), dtype=tab.dtype)
+        for i, row in enumerate(data):
+            as_tup = tuple(map_data(c, row) for c in range(len(dflts)))
+            arr[i] = as_tup
+        return arr
 
     def _convert_to_numpyarray(self, data, tab):
         """convert a list of list dataset into a numpy rec array that
@@ -442,19 +475,18 @@ class DarwinExporter(object):
             self._callback_store_rel_data(
                 genome_code, rels, [("Confidence", "fuzzy_confidence_scaled")])
 
-    def _callback_store_rel_data(self, genome, rels, assignments):
+    def _callback_store_rel_data(self, genome, rels_df, assignments):
         tab = self.h5.get_node('/PairwiseRelation/{}/within'.format(genome))
-        try:
-            rels_iter = rels.iterrows()
-            idx, cur_rel = next(rels_iter)
-            for row in tab:
-                if row['EntryNr1'] == cur_rel['entry_nr1'] and row['EntryNr2'] == cur_rel['entry_nr2']:
-                    for target, source in assignments:
-                        row[target] = cur_rel[source]
-                    row.update()
-                    idx, cur_rel = next(rels_iter)
-        except StopIteration:
-            pass
+        df_all = pandas.DataFrame(tab.read())
+        merged = pandas.merge(df_all, rels_df, how="left", left_on=['EntryNr1', 'EntryNr2'],
+                              right_on=['entry_nr1', 'entry_nr2'], validate='one_to_one')
+
+        for target, source in assignments:
+            # replace NaN in column from rels_df by the default value of the target column
+            merged.loc[merged[source].isnull(), source] = tab.coldescrs[target].dflt
+            # update the data in the target hdf5 column by the source column data
+            tab.modify_column(column=merged[source].as_matrix(), colname=target)
+        tab.flush()
 
     def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):
         # add ' ' after each sequence (Ascii is smaller than
@@ -1620,6 +1652,53 @@ class PfamDomainNameParser(CathDomainNameParser):
     source = b'Pfam'
 
 
+def augment_genomes_json_download_file(fpath, h5, backup='.bak'):
+    """Augment the genomes.json file in the download section with additional info
+
+    This function stores the ncbi taxonomy identifiers of internal nodes and adds
+    the number of ancestral genes to the internal nodes.
+
+    :param fpath: path to genomes.json file
+    :param h5: hdf5 database handle."""
+    common.package_logger.info("Augmenting genomes.json file with Nr of HOGs per level")
+    # load nr of ancestral genomes at each level
+    ancestral_hogs = collections.Counter()
+    step = 2**15
+    hog_tab = h5.get_node('/HogLevel')
+    for start in range(0, len(hog_tab), step):
+        ancestral_hogs.update((l.decode() for l in hog_tab.read(start, stop=start+step, field='Level')))
+    # load taxonomy and sorter by Name
+    tax = h5.get_node('/Taxonomy').read()
+    sorter = numpy.argsort(tax['Name'])
+    with open(fpath, 'rt') as fh:
+        genomes = json.load(fh)
+    os.rename(fpath, fpath + '.bak')
+
+    def traverse(node):
+        if 'children' not in node:
+            return
+        for child in node['children']:
+            traverse(child)
+        try:
+            node['nr_hogs'] = ancestral_hogs[node['name']]
+        except KeyError as e:
+            common.package_logger.warning('no ancestral hog counts for '+node['name'])
+            node['nr_hogs'] = 0
+
+        try:
+            n = node['name'].encode('utf-8')
+            idx = numpy.searchsorted(tax['Name'], n, sorter=sorter)
+            if tax['Name'][sorter[idx]] == n:
+                node['taxid'] = int(tax['NCBITaxonId'][sorter[idx]])
+            raise ValueError('not in taxonomy: {}'.format(n))
+        except Exception:
+            common.package_logger.exception('Cannot identify taxonomy id')
+
+    traverse(genomes)
+    with open(fpath, 'wt') as fh:
+        json.dump(genomes, fh)
+
+
 def getDebugLogger():
     import logging
 
@@ -1664,4 +1743,8 @@ def main(name="OmaServer.h5", k=6, idx_name=None):
     x.create_indexes()
     x.add_sequence_suffix_array(k=k, fn=idx_name)
     x.update_summary_stats()
+
+    genomes_json_fname = os.path.normpath(os.path.join(
+        os.path.dirname(name), '..', 'downloads', 'genomes.json'))
+    augment_genomes_json_download_file(genomes_json_fname, x.h5)
     x.close()

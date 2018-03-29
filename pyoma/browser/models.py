@@ -362,3 +362,54 @@ class GeneOntologyAnnotation(object):
     def aspect(self):
         from .geneontology import GOAspect
         return GOAspect.to_string(self.term.aspect)
+
+
+class ExonStructure(object):
+    def __init__(self, db, exons):
+        self._stored = exons
+        self._db = db
+
+    @LazyProperty
+    def _exons(self):
+        return (self._db.get_exons(self._stored)
+                if isinstance(self._stored, int)
+                else self._stored)
+
+    @classmethod
+    def from_entry_nr(cls, db, eNr):
+        return cls(db, int(eNr))
+
+    def _iter_exons(self):
+        if self._exons['Strand'][0] < 0:
+            self._exons[::-1].sort(order='Start')
+        else:
+            self._exons.sort(order='Start')
+        for exon in self._exons:
+            yield Exon(exon)
+
+    def __len__(self):
+        return len(self._exons)
+
+    def __repr__(self):
+        return "<{}(entry_nr={}, nr_exons={})>"\
+            .format(self.__class__.__name__,
+                    self._exons[0]['EntryNr'], len(self))
+
+    def __str__(self):
+        exs = list(str(e) for e in self._iter_exons())
+        if len(exs) > 1:
+            return "join({})".format(", ".join(exs))
+        else:
+            return exs[0]
+
+
+class Exon(object):
+    def __init__(self, exon):
+        self.exon = exon
+
+    def __str__(self):
+        if self.exon['Strand'] < 0:
+            template = "complement({}..{})"
+        else:
+            template = "{}..{}"
+        return template.format(self.exon['Start'], self.exon['End'])

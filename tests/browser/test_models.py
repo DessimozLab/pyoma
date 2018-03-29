@@ -1,5 +1,7 @@
 from builtins import bytes, range
-from pyoma.browser import models, db
+
+import numpy
+from pyoma.browser import models, db, tablefmt
 from future.utils import with_metaclass
 import sys
 import os
@@ -53,6 +55,27 @@ class ProteinEntryTests(unittest.TestCase):
         protein_entry = models.ProteinEntry.from_entry_nr(self.db, 12)
         protein_entry.cdna = "GCGAATAT"
         self.assertAlmostEqual(protein_entry.gc_content, 3.0 / 8.0)
+
+
+class ExonStructureTest(unittest.TestCase):
+    def get_exons(self):
+        loc_dtype = tablefmt.tables.dtype_from_descr(tablefmt.LocusTable)
+        return numpy.array([(1, 500, 510, 1), (1, 600, 610, 1)],
+                           dtype=loc_dtype)
+
+    def test_exon_struct_len(self):
+        ex = models.ExonStructure(None, self.get_exons())
+        self.assertEqual(2, len(ex))
+
+    def test_str_repr(self):
+        ex = models.ExonStructure(None, self.get_exons())
+        self.assertEqual("join(500..510, 600..610)", str(ex))
+
+    def test_str_repr_if_reverse_complement(self):
+        ex_dat = self.get_exons()
+        ex_dat['Strand'] = -1
+        ex = models.ExonStructure(None, ex_dat)
+        self.assertEqual("join(complement(600..610), complement(500..510))", str(ex))
 
 
 class GeneOntologyAnnotationTests(unittest.TestCase):

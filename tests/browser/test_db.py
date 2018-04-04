@@ -162,6 +162,11 @@ class DatabaseTests(unittest.TestCase):
     def test_fingerprint(self):
         fingerprint = 'ADRIANA'
 
+    def test_exon_structure(self):
+        query = 14677   # Q8I237
+        exons = self.db.get_exons(query)
+        self.assertEqual(3, len(exons))
+
 
 class XRefDatabaseMock(Database):
     def __init__(self):

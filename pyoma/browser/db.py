@@ -590,6 +590,11 @@ class Database(object):
     def get_release_name(self):
         return str(self.db.get_node_attr('/', 'oma_version'))
 
+    def get_exons(self, entry_nr):
+        genome = self.id_mapper['OMA'].genome_of_entry_nr(entry_nr)['UniProtSpeciesCode'].decode()
+        locus_tab = self.db.get_node('/Protein/Locus/{}'.format(genome))
+        return locus_tab.read_where('EntryNr == {}'.format(entry_nr))
+
     def get_domains(self, entry_nr):
         try:
             return self.db.root.Annotations.Domains.read_where('EntryNr == {:d}'.format(entry_nr))

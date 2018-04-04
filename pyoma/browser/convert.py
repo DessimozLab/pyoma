@@ -516,6 +516,7 @@ class DarwinExporter(object):
                                         tables.StringAtom(1), (0,), 'concatenated cDNA sequences',
                                         expectedrows=3 * nrAA + nrProt)
         seqOff = cdnaOff = 0
+        loc_parser = locus_parser.LocusParser()
         for gs in gsNode.iterrows():
             genome = gs['UniProtSpeciesCode'].decode()
             cache_file = os.path.join(
@@ -551,12 +552,16 @@ class DarwinExporter(object):
 
                 locus_str = data['locs'][nr]
                 try:
-                    locus_tab = locus_parser.parse(eNr, locus_str)
+                    locus_tab = loc_parser.parse(locus_str, eNr)
                     locTab.append(locus_tab)
+                    len_cds = sum(z['End'] - z['Start']+1 for z in locus_tab)
+                    if len_cds != protTab.row['CDNABufferLength']-1:
+                        self.logger.warning("sum of exon lengths differ with cdna sequence for {}: {} vs {}"
+                                            .format(eNr, len_cds, protTab.row['CDNABufferLength']-1))
 
-                    protTab.row['LocusStart'] = locus_tab.Start.min()
-                    protTab.row['LocusEnd'] = locus_tab.End.max()
-                    protTab.row['LocusStrand'] = locus_tab[0].Strand
+                    protTab.row['LocusStart'] = locus_tab['Start'].min()
+                    protTab.row['LocusEnd'] = locus_tab['End'].max()
+                    protTab.row['LocusStrand'] = locus_tab[0]['Strand']
                 except ValueError as e:
                     self.logger.warning(e)
                 protTab.row['SubGenome'] = data['subgenome'][nr].encode('ascii')

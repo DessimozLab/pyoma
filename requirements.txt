@@ -10,6 +10,7 @@ pandas
 matplotlib
 scikit-learn
 scikit-fuzzy
+lark-parser
 --no-binary pyopa pyopa
 
 -e git+ssh://gitolite@lab.dessimoz.org:2222/family-analyzer@master#egg=familyanalyzer

@@ -14,9 +14,10 @@ and create a numpy recarray out of it. """
 
 Exon = collections.namedtuple('Exon', ['start', 'end', 'strand'])
 
-grammar = '''?locus : join | complement | location
+grammar = '''?locus : join | complement | complement_join | location
              join  : "join" "(" (complement | location ) ("," (complement | location ))+ ")"
              complement : "complement" "(" location ")"
+             complement_join : "complement" "(" "join" "(" location ("," location)+ ")" ")"
              location : pos [".." pos]
              ?pos : num | "Before" "(" num ")" | "After" "(" num ")"
              ?num : NUMBER      -> number
@@ -39,6 +40,9 @@ class LocusTransformer(Transformer):
             return rev[0]
         else:
             return rev
+
+    def complement_join(self, value):
+        return self.complement(value)
 
     def join(self, values):
         return values

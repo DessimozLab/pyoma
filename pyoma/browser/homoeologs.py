@@ -148,6 +148,7 @@ class HomeologsConfidenceCalculator(object):
         self.genome_df.reset_index(inplace=True)
         self.relations_df = self._load_pairwise_relations()
 
+
     def _load_pairwise_relations(self):
         """load the homoeologous relations of the cannonical splice variants only
         The method returns a pandas dataframe with the relations."""
@@ -162,7 +163,7 @@ class HomeologsConfidenceCalculator(object):
     def _augment_dataframe_with_all_features(self, df):
         counts = self._count_homeologs_per_entry(df)
         df['TotalCopyNr'] = df.apply(lambda x: counts[x['EntryNr1']] + counts[x['EntryNr2']], axis=1)
-        df.iloc[df.SyntenyConservationLocal < 0, ['SyntenyConservationLocal']] = 0
+        df.loc[df.SyntenyConservationLocal < 0, 'SyntenyConservationLocal'] = 0
         return df
 
     def calculate_scores(self):
@@ -189,8 +190,8 @@ class HomeologsConfidenceCalculator(object):
 
         df['fuzzy_confidence'] = df.apply(defuzzify, axis=1)
 
-        # scale the confidence between 0 and 100
-        min_max_scaler = sklearn.preprocessing.MinMaxScaler(feature_range=(0, 100))
+        # scale the confidence between minimum value and 100
+        min_max_scaler = sklearn.preprocessing.MinMaxScaler(feature_range=(df['fuzzy_confidence'].min(), 100))
         df['fuzzy_confidence_scaled'] = min_max_scaler.fit_transform(df['fuzzy_confidence'].values.reshape(-1, 1))
         return df
 

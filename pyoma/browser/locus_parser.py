@@ -17,8 +17,7 @@ Exon = collections.namedtuple('Exon', ['start', 'end', 'strand'])
 grammar = '''?locus : join | complement | location
              join  : "join" "(" (complement | location ) ("," (complement | location ))+ ")"
              complement : "complement" "(" location ")"
-             ?location : range | pos
-             ?range : pos ".." pos
+             location : pos [".." pos]
              ?pos : num | "Before" "(" num ")" | "After" "(" num ")"
              ?num : NUMBER      -> number
              
@@ -31,8 +30,8 @@ class LocusTransformer(Transformer):
     def number(self, vals):
         return int(vals[0])
 
-    def range(self, value):
-        return Exon(value[0], value[1], 1)
+    def location(self, value):
+        return Exon(value[0], value[1] if len(value) > 1 else value[0], 1)
 
     def complement(self, value):
         rev = [e._replace(strand=-1*e.strand) for e in value]

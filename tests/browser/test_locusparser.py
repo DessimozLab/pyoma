@@ -54,3 +54,9 @@ class LocusParserTest(unittest.TestCase):
         lp = locus_parser.LocusParser()
         res = lp.parse(s, eNr)
         self.verifyResult(res, eNr, 316, 18057347, 18329692, 1)
+
+    def test_exon_with_single_nuc(self):
+        s, eNr = "join(complement(351224..351421), complement(350821..350825), complement(350585..350789), complement(350552), complement(349876..350415), complement(348297..349785), complement(347837..348173))", 6584010
+        lp = locus_parser.LocusParser()
+        res = lp.parse(s, eNr)
+        self.verifyResult(res, eNr, 7, 347837, 351421, -1)

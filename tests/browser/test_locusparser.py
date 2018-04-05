@@ -60,3 +60,9 @@ class LocusParserTest(unittest.TestCase):
         lp = locus_parser.LocusParser()
         res = lp.parse(s, eNr)
         self.verifyResult(res, eNr, 7, 347837, 351421, -1)
+
+    def test_non_local_coordinates(self):
+        s, eNr = "join(complement(FromElsewhere('AOTI010129901.1',540..627)),complement(406..534))", 88
+        lp = locus_parser.LocusParser()
+        res = lp.parse(s, eNr)
+        self.verifyResult(res, eNr, 2, 406, 627, -1)

@@ -150,7 +150,7 @@ class DatabaseTests(unittest.TestCase):
 
             s = self.db.get_sequence(enr)[ii:jj]
             self.assertTrue((enr in {z[0] for z in self.db.seq_search.search(s, is_sanitised=True)[1]}),
-                            'exact search for entry {} failed.'.format(i))
+                            'exact search for entry {}[{}:{}] failed.'.format(i, ii, jj))
 
     def test_oma_group_from_numeric_id(self):
         group_id = 5

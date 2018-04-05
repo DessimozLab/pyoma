@@ -75,7 +75,7 @@ class XRefParsingTest(unittest.TestCase):
     def test_descriptions_passed_to_description_manager(self):
         self.db_parser.parse_entrytags(self.data)
         self.assertEqual(len(self.desc_manager.add_description.call_args_list), 2)
-        self.assertEqual((3,u'β-hemoglobin'), self.desc_manager.add_description.call_args[0])
+        self.assertEqual((3, u'β-hemoglobin'), self.desc_manager.add_description.call_args[0])
 
 
 class DescriptionManagerTest(unittest.TestCase):
@@ -123,7 +123,7 @@ class DescriptionManagerTest(unittest.TestCase):
 
 
 class TestGeneOntologyManager(pyoma.GeneOntologyManager):
-    ontology_url = "file://" + os.path.dirname(__file__ ) + "/go-basic-tiny.obo"
+    ontology_url = "file://" + os.path.dirname(__file__) + "/go-basic-tiny.obo"
 
 
 class GeneOntologyManagerTest(unittest.TestCase):
@@ -132,7 +132,7 @@ class GeneOntologyManagerTest(unittest.TestCase):
                                   driver_core_backing_store=0)
 
     def tearDown(self):
-        self.h5file.close();
+        self.h5file.close()
 
     def store_and_retrieve_data(self, enr, gos):
         with TestGeneOntologyManager(self.h5file, '/Annotation/GO', '/obo') as man:

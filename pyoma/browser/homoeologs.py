@@ -194,20 +194,42 @@ class HomeologsConfidenceCalculator(object):
         return df
 
 
+class HomeologsConfidenceCalculatorFromTSV(HomeologsConfidenceCalculator):
+    def __init__(self, infile):
+        self.relations_df = pandas.read_csv(infile, sep='\t')
+        expected_columns = ['EntryNr1', 'EntryNr2', 'SyntenyConservationLocal', 'Distance']
+        if len(set(expected_columns) - set(self.relations_df.columns.values)) > 0:
+            raise KeyError("provided inputfile does not have all expected columns. "
+                           "Expected columns are {}".format(expected_columns))
+
+
 if __name__ == "__main__":
     import argparse
     # Get arguments from command line
     parser = argparse.ArgumentParser(
         description='Computes homoeology confidence score using fuzzy logic')
-    parser.add_argument('--h5', help='name of h5 file, full path', required=True)
-    parser.add_argument('--genome', help='5 letter code of polyploid genome to analyze')
-    parser.add_argument('--outfile', help='name where results will be stored (file name created to include parameters)', \
+    grp = parser.add_mutually_exclusive_group(required=True)
+    grp.add_argument('--h5', help="name of hdf5 file, full path")
+    grp.add_argument('--csv', help="tab-separated file with input data as alternative to hdf5 file")
+    parser.add_argument('--genome',
+                        help="5 letter code of polyploid genome to analyze. "
+                             "Must be specified if used with --h5 option.")
+    parser.add_argument('--outfile',
+                        help="name where results will be stored (file name created to include parameters)",
                         default="homoeolog_confidence.tsv")
 
     args = parser.parse_args()
-    h5file_path = args.h5
     logging.basicConfig(level=logging.INFO)
 
-    scorer = HomeologsConfidenceCalculator(tables.open_file(h5file_path), args.genome)
+    if args.h5 is not None and args.genome is None:
+        import sys
+        sys.stderr.write("genomes argument required if using with an hdf5 file as input")
+        sys.exit(1)
+
+    if args.h5:
+        import tables
+        scorer = HomeologsConfidenceCalculator(tables.open_file(args.h5), args.genome)
+    else:
+        scorer = HomeologsConfidenceCalculatorFromTSV(args.csv)
     data = scorer.calculate_scores()
     data.to_csv(args.outfile, sep='\t', header=True, index=True)

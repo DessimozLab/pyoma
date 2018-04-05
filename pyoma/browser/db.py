@@ -1191,20 +1191,43 @@ class Taxonomy(object):
             res = it
         return res
 
-    def get_induced_taxonomy(self, members, collapse=True):
+    def get_induced_taxonomy(self, members, collapse=True, augment_parents=False):
         """Extract the taxonomy induced by a given set of `members`.
 
-        This method allows to extract the part which is induced bay a
+        This method allows to extract the part which is induced by a
         given set of levels and leaves that should be part of the
         new taxonomy. `members` must be an iterable, the levels
         must be either numeric taxids or scientific names.
 
+        Unless `augment_parents` is set to true, the resulting sub-taxonomy
+        will only contain levels that are specified in `members`. If
+        `augment_parents` is set to True, also all parent nodes of the
+        levels passed in members are considered for the sub-taxonomy.
+
         :param iter members: an iterable containing the levels
             and leaves that should remain in the new taxonomy. can be
             either axonomic ids or scientific names.
+
         :param bool collapse: whether or not levels with only one child
-            should be skipped or not. This defaults to True"""
+            should be skipped or not. This defaults to True
+
+        :param bool augment_parents: whether or not to consider parent
+            levels of members for the resulting taxonomy."""
+
         taxids_to_keep = numpy.sort(self._get_taxids_from_any(members))
+        if augment_parents:
+            # find all the parents of all the members, add them to taxids_to_keep
+            additional_levels = set([])
+            for cur_tax in taxids_to_keep:
+                try:
+                    additional_levels.update(set(self.get_parent_taxa(cur_tax)['NCBITaxonId']))
+                except KeyError:
+                    logger.info("{} seems not to exist in Taxonomy".format(cur_tax))
+                    pass
+            # add and remove duplicates
+            all_levels = numpy.append(taxids_to_keep, list(additional_levels))
+            taxids_to_keep = numpy.unique(all_levels)
+
         idxs = numpy.searchsorted(self.tax_table['NCBITaxonId'], taxids_to_keep, sorter=self.taxid_key)
         idxs = numpy.clip(idxs, 0, len(self.taxid_key) - 1)
         subtaxdata = self.tax_table[self.taxid_key[idxs]]

@@ -255,9 +255,17 @@ class TaxonomyTest(unittest.TestCase):
     def test_induced_tax_simple_subtree(self):
         members = [559292, 284811]
         phylo = self.tax.get_induced_taxonomy(members)
+        expected = {"id": 0, "name": "LUCA", "children": [
+                        {"id": 284811, "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)"},
+                        {"id": 559292, "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"}]}
+        self.assertEqual(expected, phylo.as_dict())
+
+    def test_induced_tax_with_parents_subtree(self):
+        members = [559292, 284811]
+        phylo = self.tax.get_induced_taxonomy(members, augment_parents=True)
         expected = {"id": 4893, "name": "Saccharomycetaceae", "children": [
-                        {"id":284811, "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)"},
-                        {"id":559292, "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"}]}
+                        {"id": 284811, "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)"},
+                        {"id": 559292, "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"}]}
         self.assertEqual(expected, phylo.as_dict())
 
     def test_induced_tax_with_gaps(self):

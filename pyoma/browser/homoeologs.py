@@ -1,12 +1,11 @@
 import pandas
-import tables
 import logging
 import collections
 import numpy as np
-import skfuzzy as fuzz
 from skfuzzy import control as ctrl
+from skfuzzy import gaussmf
 import sklearn
-from sklearn import preprocessing
+import sklearn.preprocessing
 
 try:
     from tqdm import tqdm
@@ -73,13 +72,13 @@ def create_fuzzy_rules(distance, synteny, total_nb_hom, conf):
 
 def get_distance_mf(df, distance):
     # here, the first numnber is the universe, second number the central point, third the standard deviation
-    distance['low'] = fuzz.gaussmf(distance.universe, 0, (df['Distance'].max() / 10))
+    distance['low'] = gaussmf(distance.universe, 0, (df['Distance'].max() / 10))
 
-    distance['med'] = fuzz.gaussmf(distance.universe,
+    distance['med'] = gaussmf(distance.universe,
                                    (df['Distance'].max() / 4),
                                    (df['Distance'].max() / 10))
 
-    distance['high'] = fuzz.gaussmf(distance.universe,
+    distance['high'] = gaussmf(distance.universe,
                                     df['Distance'].max(),
                                     (df['Distance'].max() / 2.5))
     return distance
@@ -87,22 +86,22 @@ def get_distance_mf(df, distance):
 
 def get_synteny_mf(df, synteny, view=False):
     # synteny (gaussian)
-    synteny['low'] = fuzz.gaussmf(synteny.universe, 0, .15)
-    synteny['med'] = fuzz.gaussmf(synteny.universe, .3, .15)
-    synteny['high'] = fuzz.gaussmf(synteny.universe, .7, .25)
+    synteny['low'] = gaussmf(synteny.universe, 0, .15)
+    synteny['med'] = gaussmf(synteny.universe, .3, .15)
+    synteny['high'] = gaussmf(synteny.universe, .7, .25)
     return synteny
 
 
 def get_total_nb_hom_mf(df, total_nb_hom):
     copy_nr_median = df['TotalCopyNr'].median()
-    total_nb_hom['low'] = fuzz.gaussmf(total_nb_hom.universe,
+    total_nb_hom['low'] = gaussmf(total_nb_hom.universe,
                                        copy_nr_median, copy_nr_median)
 
-    total_nb_hom['med'] = fuzz.gaussmf(total_nb_hom.universe,
+    total_nb_hom['med'] = gaussmf(total_nb_hom.universe,
                                        4 * copy_nr_median,
                                        1.5 * copy_nr_median)
 
-    total_nb_hom['high'] = fuzz.gaussmf(total_nb_hom.universe,
+    total_nb_hom['high'] = gaussmf(total_nb_hom.universe,
                                         df['TotalCopyNr'].max(),
                                         df['TotalCopyNr'].max() / 2.5)
     return total_nb_hom
@@ -110,11 +109,11 @@ def get_total_nb_hom_mf(df, total_nb_hom):
 
 def get_conf_mf(df, conf):
     # confidence (gaussian)
-    conf['very_low'] = fuzz.gaussmf(conf.universe, 0, 20)
-    conf['low'] = fuzz.gaussmf(conf.universe, 50, 10)
-    conf['med'] = fuzz.gaussmf(conf.universe, 70, 10)
-    conf['high'] = fuzz.gaussmf(conf.universe, 90, 10)
-    conf['very_high'] = fuzz.gaussmf(conf.universe, 100, 10)
+    conf['very_low'] = gaussmf(conf.universe, 0, 20)
+    conf['low'] = gaussmf(conf.universe, 50, 10)
+    conf['med'] = gaussmf(conf.universe, 70, 10)
+    conf['high'] = gaussmf(conf.universe, 90, 10)
+    conf['very_high'] = gaussmf(conf.universe, 100, 10)
     return conf
 
 
@@ -148,7 +147,6 @@ class HomeologsConfidenceCalculator(object):
         self.genome_df.reset_index(inplace=True)
         self.relations_df = self._load_pairwise_relations()
 
-
     def _load_pairwise_relations(self):
         """load the homoeologous relations of the cannonical splice variants only
         The method returns a pandas dataframe with the relations."""
@@ -168,7 +166,7 @@ class HomeologsConfidenceCalculator(object):
 
     def calculate_scores(self):
         # load dataframe
-        df = self._load_pairwise_relations()
+        df = self.relations_df
         df = self._augment_dataframe_with_all_features(df)
 
         distanceObj, syntenyObj, total_nb_homObj, confObj = define_universe(df)
@@ -196,20 +194,42 @@ class HomeologsConfidenceCalculator(object):
         return df
 
 
+class HomeologsConfidenceCalculatorFromTSV(HomeologsConfidenceCalculator):
+    def __init__(self, infile):
+        self.relations_df = pandas.read_csv(infile, sep='\t')
+        expected_columns = ['EntryNr1', 'EntryNr2', 'SyntenyConservationLocal', 'Distance']
+        if len(set(expected_columns) - set(self.relations_df.columns.values)) > 0:
+            raise KeyError("provided inputfile does not have all expected columns. "
+                           "Expected columns are {}".format(expected_columns))
+
+
 if __name__ == "__main__":
     import argparse
     # Get arguments from command line
     parser = argparse.ArgumentParser(
         description='Computes homoeology confidence score using fuzzy logic')
-    parser.add_argument('--h5', help='name of h5 file, full path', required=True)
-    parser.add_argument('--genome', help='5 letter code of polyploid genome to analyze')
-    parser.add_argument('--outfile', help='name where results will be stored (file name created to include parameters)', \
+    grp = parser.add_mutually_exclusive_group(required=True)
+    grp.add_argument('--h5', help="name of hdf5 file, full path")
+    grp.add_argument('--csv', help="tab-separated file with input data as alternative to hdf5 file")
+    parser.add_argument('--genome',
+                        help="5 letter code of polyploid genome to analyze. "
+                             "Must be specified if used with --h5 option.")
+    parser.add_argument('--outfile',
+                        help="name where results will be stored (file name created to include parameters)",
                         default="homoeolog_confidence.tsv")
 
     args = parser.parse_args()
-    h5file_path = args.h5
     logging.basicConfig(level=logging.INFO)
 
-    scorer = HomeologsConfidenceCalculator(tables.open_file(h5file_path), args.genome)
+    if args.h5 is not None and args.genome is None:
+        import sys
+        sys.stderr.write("genomes argument required if using with an hdf5 file as input")
+        sys.exit(1)
+
+    if args.h5:
+        import tables
+        scorer = HomeologsConfidenceCalculator(tables.open_file(args.h5), args.genome)
+    else:
+        scorer = HomeologsConfidenceCalculatorFromTSV(args.csv)
     data = scorer.calculate_scores()
     data.to_csv(args.outfile, sep='\t', header=True, index=True)

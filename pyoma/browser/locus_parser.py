@@ -18,9 +18,10 @@ grammar = '''?locus : join | complement | complement_join | location
              join  : "join" "(" (complement | location ) ("," (complement | location ))+ ")"
              complement : "complement" "(" location ")"
              complement_join : "complement" "(" "join" "(" location ("," location)+ ")" ")"
-             location : pos [".." pos]
+             location : pos [".." pos ] | "FromElsewhere" "('" _SEQID "'," pos [".." pos] ")" 
              ?pos : num | "Before" "(" num ")" | "After" "(" num ")"
              ?num : NUMBER      -> number
+             _SEQID: /[A-Za-z0-9._-]+/
              
              %import common.NUMBER
              %import common.WS

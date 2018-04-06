@@ -117,6 +117,10 @@ class ProteinEntry(object):
     def strand(self):
         return int(self._entry['LocusStrand'])
 
+    @LazyProperty
+    def exons(self):
+        return ExonStructure.from_entry_nr(self._db, self.entry_nr)
+
     @property
     def oma_group(self):
         return int(self._entry['OmaGroup'])

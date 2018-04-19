@@ -1493,7 +1493,8 @@ class LinkoutIdMapper(XrefIdMapper):
         super(LinkoutIdMapper, self).__init__(db)
         self.idtype = frozenset([self.xrefEnum[z]
                                  for z in ['UniProtKB/SwissProt', 'UniProtKB/TrEMBL',
-                                           'Ensembl Protein', 'EntrezGene']])
+                                           'Ensembl Protein', 'Ensembl Gene',
+                                           'EntrezGene']])
 
     def url(self, typ, id_):
         # TODO: improve url generator in external module with all xrefs

@@ -125,7 +125,8 @@ def import_oma_run(path, outfile, add_domains=True):
         domain_url = 'file:///dev/null'
     x.add_domain_info(only_pfam_or_cath_domains(iter_domains(domain_url)))
     x.add_domainname_info(itertools.chain(
-        CathDomainNameParser('ftp://ftp.biochem.ucl.ac.uk/pub/cath/latest_release/CathNames').parse(),
+        CathDomainNameParser('http://download.cathdb.info/cath/releases/latest-release/'
+                             'cath-classification-data/cath-names.txt').parse(),
         PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
     x.add_canonical_id()
     x.add_group_metadata()
@@ -134,6 +135,8 @@ def import_oma_run(path, outfile, add_domains=True):
 
     x = StandaloneExporter(path, outfile, logger=log)
     x.create_indexes()
+    x.add_sequence_suffix_array()
+    x.update_summary_stats()
     x.close()
 
 

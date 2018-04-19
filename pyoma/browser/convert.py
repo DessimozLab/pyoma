@@ -1138,10 +1138,11 @@ def download_url_if_not_present(url):
     if not os.path.exists(tmpfolder):
         os.makedirs(tmpfolder)
     if not os.path.exists(fname):
+        common.package_logger.info("downloading {} into {}".format(url, fname))
         try:
             urllib.request.urlretrieve(url, fname)
         except urllib.request.URLError:
-            common.package_logger.warn('cannot access domain url')
+            common.package_logger.warn('cannot download {}'.format(url))
     return fname
 
 
@@ -1615,7 +1616,7 @@ class DarwinDbEntryParser:
         for line in fh:
             line = line.strip()
             if not line.startswith('<E>'):
-                common.package_logger.debug('skipping line:' + line.encode('utf-8'))
+                common.package_logger.debug('skipping line:' + line)
                 continue
 
             eNr += 1

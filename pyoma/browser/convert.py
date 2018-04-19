@@ -581,7 +581,8 @@ class DarwinExporter(object):
         protTab.cols.MD5ProteinHash.create_csindex(filters=self._compr)
 
     def _write_to_table(self, tab, data):
-        tab.append(data)
+        if len(data)>0:
+            tab.append(data)
         self.logger.info('wrote %s : compression ratio %.3f%%' %
                          (tab._v_pathname, 100 * tab.size_on_disk / tab.size_in_memory))
 
@@ -1016,12 +1017,11 @@ class DarwinExporter(object):
                 while (jj < len(sa)) and (seqs[sa[jj]:(sa[jj] + k)] == kmer):
                     jj += 1
                 kmer_lookup_arr.append(idx[ii:jj])
+                # New start
+                ii = jj
             else:
                 # End or not found
                 kmer_lookup_arr.append([])
-
-            # New start
-            ii = jj
 
         if db.filename != self.h5.filename:
             self.logger.info('storing external links to SequenceIndex and KmerLookup')

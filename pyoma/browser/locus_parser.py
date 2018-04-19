@@ -1,6 +1,6 @@
 import numpy
 import collections
-from lark import Lark, Transformer
+from lark import Lark, Transformer, ParseError
 from tables import dtype_from_descr
 from .tablefmt import LocusTable
 import logging
@@ -56,7 +56,10 @@ class LocusParser(object):
         self.dtype = dtype_from_descr(LocusTable)
 
     def parse(self, locus_string, entry_nr=0):
-        tree = self.parser.parse(locus_string)
+        try:
+            tree = self.parser.parse(locus_string)
+        except ParseError as e:
+            raise ValueError("cannot parse '{}' locus string".format(locus_string))
         data = self.locus_transformer.transform(tree)
         nr_exons = 1 if isinstance(data, Exon) else len(data)
         locus_data = numpy.empty(nr_exons, dtype=self.dtype)

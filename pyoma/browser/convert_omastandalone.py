@@ -65,7 +65,7 @@ class StandaloneExporter(DarwinExporter):
             os.environ['DARWIN_BROWSERDATA_PATH'],
             'EstimatedSpeciesTree.nwk')
 
-        hog_converter = StandaloneHogConverter(entryTab)
+        hog_converter = HogConverter(entryTab)
 
         if os.path.exists(tree_filename):
             hog_converter.attach_newick_taxonomy(tree_filename)
@@ -103,12 +103,6 @@ class StandaloneExporter(DarwinExporter):
 
     def xref_databases(self):
         return self._get_genome_database_paths()
-
-
-class StandaloneHogConverter(HogConverter):
-    def __init__(self, entry_tab):
-        super(StandaloneHogConverter, self).__init__(entry_tab)
-        self.fam_re = re.compile(r'(?P<fam_nr>\d+)')
 
 
 def import_oma_run(path, outfile, add_domains=True):

@@ -186,6 +186,8 @@ class OrthoXMLSplitter(object):
 
         groupsxml = etree.SubElement(etree_2_dump, "groups")
         for og_et in OGs:
+            if not og_et.get('id').startswith('HOG:'):
+                og_et.set('id', 'HOG:{:07d}'.format(int(og_et.get('id'))))
             groupsxml.append(og_et)
 
         tree = etree.ElementTree(etree_2_dump)

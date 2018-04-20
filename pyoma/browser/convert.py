@@ -1417,7 +1417,7 @@ class HogConverter(object):
         for fam in p.getToplevelGroups():
             m = self.fam_re.match(fam.get('og'))
             fam_nr = int(m.group('fam_nr'))
-            levs.extend([(fam_nr, n.getparent().get('og'), n.get('value'),)
+            levs.extend([(fam_nr, n.getparent().get('og'), n.get('value'),) + self.get_hog_scores(n.getparent())
                          for n in p._findSubNodes('property', root=fam)
                          if n.get('name') == "TaxRange"])
 
@@ -1429,8 +1429,27 @@ class HogConverter(object):
         return levs
 
     def write_hogs(self):
+        """update the Entry Table with the newly collected OmaHOG values for all
+        the proteins at once.
+
+        .. note: This method will overwrite any previous value of the OmaHOG column"""
         self.entry_tab.modify_column(0, len(self.entry_tab), 1, self.hogs[1:], 'OmaHOG')
         self.entry_tab.flush()
+
+    def get_hog_scores(self, og_node):
+        """extract the scores associated with an orthologGroup node
+
+        only scores that are defined in HOGsTable are extract. The method
+        returns a tuple with the scores in the order of the score fields."""
+        scores = collections.OrderedDict([(score, tablefmt.HOGsTable.columns[score].dflt)
+                                          for score in ('CompletenessScore', 'ImpliedLosses')])
+        for score in og_node.iterfind('{*}score'):
+            score_id = score.get("id")
+            if score_id == "CompletenessScore":
+                scores['CompletenessScore'] = float(score.get('value'))
+            elif score_id == "ImpliedLosses":
+                scores['ImpliedLosses'] = int(score.get('value'))
+        return tuple(scores.values())
 
 
 class XRefImporter(object):

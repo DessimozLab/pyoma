@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<orthoXML xmlns="http://orthoXML.org/2011/" version="0.3" origin="orthoXML.org" originVersion="1">
+  <species name="Homo sapiens" NCBITaxId="9606">
+    <database name="someDB" version="42">
+      <genes>
+        <gene id="1" geneId="hsa1" protId="hsa1" />
+      </genes>
+    </database>
+  </species>
+  <species name="Pan troglodytes" NCBITaxId="9598">
+    <database name="someDB" version="42">
+      <genes>
+        <gene id="2" geneId="ptr1"/>
+      </genes>
+    </database>
+  </species>
+  <species name="Mus musculus" NCBITaxId="10090">
+    <database name="someDB" version="42">
+      <genes>
+        <gene id="3" geneId="mmu1"/>
+        <gene id="4" geneId="mmu2"/>
+      </genes>
+    </database>
+  </species>
+  <species name="Rattus norvegicus" NCBITaxId="10116">
+    <database name="someDB" version="42">
+      <genes>
+        <gene id="5" geneId="rno1"/>
+        <gene id="6" geneId="rno2"/>
+      </genes>
+    </database>
+  </species>
+  <scores>
+    <scoreDef id="CompletenessScore" desc="fraction of genomes covered with at least one gene" />
+    <scoreDef id="ImpliedLosses" desc="number of losses needed to explain the group" />
+  </scores>
+  <groups>
+    <orthologGroup id="1">
+      <score id="ImpliedLosses" value="1" />
+      <property name="TaxRange" value="Mammalia" />
+      <orthologGroup>
+        <score id="ImpliedLosses" value="0" />
+        <score id="CompletenessScore" value="1.0" />
+        <property name="TaxRange" value="Primates" />
+        <geneRef id="1" />
+        <geneRef id="2" />
+      </orthologGroup>
+      <paralogGroup>
+        <orthologGroup>
+          <score id="ImpliedLosses" value="0" />
+          <score id="CompletenessScore" value="1" />
+          <property name="TaxRange" value="Rodents" />
+          <geneRef id="3" />
+          <geneRef id="5" />
+        </orthologGroup>
+        <geneRef id="4" />
+      </paralogGroup>
+    </orthologGroup>
+  </groups>
+</orthoXML>

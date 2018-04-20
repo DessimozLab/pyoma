@@ -17,6 +17,8 @@ class HOGsTable(tables.IsDescription):
     Fam = tables.Int32Col(pos=1)
     ID = tables.StringCol(255, pos=2)
     Level = tables.StringCol(255, pos=3)
+    CompletenessScore = tables.Float32Col(pos=4, dflt=-1)
+    ImpliedLosses = tables.Int32Col(pos=5, dflt=-1)
 
 
 class OrthoXmlHogTable(tables.IsDescription):

@@ -114,7 +114,8 @@ def import_oma_run(path, outfile, add_domains=True):
     x.add_proteins()
     x.add_hogs()
     x.add_xrefs()
-    domain_url = 'ftp://ftp.biochem.ucl.ac.uk/pub/gene3d_data/CURRENT_RELEASE/mdas.csv.gz'
+    domain_url = ('ftp://orengoftp.biochem.ucl.ac.uk/gene3d/CURRENT_RELEASE/'+
+                  'representative_uniprot_genome_assignments.csv.gz')
     if not add_domains:
         domain_url = 'file:///dev/null'
     x.add_domain_info(only_pfam_or_cath_domains(iter_domains(domain_url)))

@@ -730,15 +730,19 @@ class DarwinExporter(object):
             if xref['EntryNr'] != current_protein:
                 if current_protein:
                     past_proteins.add(current_protein)
-                    yield (current_protein, current_xrefs.pop()[1])
+                    yield (current_protein, current_xref[1])
                 current_protein = xref['EntryNr']
-                current_xrefs = [(1000, b'')]  # init with a sentinel
+                current_xref = (1000, b'')  # init with a sentinel
                 if current_protein in past_proteins:
-                    raise DataImportError('Data in /XRef is not sorted w.r.t. EntryNr')
-            if xref['XRefSource'] in canonical_sources and xref['XRefSource'] < current_xrefs[-1][0]:
-                current_xrefs.append((xref['XRefSource'], xref['XRefId']))
+                    raise DataImportError('Data in /XRef is not grouped w.r.t. EntryNr')
+            try:
+                rank = canonical_sources.index(xref['XRefSource'])
+                if rank < current_xref[0]:
+                    current_xref = (rank, xref['XRefId'])
+            except ValueError:
+                pass
         if current_protein:
-            yield (current_protein, current_xrefs.pop()[1])
+            yield (current_protein, current_xref[1])
 
     def add_canonical_id(self):
         """add one canonical xref id to the /Protein/Entries table."""

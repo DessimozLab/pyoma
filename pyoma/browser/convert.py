@@ -1156,10 +1156,34 @@ def iter_domains(url):
 
     fname = download_url_if_not_present(url)
     with gzip.open(fname, 'rt') as uncompressed:
-        csv_reader = csv.reader(uncompressed)
+        dialect = csv.Sniffer().sniff(uncompressed.read(4096))
+        uncompressed.seek(0)
+        csv_reader = csv.reader(uncompressed, dialect)
+        col_start, col_end = None, None
         for lineNr, row in enumerate(csv_reader):
+            if col_start is None:
+                # identify which tuples to use.
+                if len(row) >= 9:
+                    # representative_proteins format. use columns 5-7
+                    col_start, col_end = 4, 7
+                elif len(row) == 3:
+                    # additionally created ones, minimal format
+                    col_start, col_end = 0, 3
+                else:
+                    raise DataImportError("Unknown Domain Annotation format in {}".format(uncompressed.filename))
             try:
-                dom = DomainTuple(*row[0:3])
+                dom = DomainTuple(*row[col_start:col_end])
+                if lineNr < 10:
+                    # do some sanity checks on the first few lines
+                    if re.match(r'[0-9a-f]{32}$', dom.md5) is None:
+                        raise DataImportError("md5 hash of line {:d} has unexpected values: {}"
+                                              .format(lineNr, dom.md5))
+                    if re.match(r'([1-4]\.\d+\.\d+\.\d+|PF\d+)$', dom.id) is None:
+                        raise DataImportError("Domain-ID of line {:d} has unexpected value: {}"
+                                              .format(lineNr, dom.id))
+                    if re.match(r'\d+-\d+', dom.coords) is None:
+                        raise DataImportError("Domain coordinates in line {:d} has unexpected value: {}"
+                                              .format(lineNr, dom.coords))
                 yield dom
             except Exception:
                 common.package_logger.exception('cannot create tuple from line {}'.format(lineNr))
@@ -1762,7 +1786,8 @@ def main(name="OmaServer.h5", k=6, idx_name=None):
     x.add_synteny_scores()
     x.add_homoeology_confidence()
     x.add_domain_info(only_pfam_or_cath_domains(itertools.chain(
-        iter_domains('http://download.cathdb.info/gene3d/CURRENT_RELEASE/mdas.csv.gz'),
+        iter_domains('ftp://orengoftp.biochem.ucl.ac.uk/gene3d/CURRENT_RELEASE/' +
+                     'representative_uniprot_genome_assignments.csv.gz'),
         iter_domains('file://{}/additional_domains.mdas.csv.gz'.format(os.getenv('DARWIN_BROWSERDATA_PATH', '')))
     )))
     x.add_domainname_info(itertools.chain(

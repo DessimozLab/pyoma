@@ -718,7 +718,8 @@ class DarwinExporter(object):
         We take the first valid xref per gene with the ordering of xrefsources
         as given in the xrefsource_order."""
         xrefsource_order = ('UniProtKB/SwissProt', 'UniProtKB/TrEMBL',
-                            'Ensembl Gene', 'Ensembl Protein', 'FlyBase',)
+                            'Ensembl Gene', 'Ensembl Protein', 'FlyBase',
+                            'WormBase', 'RefSeq', 'SourceID')
 
         xrefs = self.h5.get_node('/XRef')
         source_enum = xrefs.get_enum('XRefSource')
@@ -1502,6 +1503,7 @@ class XRefImporter(object):
         self.ENS_RE = re.compile(r'ENS(?P<species>[A-Z]{0,3})(?P<typ>[GTP])(?P<num>\d{11})')
         self.FB_RE = re.compile(r'FB(?P<typ>[gnptr]{2})(?P<num>\d{7})')
         self.NCBI_RE = re.compile(r'[A-Z]{3}\d{5}\.\d$')
+        self.WB_RE = re.compile(r'WBGene\d{8}$')
         self.EC_RE = re.compile(r'\d+\.(\d+|-)\.(\d+|-)\.(\d+|-)')
 
     def flush_buffers(self):
@@ -1551,7 +1553,7 @@ class XRefImporter(object):
                     'ensembl: ({}, {}, {})'.format(key, typ, enum_nr))
                 self._add_to_xrefs(eNr, enum_nr, key, 'exact')
 
-            for enum, regex in {'FlyBase': self.FB_RE, 'NCBI': self.NCBI_RE}.items():
+            for enum, regex in {'FlyBase': self.FB_RE, 'NCBI': self.NCBI_RE, 'WormBase': self.WB_RE}.items():
                 match = regex.match(key)
                 if match is not None:
                     enum_nr = self.xrefEnum[enum]

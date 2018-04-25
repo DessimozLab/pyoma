@@ -666,7 +666,21 @@ class Database(object):
 
         return fam_row, sim_fams_df
 
-    def get_gene_ontology_annotations(self, entry_nr, as_dataframe=False, as_gaf=False):
+    def get_gene_ontology_annotations(self, entry_nr, stop=None, as_dataframe=False, as_gaf=False):
+        """Retrieve the gene ontology annotations for an entry or entry_range
+
+        The method returns the gene ontology annotations stored in the database
+        for a given entry (if `stop` parameter is not provided) or for all the
+        entries between [entry_nr, stop). Like in slices, the stop entry_nr is
+        not inclusive, where as the entry_nr - the start of the slice - is.
+
+        By default the result are returned as numpy arrays of type
+        :class:`tablefmt.GeneOntologyTable`. If as_dataframe is set to true, the
+        result will be a pandas dataframe, and if as_gaf is set to true, a gaf
+        formatted text file with the annotations is returned.
+
+        :param int entry_nr: numeric protein entry
+        """
         # function to check if an annotation term is obsolete
         def filter_obsolete_terms(term):
             try:
@@ -675,7 +689,13 @@ class Database(object):
             except (KeyError, ValueError):
                 return False
         try:
-            annots = self.db.root.Annotations.GeneOntology.read_where('EntryNr == {:d}'.format(entry_nr))
+            if stop is None:
+                query = 'EntryNr == {:d}'.format(entry_nr)
+            else:
+                if not isinstance(stop, int) or stop < entry_nr:
+                    raise TypeError("stop argument needs to be a entry number that is larger than 'entry_nr'")
+                query = '(EntryNr >= {:d}) & (EntryNr < {:d})'.format(entry_nr, stop)
+            annots = self.db.root.Annotations.GeneOntology.read_where(query)
 
             # for test database we also have some obsolete terms. we need to filter those
             if len(annots) > 0:

@@ -89,12 +89,17 @@ class Database(object):
 
     @LazyProperty
     def gene_ontology(self):
+        return self.load_gene_ontology(GeneOntology)
+
+    def load_gene_ontology(self, factory=None):
         try:
             fp = io.StringIO(self.db.root.Ontologies.GO.read().tobytes().decode('utf-8'))
         except tables.NoSuchNodeError:
             p = os.path.join(os.path.dirname(self.db.filename), 'go-basic.obo')
             fp = open(p, 'rt')
-        go = GeneOntology(OntologyParser(fp))
+        if factory is None:
+            factory = GeneOntology
+        go = factory(OntologyParser(fp))
         go.parse()
         fp.close()
         return go

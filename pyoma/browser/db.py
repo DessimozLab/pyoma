@@ -171,6 +171,12 @@ class Database(object):
             return
         raise DBConsistencyError('no protein in a hog')
 
+    def all_proteins_of_genome(self, genome):
+        """return all protein entries of a genome"""
+        rng = self.id_mapper['OMA'].genome_range(genome)
+        prot_tab = self.get_hdf5_handle().get_node('/Protein/Entries')
+        return prot_tab.read_where('(EntryNr >= {}) & (EntryNr <= {})'.format(rng[0], rng[1]))
+
     def main_isoforms(self, genome):
         """returns the proteins that are the main isoforms of a genome.
 

@@ -1136,7 +1136,12 @@ class DarwinExporter(object):
         tab.flush()  # Required?
 
 
-def download_url_if_not_present(url):
+def download_url_if_not_present(url, force_copy=False):
+    if url.startswith('file://') and not force_copy:
+        fname = url[len('file://'):]
+        if os.path.exists(fname):
+            common.package_logger.info('using file "{}" directly from source without copying.'.format(url))
+            return fname
     tmpfolder = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH', '/tmp'), "Browser", "xref")
     basename = url.split('/')[-1]
     fname = os.path.join(tmpfolder, basename)

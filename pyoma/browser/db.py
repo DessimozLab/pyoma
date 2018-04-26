@@ -91,7 +91,7 @@ class Database(object):
     def gene_ontology(self):
         return self.load_gene_ontology(GeneOntology)
 
-    def load_gene_ontology(self, factory=None):
+    def load_gene_ontology(self, factory=None, rels=None):
         try:
             fp = io.StringIO(self.db.root.Ontologies.GO.read().tobytes().decode('utf-8'))
         except tables.NoSuchNodeError:
@@ -99,7 +99,7 @@ class Database(object):
             fp = open(p, 'rt')
         if factory is None:
             factory = GeneOntology
-        go = factory(OntologyParser(fp))
+        go = factory(OntologyParser(fp), rels=rels)
         go.parse()
         fp.close()
         return go

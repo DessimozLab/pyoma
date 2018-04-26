@@ -1196,6 +1196,20 @@ def only_pfam_or_cath_domains(iterable):
             yield dom
 
 
+def filter_duplicated_domains(iterable):
+    """filter duplicated domain annotations that come from different proteins
+    with the exact same sequence."""
+    seen = set([])
+    ignored = 0
+    for dom in iterable:
+        if not dom in seen:
+            seen.add(dom)
+            yield dom
+        else:
+            ignored += 1
+    common.package_logger.info("skipped {} duplicated domains. {} distinct domains yielded"
+                               .format(ignored, len(seen)))
+
 class OmaGroupMetadataLoader(object):
     keyword_name = "Keywords.drw"
     finger_name = "Fingerprints"
@@ -1785,11 +1799,11 @@ def main(name="OmaServer.h5", k=6, idx_name=None):
     x.add_xrefs()
     x.add_synteny_scores()
     x.add_homoeology_confidence()
-    x.add_domain_info(only_pfam_or_cath_domains(itertools.chain(
+    x.add_domain_info(filter_duplicated_domains(only_pfam_or_cath_domains(itertools.chain(
         iter_domains('ftp://orengoftp.biochem.ucl.ac.uk/gene3d/CURRENT_RELEASE/' +
                      'representative_uniprot_genome_assignments.csv.gz'),
         iter_domains('file://{}/additional_domains.mdas.csv.gz'.format(os.getenv('DARWIN_BROWSERDATA_PATH', '')))
-    )))
+    ))))
     x.add_domainname_info(itertools.chain(
         CathDomainNameParser('http://download.cathdb.info/cath/releases/latest-release/'
                              'cath-classification-data/cath-names.txt').parse(),

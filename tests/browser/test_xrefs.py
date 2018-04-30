@@ -13,15 +13,25 @@ from pyoma.browser import convert as pyoma
 
 
 class XRefParsingTest(unittest.TestCase):
+    def _create_genome_info(self):
+        gs = numpy.zeros(3, dtype=tables.dtype_from_descr(pyoma.tablefmt.GenomeTable))
+        gs['EntryOff'] = [0, 2, 3]
+        gs['TotEntries'] = [2, 1, 1]
+        gs['Release'] = [b"Ensembl", b"madeup", b"Ensembl Metazoa 22; CB4; 13-MAR-2014"]
+        return gs
+
     def setUp(self):
         self.data = io.StringIO(
             """<E><ID>ENSG00000204640</ID><AC>ENSP00000366061; ENST00000376865</AC><DE>hypotetical protein</DE><GI>125233342</GI><UniProt/TrEMBL>P21522</UniProt/TrEMBL></E>
             <E><ID>BLA22; BLABLA22.Rep22</ID><AC>BLA22.1</AC><EC>3.2.2.-; 4.2.99.18</EC><EntrezGene>32244</EntrezGene><PMP>P21122; Q24S32</PMP><GO>GO:0006270@[[IDA,{'PMID:2167836'}],[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]; GO:0006275@[[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]</GO></E>
-            <E><UniProt/TrEMBL>L8ECQ9_BACSU</UniProt/TrEMBL><SwissProt_AC>Q6CI62</SwissProt_AC><SwissProt>ASF1_YARLI</SwissProt><ID>FBgn0218776</ID><AC>FBpp0245919; FBtr0247427</AC><DE>β-hemoglobin</DE><GO></GO></E>""")
+            <E><UniProt/TrEMBL>L8ECQ9_BACSU</UniProt/TrEMBL><SwissProt_AC>Q6CI62</SwissProt_AC><SwissProt>ASF1_YARLI</SwissProt><ID>FBgn0218776</ID><AC>FBpp0245919; FBtr0247427</AC><DE>β-hemoglobin</DE><GO></GO></E>
+            <E><OS>CAEBR</OS><NR>1</NR><OG>0</OG><AC>CBG23988</AC><CHR>chrI</CHR><ID>CBG23988</ID><LOC>join(80..1057,2068..2664)</LOC><UniProt/TrEMBL>A8WJQ9_CAEBR</UniProt/TrEMBL><GO>GO:0016020@[[IEA,{'GO_REF:038'}]]; GO:0016021@[[IEA,{'GO_REF:038'}]]</GO><SEQ>A</SEQ></E>""")
         self.db_parser = pyoma.DarwinDbEntryParser()
         self.desc_manager = mock.Mock()
         self.go_manager = mock.Mock()
-        self.importer = pyoma.XRefImporter(self.db_parser, None, None, self.go_manager, self.desc_manager)
+        self.xref_tab = mock.Mock()
+        self.gs = self._create_genome_info()
+        self.importer = pyoma.XRefImporter(self.db_parser, self.gs, self.xref_tab, None, self.go_manager, self.desc_manager)
 
     def test_standard_handler(self):
         self.db_parser.parse_entrytags(self.data)
@@ -41,6 +51,12 @@ class XRefParsingTest(unittest.TestCase):
         for case in ('ENSG00000162687', 'ENSMUSP00000162687'):
             match = self.importer.ENS_RE.match(case)
             self.assertIsNotNone(match)
+
+    def test_ensembgenomes_ids(self):
+        self.db_parser.parse_entrytags(self.data)
+        enum = pyoma.tablefmt.XRefTable.columns.get('XRefSource').enum
+        verif = pyoma.tablefmt.XRefTable.columns.get('Verification').enum
+        self.assertIn((4, enum.EnsemblGenomes, b'CBG23988', verif.exact), self.importer.xrefs)
 
     def test_uniprot_ids(self):
         self.db_parser.parse_entrytags(self.data)

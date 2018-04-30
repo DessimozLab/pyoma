@@ -654,9 +654,10 @@ class DarwinExporter(object):
 
         ec_tab = self.h5.create_table('/Annotations', 'EC', tablefmt.ECTable, 'Enzyme Commission annotations',
                                       expectedrows=1e7, createparents=True)
+        gs = self.h5.get_node('/Genome').read()
         with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man, \
              GeneOntologyManager(self.h5, '/Annotations/GeneOntology', '/Ontologies/GO') as go_man:
-            xref_importer = XRefImporter(db_parser, xref_tab, ec_tab, go_man, de_man)
+            xref_importer = XRefImporter(db_parser, gs, xref_tab, ec_tab, go_man, de_man)
             files = self.xref_databases()
             dbs_iter = fileinput.input(files=files)
             db_parser.parse_entrytags(dbs_iter)
@@ -719,7 +720,7 @@ class DarwinExporter(object):
         as given in the xrefsource_order."""
         xrefsource_order = ('UniProtKB/SwissProt', 'UniProtKB/TrEMBL',
                             'Ensembl Gene', 'Ensembl Protein', 'FlyBase',
-                            'WormBase', 'RefSeq', 'SourceID')
+                            'WormBase', 'EnsemblGenomes', 'RefSeq', 'SourceID')
 
         xrefs = self.h5.get_node('/XRef')
         source_enum = xrefs.get_enum('XRefSource')
@@ -1501,7 +1502,7 @@ class HogConverter(object):
 
 
 class XRefImporter(object):
-    def __init__(self, db_parser, xref_tab, ec_tab, go_manager, desc_manager):
+    def __init__(self, db_parser, genomes_tab, xref_tab, ec_tab, go_manager, desc_manager):
         self.xrefs = []
         self.ec = []
         self.xref_tab = xref_tab
@@ -1605,6 +1606,8 @@ class XRefImporter(object):
                 if match is not None:
                     enum_nr = self.xrefEnum[enum]
                     self._add_to_xrefs(eNr, enum_nr, key, 'unchecked')
+            if self.from_EnsemblGenome(eNr):
+                self._add_to_xrefs(eNr, self.xrefEnum.EnsemblGenomes, key, 'exact')
 
     def go_handler(self, gos, enr):
         self.go_manager.add_annotations(enr, gos)

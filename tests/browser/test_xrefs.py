@@ -52,6 +52,12 @@ class XRefParsingTest(unittest.TestCase):
             match = self.importer.ENS_RE.match(case)
             self.assertIsNotNone(match)
 
+    def test_potential_flush_gets_called(self):
+        callback = mock.MagicMock(name="potential_flush")
+        self.db_parser.add_end_of_entry_notifier(callback)
+        self.db_parser.parse_entrytags(self.data)
+        self.assertEqual(callback.call_count, 4)
+
     def test_ensembgenomes_ids(self):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get('XRefSource').enum
@@ -67,7 +73,7 @@ class XRefParsingTest(unittest.TestCase):
 
     def test_go(self):
         self.db_parser.parse_entrytags(self.data)
-        self.assertEqual(len(self.go_manager.add_annotations.call_args_list), 1)
+        self.assertEqual(len(self.go_manager.add_annotations.call_args_list), 2)
 
     def test_ec(self):
         self.db_parser.parse_entrytags(self.data)
@@ -92,6 +98,16 @@ class XRefParsingTest(unittest.TestCase):
         self.db_parser.parse_entrytags(self.data)
         self.assertEqual(len(self.desc_manager.add_description.call_args_list), 2)
         self.assertEqual((3, u'β-hemoglobin'), self.desc_manager.add_description.call_args[0])
+
+    def test_remove_duplicated_xrefs(self):
+        ref = (1, 10, 'test_id', 'unchecked')
+        res = (1, 10, b'test_id', 2)
+        self.importer.FLUSH_SIZE = 20
+        for i in range(self.importer.FLUSH_SIZE+1):
+            self.importer._add_to_xrefs(*ref)
+        self.xref_tab.append.assert_not_called()
+        self.importer.potential_flush()
+        self.xref_tab.append.assert_called_once_with([res])
 
 
 class DescriptionManagerTest(unittest.TestCase):

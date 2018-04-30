@@ -1546,6 +1546,9 @@ class XRefImporter(object):
                                       lambda key, enr, typ=xrefEnum['UniProtKB/TrEMBL']:
                                       self.remove_uniprot_code_handler(key, enr, typ))
 
+        # register the potential_flush as end_of_entry_notifier
+        db_parser.add_end_of_entry_notifier(self.potential_flush)
+
         self.db_parser = db_parser
         self.xrefEnum = xrefEnum
         self.ENS_RE = re.compile(r'ENS(?P<species>[A-Z]{0,3})(?P<typ>[GTP])(?P<num>\d{11})')
@@ -1553,22 +1556,40 @@ class XRefImporter(object):
         self.NCBI_RE = re.compile(r'[A-Z]{3}\d{5}\.\d$')
         self.WB_RE = re.compile(r'WBGene\d{8}$')
         self.EC_RE = re.compile(r'\d+\.(\d+|-)\.(\d+|-)\.(\d+|-)')
+        self.ENSGENOME_RE = re.compile(rb'Ensembl (Metazoa|Plant|Fungi|Protist|Bacteria)', re.IGNORECASE)
+
+        self.FLUSH_SIZE = 5e6
+
+        # info about current genome
+        self.genomes_tab = genomes_tab
+        self._cur_genome = None
+
+    def _get_genome_info(self, entry_nr):
+        if not (self._cur_genome is not None and self._cur_genome['EntryOff'] < entry_nr <=
+                self._cur_genome['EntryOff'] + self._cur_genome['TotEntries']):
+            self._cur_genome = self.genomes_tab[self.genomes_tab['EntryOff'].searchsorted(entry_nr+1)-1]
+        return self._cur_genome
+
+    def from_EnsemblGenome(self, entry_nr):
+        return self.ENSGENOME_RE.search(self._get_genome_info(entry_nr)) is not None
 
     def flush_buffers(self):
         common.package_logger.info('flushing xrefs and ec buffers')
         if len(self.xrefs) > 0:
-            self.xref_tab.append(self.xrefs)
+            self.xref_tab.append(sorted(uniq(self.xrefs)))
             self.xrefs = []
         if len(self.ec) > 0:
-            self.ec_tab.append(self.ec)
+            self.ec_tab.append(sorted(uniq(self.ec)))
             self.ec = []
+
+    def potential_flush(self):
+        if len(self.xrefs) > self.FLUSH_SIZE:
+            self.flush_buffers()
 
     def _add_to_xrefs(self, eNr, enum_nr, key, verif='unchecked'):
         if not isinstance(eNr, int):
             raise ValueError('eNr is of wrong type:' + str(eNr))
         self.xrefs.append((eNr, enum_nr, key.encode('utf-8'), self.verif_enum[verif], ))
-        if len(self.xrefs) > 5e6:
-            self.flush_buffers()
 
     def key_value_handler(self, key, eNr, enum_nr, verif='unchecked'):
         """basic handler that simply adds a key (the xref) under a given enum_nr"""
@@ -1670,11 +1691,16 @@ class DarwinDbEntryParser:
         """Initializes a Parser for SGML formatted darwin database file
         """
         self.tag_handlers = collections.defaultdict(list)
+        self.end_of_entry_notifier = []
 
     def add_tag_handler(self, tag, handler):
         """add a callback handler for a certain tag"""
         self.tag_handlers[tag].append(handler)
         common.package_logger.debug('# handlers for {}: {}'.format(tag, len(self.tag_handlers[tag])))
+
+    def add_end_of_entry_notifier(self, handler):
+        self.end_of_entry_notifier.append(handler)
+
 
     def parse_entrytags(self, fh):
         """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,
@@ -1704,6 +1730,8 @@ class DarwinDbEntryParser:
                         handler(value, eNr)
                         # common.package_logger.debug('called handler {} with ({},{})'.format(
                         #    handler, value.encode('utf-8'), eNr))
+            for notifier in self.end_of_entry_notifier:
+                notifier()
 
 
 DomainDescription = collections.namedtuple('DomainDescription',

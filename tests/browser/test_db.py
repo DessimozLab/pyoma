@@ -174,7 +174,7 @@ class XRefDatabaseMock(Database):
                              driver_core_backing_store=0)
         xref = numpy.zeros(10, tables.dtype_from_descr(tablefmt.XRefTable))
         xref['EntryNr'] = numpy.arange(1, 6, 0.5).astype(numpy.int32)
-        xref['XRefSource'] = numpy.arange(10) % 5
+        xref['XRefSource'] = numpy.tile([0, 20], 5)
         xref['XRefId'] = ['XA{:03}g1.4'.format(i) for i in range(10)]
         f.create_table('/', 'XRef', tablefmt.XRefTable, obj=xref)
         f.create_group('/', 'XRef_Index')

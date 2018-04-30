@@ -1405,12 +1405,22 @@ class XrefIdMapper(object):
         all valid xref types. Typically, subclasses of XrefIdMapper
         will change this set.
 
-        :param entry_nr: the numeric id of the query protein."""
+        :param entry_nr: the numeric id of the query protein.
+        :returns: list of dicts with 'source' and 'xref' keys."""
         res = [{'source': self.xrefEnum._values[row['XRefSource']],
                 'xref': row['XRefId'].decode()}
                 for row in self.xref_tab.where('EntryNr=={:d}'.format(entry_nr))
                 if row['XRefSource'] in self.idtype]
         return res
+
+    def canonical_source_order(self):
+        """returns the list of xref sources in order of their importance.
+
+        Most important source - in the base class for example UniProtKB/SwissProt
+        are first. The canonical order is defined in the enum definition.
+
+        :returns: list of source strings"""
+        return [self.xrefEnum(z) for z in sorted(self.idtype)]
 
     def iter_xrefs_for_entry_nr(self, entry_nr):
         """Iterate over the xrefs of a given entry number.

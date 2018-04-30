@@ -1526,6 +1526,7 @@ class XRefImporter(object):
             'Synonyms': (xrefEnum['Synonym'], 'unchecked'),
             'HGNC_Id': (xrefEnum['HGNC'], 'unchecked'),
             'PMP': (xrefEnum['PMP'], 'exact'),
+            'PDB': (xrefEnum['PDB'], 'unchecked'),
             'EMBL': (xrefEnum['EMBL'], 'unchecked'),
             'ID': (xrefEnum['SourceID'], 'exact'),
             'AC': (xrefEnum['SourceAC'], 'exact'),

@@ -2,6 +2,8 @@ import pandas
 import logging
 import collections
 import numpy as np
+import matplotlib
+matplotlib.use('agg')
 from skfuzzy import control as ctrl
 from skfuzzy import gaussmf
 import sklearn

@@ -195,8 +195,8 @@ class Database(object):
         the species to which this protein belongs.
 
         :Note: OMA only predicts orthologs for the main isoform, so there is no
-        difference if you work with only the main isoforms or all proteins of
-        a genome in terms of orthologs.
+            difference if you work with only the main isoforms or all proteins of
+            a genome in terms of orthologs.
 
         :param genome: UniProtSpeciesCode of the genome of interest, or a gene
                        number (EntryNr) from the genome of interest.

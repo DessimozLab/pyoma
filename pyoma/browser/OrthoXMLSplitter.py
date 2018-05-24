@@ -20,7 +20,7 @@ class OrthoXMLSplitter(object):
     be stored. This later parameter can be overwritten in the __call__
     method call that does the work.
 
-    ..note::
+    .. note::
 
        Calls to the splitter will remove the created families from the
        loaded input file, so subsequent calls that contain a family in

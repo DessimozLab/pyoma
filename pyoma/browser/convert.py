@@ -1216,7 +1216,15 @@ def filter_duplicated_domains(iterable):
     common.package_logger.info("skipped {} duplicated domains. {} distinct domains yielded"
                                .format(ignored, len(seen)))
 
+
 class OmaGroupMetadataLoader(object):
+    """OMA Group Meta data extractor.
+
+    This class provides the means to import the Keywords and Fingerprints
+    of the OMA Groups into the hdf5 database. The data is stored under
+    in the node defined by :attr:`meta_data_path`, which defaults to
+    /OmaGroups/MetaData.
+    """
     keyword_name = "Keywords.drw"
     finger_name = "Fingerprints"
 
@@ -1502,6 +1510,11 @@ class HogConverter(object):
 
 
 class XRefImporter(object):
+    """Object to import various types of crossreferences into hdf5.
+
+    The XRefImporter registers at a db_parser object various handlers
+    to import the various types of xrefs, namely ids, go-terms,
+    EC annotations and descriptions."""
     def __init__(self, db_parser, genomes_tab, xref_tab, ec_tab, go_manager, desc_manager):
         self.xrefs = []
         self.ec = []
@@ -1701,7 +1714,6 @@ class DarwinDbEntryParser:
 
     def add_end_of_entry_notifier(self, handler):
         self.end_of_entry_notifier.append(handler)
-
 
     def parse_entrytags(self, fh):
         """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,

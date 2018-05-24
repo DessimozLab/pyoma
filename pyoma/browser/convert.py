@@ -1570,7 +1570,7 @@ class XRefImporter(object):
         self.NCBI_RE = re.compile(r'[A-Z]{3}\d{5}\.\d$')
         self.WB_RE = re.compile(r'WBGene\d{8}$')
         self.EC_RE = re.compile(r'\d+\.(\d+|-)\.(\d+|-)\.(\d+|-)')
-        self.ENSGENOME_RE = re.compile(rb'Ensembl (Metazoa|Plant|Fungi|Protist|Bacteria)', re.IGNORECASE)
+        self.ENSGENOME_RE = re.compile(b'Ensembl (Metazoa|Plant|Fungi|Protist|Bacteria)', re.IGNORECASE)
 
         self.FLUSH_SIZE = 5e6
 
@@ -1585,7 +1585,8 @@ class XRefImporter(object):
         return self._cur_genome
 
     def from_EnsemblGenome(self, entry_nr):
-        return self.ENSGENOME_RE.search(self._get_genome_info(entry_nr)) is not None
+        genome_info = self._get_genome_info(entry_nr)
+        return self.ENSGENOME_RE.search(genome_info['Release']) is not None
 
     def flush_buffers(self):
         common.package_logger.info('flushing xrefs and ec buffers')

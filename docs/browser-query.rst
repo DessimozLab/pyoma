@@ -69,11 +69,10 @@ The following mappers exist so far:
 The individual types can be used as accessors of the facotry to get the respecive mapper 
 object, e.g.
 
-code-block:: python
+.. code-block:: python
 
     db.id_mapper['OMA']
     db.id_mapper['XRef']
-
 
 
 The OMA mapper provides the following interface:
@@ -85,4 +84,55 @@ Similarly for the XRef id mapper object:
 
 .. autoclass:: pyoma.browser.db.XrefIdMapper
     :members:
+
+
+Working with GeneOntology annotations
+#####################################
+
+Gene Annotations for a specific protein (or for a
+range of entries) in the database can be loaded with the
+:meth:`pyoma.browser.db.Database.get_gene_ontology_annotations`.
+
+In order to traverse the ontology itself (e.g. to get also the
+parent terms of a specific annotation, a
+:class:`pyoma.browser.gene_ontology.GeneOntology` object needs
+to be created. The easiest way for this is by using the
+property :meth:`pyoma.browser.db.Database.gene_ontology` of the
+database.
+
+
+
+.. doctest::
+
+    >>> import pyoma.browser.db
+    >>> db = pyoma.browser.db.Database('tests/browser/TestDb.h5')
+    >>> annos = db.get_gene_ontology_annotations(11522)
+    >>> annos
+    array([(11522,  3735, b'ISS', b'PMID:12368867'),
+           (11522,  3735, b'IEA', b'GO_REF:002'),
+           (11522,  5622, b'IEA', b'GO_REF:002'),
+           (11522,  5840, b'IEA', b'GO_REF:002'),
+           (11522,  5840, b'IEA', b'GO_REF:038'),
+           (11522,  6412, b'ISS', b'PMID:12368867'),
+           (11522,  6412, b'IEA', b'GO_REF:002'),
+           (11522, 22627, b'ISS', b'PMID:12368867'),
+           (11522, 30529, b'IEA', b'GO_REF:038')],
+          dtype=[('EntryNr', '<u4'), ('TermNr', '<u4'), ('Evidence', 'S3'), ('Reference', 'S255')])
+    >>> term = db.gene_ontology.term_by_id(annos[0]['TermNr'])
+    >>> print("{0} - {0.name}".format(term))
+    GO:0003735 - structural constituent of ribosome
+
+Working with GO can also be simplified by using working with the
+:class:`pyoma.browser.model.GeneOntology` model:
+
+.. code-block:: python
+
+    >>> import pyoma.browser.models
+    >>> annos = [pyoma.browser.models.GeneOntologyAnnotation(db, anno)
+                 for anno in annos]
+    >>> annos[0].evidence
+    ISS
+
+
+
 

@@ -89,9 +89,28 @@ class Database(object):
 
     @LazyProperty
     def gene_ontology(self):
+        """returns GeneOntology object containing hierarchy
+        of terms using the is_a and part_of relations. See
+        :meth:`load_gene_ontology` to parametrize the
+        creation of GeneOntology object."""
         return self.load_gene_ontology(GeneOntology)
 
     def load_gene_ontology(self, factory=None, rels=None):
+        """Instantiate GeneOntology object
+
+        By default, a GeneOntology object is returned based on
+        the default relations (which are defined in :mod:`.gene_ontology`)
+
+        The factory parameter allows to specify an subtype of
+        GeneOntology, e.g. :class:`.gene_ontology.FreqAwareGeneOntology`,
+
+        The rels parameter should be a list of relation strings that
+        should be used as parents relations.
+
+        :param factory: GeneOntology factory
+        :param rels: list of rels for parent relations
+
+        :returns: GeneOntology object"""
         try:
             fp = io.StringIO(self.db.root.Ontologies.GO.read().tobytes().decode('utf-8'))
         except tables.NoSuchNodeError:

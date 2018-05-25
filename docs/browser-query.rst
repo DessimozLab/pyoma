@@ -128,10 +128,9 @@ Working with GO can also be simplified by using working with the
 .. code-block:: python
 
     >>> import pyoma.browser.models
-    >>> annos = [pyoma.browser.models.GeneOntologyAnnotation(db, anno)
-                 for anno in annos]
+    >>> annos = [pyoma.browser.models.GeneOntologyAnnotation(db, anno) for anno in annos]
     >>> annos[0].evidence
-    ISS
+    'ISS'
 
 
 

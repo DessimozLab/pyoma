@@ -1614,6 +1614,8 @@ class XRefImporter(object):
         """try to split the myltikey field using '; ' as a delimiter and add each
         part individually under the passed enum_nr id type."""
         for key in multikey.split('; '):
+            if key.startswith('Rep'):
+                continue
             pos = key.find('.Rep')
             if pos > 0:
                 key = key[0:pos]

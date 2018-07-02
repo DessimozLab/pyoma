@@ -1095,7 +1095,7 @@ class OmaIdMapper(object):
 
 class AmbiguousID(Exception):
     def __init__(self, message, candidates):
-        super(self, AmbiguousID).__init__(message, candidates)
+        super(AmbiguousID, self).__init__(message, candidates)
         self.candidates = candidates
 
 

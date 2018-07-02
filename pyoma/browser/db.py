@@ -1118,8 +1118,11 @@ class IDResolver(object):
         """search for all xrefs. TODO: what happens if xref is ambiguous?"""
         res = set([x['EntryNr'] for x in self._db.id_mapper['XRef'].search_xref(e_id)])
         if len(res) == 0:
-            raise InvalidId(e_id)
-        elif len(res) > 1:
+            # let's try to mach as substring using suffix array case insensitive
+            res = set([x['EntryNr'] for x in self._db.id_mapper['XRef'].search_xref(e_id, match_any_substring=True)])
+            if len(res) == 0:
+                raise InvalidId(e_id)
+        if len(res) > 1:
             # check whether its only different isoforms, then return canonical isoform
             splice_variants = set([x['AltSpliceVariant'] for x in (self._db.entry_by_entry_nr(eNr) for eNr in res)])
             logger.info('xref {} has {} entries, {} splice variants'.format(e_id, len(res), len(splice_variants)))

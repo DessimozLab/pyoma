@@ -1359,12 +1359,15 @@ class Taxonomy(object):
          a Taxonomy in json format."""
 
         def _rec_phylogeny(node):
-            res = {'name': node['Name'].decode(), 'id': int(node['NCBITaxonId'])}
+            res = {'name': node['Name'].decode(), 'id': int(node['NCBITaxonId']),
+                   'UniProtSpeciesCode': node['UniProtSpeciesCode'].decode()}
             children = []
             for child in self._direct_children_taxa(node['NCBITaxonId']):
                 children.append(_rec_phylogeny(child))
             if len(children) > 0:
                 res['children'] = children
+            else:
+                OmaIdMapper
             return res
 
         return _rec_phylogeny(self._get_root_taxon())

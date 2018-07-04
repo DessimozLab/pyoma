@@ -528,7 +528,7 @@ class Database(object):
     def resolve_oma_group(self, group_id):
         if isinstance(group_id, int) and 0 < group_id <= self.get_nr_oma_groups():
             return group_id
-        elif isinstance(group_id, numpy.int):
+        elif isinstance(group_id, numpy.integer):
             return self.resolve_oma_group(int(group_id))
         elif isinstance(group_id, (bytes, str)):
             if group_id.isdigit():
@@ -551,7 +551,8 @@ class Database(object):
                 group_id.decode(), only_full_length=False)
             if len(entry_nrs) == 0:
                 raise InvalidId('No sequence contains search pattern')
-            group_nrs = {self.entry_by_entry_nr(nr)['OmaGroup'] for nr in entry_nrs if nr != 0}
+            group_nrs = {self.entry_by_entry_nr(nr)['OmaGroup'] for nr in entry_nrs}
+            group_nrs.discard(0)
             if len(group_nrs) == 1:
                 return int(group_nrs.pop())
             else:
@@ -566,8 +567,8 @@ class Database(object):
         the numeric oma group nr.
 
         :param int group_nr: a numeric oma group id."""
-        if not isinstance(group_nr, int) or group_nr < 0:
-            raise InvalidId('Invalid group nr')
+        if not isinstance(group_nr, (int, numpy.integer)) or group_nr < 0:
+            raise InvalidId('Invalid group nr: {} (type: {})'.format(group_nr, type(group_nr)))
         meta_tab = self.db.get_node('/OmaGroups/MetaData')
         try:
             e = next(meta_tab.where('GroupNr == {:d}'.format(group_nr)))

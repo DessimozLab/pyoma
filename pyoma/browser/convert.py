@@ -1249,6 +1249,7 @@ class OmaGroupMetadataLoader(object):
 
         grptab, keybuf = self._create_db_objects(nr_groups)
         self._fill_data_into_db(fingerprints, keywords, grptab, keybuf)
+        grptab.modify_column(column=self._get_group_member_counts(), colname='NrMembers')
         self._create_indexes(grptab)
 
     def _create_db_objects(self, nrows):
@@ -1279,11 +1280,13 @@ class OmaGroupMetadataLoader(object):
             key = numpy.ndarray((len(keywords[i]),), buffer=keywords[i],
                                 dtype=tables.StringAtom(1))
             key_buf.append(key)
+            buf_pos += len(keywords[i])
         grp_tab.flush()
         key_buf.flush()
 
     def _create_indexes(self, grp_tab):
         grp_tab.cols.Fingerprint.create_csindex()
+        grp_tab.cols.GroupNr.create_csindex()
 
     def _parse_darwin_string_list_file(self, fh):
         data = fh.read()
@@ -1306,6 +1309,13 @@ class OmaGroupMetadataLoader(object):
             return etab[etab.colindexes['OmaGroup'][-1]]['OmaGroup']
         except KeyError:
             return max(etab.col('OmaGroup'))
+
+    def _get_group_member_counts(self):
+        grp_nr, cnts = numpy.unique(self.db.get_node('/Protein/Entries').col('OmaGroup'), return_counts=True)
+        if grp_nr[0] == 0:
+            cnts = cnts[1:]
+        assert(len(cnts) == self._get_nr_of_groups())
+        return cnts
 
     def _check_textfiles_avail(self):
         rootdir = os.getenv('DARWIN_BROWSERDATA_PATH','')

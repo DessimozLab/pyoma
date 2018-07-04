@@ -159,3 +159,4 @@ class OmaGroupTable(tables.IsDescription):
     Fingerprint = tables.StringCol(7, pos=1)
     KeywordOffset = tables.UInt32Col(pos=2)
     KeywordLength = tables.UInt16Col(pos=3)
+    NrMembers = tables.UInt16Col(pos=4)

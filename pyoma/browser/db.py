@@ -521,26 +521,42 @@ class Database(object):
         is raised.
 
         :param group_id: numeric oma group id or Fingerprint"""
-        if isinstance(group_id, (str, bytes)):
+        group_nr = self.resolve_oma_group(group_id)
+        members = self.db.root.Protein.Entries.read_where('OmaGroup=={:d}'.format(group_nr))
+        return members
+
+    def resolve_oma_group(self, group_id):
+        if isinstance(group_id, int) and 0 < group_id <= self.get_nr_oma_groups():
+            return group_id
+        elif isinstance(group_id, numpy.int):
+            return self.resolve_oma_group(int(group_id))
+        elif isinstance(group_id, (bytes, str)):
             if group_id.isdigit():
-                return self.oma_group_members(int(group_id))
+                return self.resolve_oma_group(int(group_id))
             if isinstance(group_id, str):
                 group_id = group_id.encode('utf-8')
             if group_id == b'n/a':
-                raise InvalidId('Invalid fingerprint for an OMA Group')
-            group_meta_tab = self.db.get_node('/OmaGroups/MetaData')
-            try:
-                e = next(group_meta_tab.where('(Fingerprint == {!r})'
-                                              .format(group_id)))
-                group_nr = e['GroupNr']
-            except StopIteration:
-                raise InvalidId('Unknown fingerprint for an OMA Group')
-        elif isinstance(group_id, int) and group_id > 0:
-            group_nr = group_id
-        else:
-            raise InvalidId('Invalid id of oma group')
-        members = self.db.root.Protein.Entries.read_where('OmaGroup=={:d}'.format(group_nr))
-        return members
+                raise InvalidId('Invalid ID (n/a) for an OMA Group')
+            if len(group_id) == 7:
+                # most likely a fingerprint. let's check that first
+                group_meta_tab = self.db.get_node('/OmaGroups/MetaData')
+                try:
+                    e = next(group_meta_tab.where('(Fingerprint == {!r})'
+                                                  .format(group_id)))
+                    return int(e['GroupNr'])
+                except StopIteration:
+                    pass
+            # search in suffix array
+            entry_nrs = self.seq_search.exact_search(
+                group_id.decode(), only_full_length=False)
+            if len(entry_nrs) == 0:
+                raise InvalidId('No sequence contains search pattern')
+            group_nrs = {self.entry_by_entry_nr(nr)['OmaGroup'] for nr in entry_nrs if nr != 0}
+            if len(group_nrs) == 1:
+                return int(group_nrs.pop())
+            else:
+                raise AmbiguousID("sequence pattern matches several oma groups", candidates=group_nrs)
+        raise InvalidId('Invalid type to determine OMA Group: {} (type: {})'.format(group_id, type(group_id)))
 
     def oma_group_metadata(self, group_nr):
         """get the meta data associated with a OMA Group
@@ -551,14 +567,15 @@ class Database(object):
 
         :param int group_nr: a numeric oma group id."""
         if not isinstance(group_nr, int) or group_nr < 0:
-            raise InvalidId('Invalid group id')
+            raise InvalidId('Invalid group nr')
         meta_tab = self.db.get_node('/OmaGroups/MetaData')
         try:
             e = next(meta_tab.where('GroupNr == {:d}'.format(group_nr)))
             kw_buf = self.db.get_node('/OmaGroups/KeywordBuffer')
             res = {'fingerprint': e['Fingerprint'].decode(),
                    'group_nr': int(e['GroupNr']),
-                   'keywords': kw_buf[e['KeywordOffset']:e['KeywordOffset']+e['KeywordLength']].tostring().decode()}
+                   'keywords': kw_buf[e['KeywordOffset']:e['KeywordOffset']+e['KeywordLength']].tostring().decode(),
+                   'size': int(e['NrMembers'])}
             return res
         except StopIteration:
             raise InvalidId('invalid group nr')

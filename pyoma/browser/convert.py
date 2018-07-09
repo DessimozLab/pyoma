@@ -1834,23 +1834,27 @@ def augment_genomes_json_download_file(fpath, h5, backup='.bak'):
         json.dump(genomes, fh)
 
 
-def getDebugLogger():
+def getLogger(level='DEBUG'):
     import logging
 
     log = logging.getLogger('pyoma')
-    log.setLevel(logging.DEBUG)
+    if isinstance(level, str):
+        level = logging.getLevelName(level.upper())
+        if not isinstance(level, int):
+            level = logging.DEBUG
+    log.setLevel(level)
     logHandler = logging.StreamHandler()
-    logHandler.setLevel(logging.DEBUG)
+    logHandler.setLevel(level)
     logHandler.setFormatter(logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     log.addHandler(logHandler)
     return log
 
 
-def main(name="OmaServer.h5", k=6, idx_name=None):
+def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level='INFO'):
     idx_name = (name + '.idx') if idx_name is None else idx_name
 
-    log = getDebugLogger()
+    log = getLogger(log_level)
     x = DarwinExporter(name, logger=log)
     x.add_version()
     x.add_species_data()

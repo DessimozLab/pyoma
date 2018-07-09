@@ -105,8 +105,8 @@ class StandaloneExporter(DarwinExporter):
         return self._get_genome_database_paths()
 
 
-def import_oma_run(path, outfile, add_domains=True):
-    log = getDebugLogger()
+def import_oma_run(path, outfile, add_domains=True, log_level='INFO'):
+    log = getLogger(log_level)
     x = StandaloneExporter(path, outfile, logger=log, mode='write')
     x.add_version()
     x.add_species_data()

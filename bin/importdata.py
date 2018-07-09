@@ -27,19 +27,23 @@ def main(args):
     parser.add_argument('--no-domains', action='store_false',
                         help="do not include CATH domain information. This flag is only "
                              "considered for oma standalone imports. (see -s/--standalone flag")
+    parser.add_argument('-v', default=0, action='count',
+                        help="Increase verbosity level to INFO or DEBUG level")
 
     options = parser.parse_args(args)
+    log_level = 30 - (10 * max(options.v, 2))
     if options.standalone:
         pyoma.browser.convert_omastandalone.import_oma_run(
             options.release,
             options.out,
-            add_domains=options.no_domains)
+            add_domains=options.no_domains,
+            log_level=log_level)
     else:
         if options.release:
             os.environ['DARWIN_BROWSERDATA_PATH'] = options.release
         print(options.out)
 
-        pyoma.browser.convert.main(options.out)
+        pyoma.browser.convert.main(options.out, log_level=log_level)
 
 
 if __name__ == '__main__':

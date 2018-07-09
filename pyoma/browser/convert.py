@@ -1165,20 +1165,22 @@ def iter_domains(url):
         dialect = csv.Sniffer().sniff(uncompressed.read(4096))
         uncompressed.seek(0)
         csv_reader = csv.reader(uncompressed, dialect)
-        col_start, col_end = None, None
+        col_md5, col_id, col_coord = (None,) * 3
+        coord_fromat_trans = str.maketrans('-,', '::')
+
         for lineNr, row in enumerate(csv_reader):
-            if col_start is None:
+            if col_md5 is None:
                 # identify which tuples to use.
                 if len(row) >= 9:
                     # representative_proteins format. use columns 5-7
-                    col_start, col_end = 4, 7
+                    col_md5, col_id, col_coord = 4, 5, 6
                 elif len(row) == 3:
                     # additionally created ones, minimal format
-                    col_start, col_end = 0, 3
+                    col_md5, col_id, col_coord = 0, 1, 2
                 else:
                     raise DataImportError("Unknown Domain Annotation format in {}".format(uncompressed.filename))
             try:
-                dom = DomainTuple(*row[col_start:col_end])
+                dom = DomainTuple(row[col_md5], row[col_id], row[col_coord].translate(coord_fromat_trans))
                 if lineNr < 10:
                     # do some sanity checks on the first few lines
                     if re.match(r'[0-9a-f]{32}$', dom.md5) is None:
@@ -1187,7 +1189,7 @@ def iter_domains(url):
                     if re.match(r'([1-4]\.\d+\.\d+\.\d+|PF\d+)$', dom.id) is None:
                         raise DataImportError("Domain-ID of line {:d} has unexpected value: {}"
                                               .format(lineNr, dom.id))
-                    if re.match(r'\d+-\d+', dom.coords) is None:
+                    if re.match(r'\d+:\d+', dom.coords) is None:
                         raise DataImportError("Domain coordinates in line {:d} has unexpected value: {}"
                                               .format(lineNr, dom.coords))
                 yield dom
@@ -1865,6 +1867,8 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level='INFO'
     x.add_xrefs()
     x.add_synteny_scores()
     x.add_homoeology_confidence()
+    if domains is None:
+        domains = ["file://dev/null"]
     x.add_domain_info(filter_duplicated_domains(only_pfam_or_cath_domains(itertools.chain(
         iter_domains('ftp://orengoftp.biochem.ucl.ac.uk/gene3d/CURRENT_RELEASE/' +
                      'representative_uniprot_genome_assignments.csv.gz'),

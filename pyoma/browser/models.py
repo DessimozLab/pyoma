@@ -175,6 +175,10 @@ class ProteinEntry(object):
     def description(self):
         return self._db.get_description(self._entry).decode()
 
+    @property
+    def subgenome(self):
+        return self._entry['SubGenome'].decode()
+
     @LazyProperty
     def hog_family_nr(self):
         from .db import Singleton as HOGSingleton

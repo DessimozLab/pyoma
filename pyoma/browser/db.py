@@ -250,6 +250,15 @@ class Database(object):
             cnt = 0
         return cnt
 
+    def count_homoeologs(self, entry_nr):
+        pwtab = self._get_pw_tab(entry_nr, 'within')
+        homolog_typ_nr = pwtab.get_enum('RelType')['homeolog']
+        try:
+            cnt = count_elements(pwtab.where('(EntryNr1=={:d}) & (RelType == {:d})'.format(entry_nr, homolog_typ_nr)))
+        except (TypeError, ValueError):
+            cnt = 0
+        return cnt
+
     def _get_pw_data(self, entry_nr, tab, typ_filter=None, extra_cols=None):
         query = "(EntryNr1 == {:d})".format(entry_nr)
         if typ_filter is not None:

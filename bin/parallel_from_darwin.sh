@@ -5,12 +5,16 @@ doVPS="${2:-false}"
 overwrite="${3:-true}"
 echo "Running with $NProc procs, doVPS=$doVPS"
 
+if [ -z "$LSB_JOBINDEX" ] ; then
+    echo "bla"
+    LSB_JOBINDEX=$THIS_PROC_NR
+fi
+echo $LSB_JOBINDEX
 
 mkdir -p ${DARWIN_NETWORK_SCRATCH_PATH}/pyoma/{prots,cps,vps}/
-for i in $(eval echo {1..${NProc}}) ; do
-    darwin -E -q << EOF &
+    darwin -E -q << EOF
     NR_PROCESSES := $NProc;
-    THIS_PROC_NR := $i;
+    THIS_PROC_NR := $LSB_JOBINDEX;
     ReadProgram('$DARWIN_OMA_REPO_PATH/lib/Platforms');
     ReadProgram('pyoma/browser/convert.drw');
     pInf := DetectParallelInfo();
@@ -42,7 +46,5 @@ for i in $(eval echo {1..${NProc}}) ; do
     od:
     done
 EOF
-sleep 1
-done
 
 

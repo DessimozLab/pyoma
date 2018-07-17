@@ -26,7 +26,6 @@ import hashlib
 import itertools
 import operator
 import fileinput
-import pandas as pd
 
 from .. import common
 from . import locus_parser
@@ -1055,7 +1054,7 @@ class DarwinExporter(object):
         # Load the HOG -> Entry table to memory
         prot_tab = self.h5.root.Protein.Entries
         # TODO: work out how to do this in a neater way
-        df = pd.DataFrame.from_records(((z['EntryNr'], z['OmaHOG'], z['SeqBufferLength'])
+        df = pandas.DataFrame.from_records(((z['EntryNr'], z['OmaHOG'], z['SeqBufferLength'])
                                         for z in prot_tab.iterrows()),
                                        columns=['EntryNr', 'OmaHOG', 'SeqBufferLength'])
         # Strip singletons
@@ -1065,7 +1064,7 @@ class DarwinExporter(object):
         df['OmaHOG'] = df['OmaHOG'].apply(lambda i: int(i[4:].split(b'.')[0]))
 
         # Load domains
-        domains = pd.DataFrame.from_records(self.h5.root.Annotations.Domains[:])
+        domains = pandas.DataFrame.from_records(self.h5.root.Annotations.Domains[:])
 
         # Ensure sorted by coordinate - TODO: move this to DA import function
         domains['start'] = domains['Coords'].apply(lambda c:
@@ -1075,7 +1074,7 @@ class DarwinExporter(object):
 
         # Merge domains / entry-hog tables. Keep entries with no domains
         # so that we can count the size of the HOGs.
-        df = pd.merge(df, domains, on='EntryNr', how='left')
+        df = pandas.merge(df, domains, on='EntryNr', how='left')
 
         # Gather entry-domain for each HOG.
         hog2dom = []

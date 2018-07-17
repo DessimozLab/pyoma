@@ -466,7 +466,7 @@ class DarwinExporter(object):
 
         The computations are done using :mod:`homoeologs` module."""
         self.logger.info("Adding homoeolog confidence scores")
-        polyploid_genomes = self.h5.root.Genomes.where('IsPolyploid==True')
+        polyploid_genomes = self.h5.root.Genome.where('IsPolyploid==True')
         for genome in polyploid_genomes:
             genome_code = genome['UniProtSpeciesCode'].decode()
             self.logger.info("compute homoeolog confidence for {}".format(genome_code))

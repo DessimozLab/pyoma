@@ -8,6 +8,7 @@ from skfuzzy import control as ctrl
 from skfuzzy import gaussmf
 import sklearn
 import sklearn.preprocessing
+import tables
 
 try:
     from tqdm import tqdm

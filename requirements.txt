@@ -6,7 +6,7 @@ cython
 PySAIS
 biopython
 tqdm
-pandas
+pandas>=0.22
 matplotlib
 scikit-learn
 scikit-fuzzy

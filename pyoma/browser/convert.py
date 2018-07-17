@@ -1239,8 +1239,9 @@ class OmaGroupMetadataLoader(object):
         nr_groups = self._get_nr_of_groups()
         has_meta_data = self._check_textfiles_avail()
         if has_meta_data:
-            fingerprints = self._load_data(self.finger_name)
-            keywords = self._load_data(self.keyword_name)
+            data = self._load_data()
+            fingerprints = data['Fingerprints']
+            keywords = data['Keywords']
         else:
             common.package_logger.warning('No fingerprint nor keyword information available')
             fingerprints = [b'n/a'] * nr_groups
@@ -1300,9 +1301,8 @@ class OmaGroupMetadataLoader(object):
         as_list = json.loads(as_json.decode())
         return [el.encode('utf8') for el in as_list]
 
-    def _load_data(self, fname):
-        with open(os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), fname), 'rb') as fh:
-            return self._parse_darwin_string_list_file(fh)
+    def _load_data(self):
+        return callDarwinExport('GetGroupData()')
 
     def _get_nr_of_groups(self):
         etab = self.db.get_node('/Protein/Entries')

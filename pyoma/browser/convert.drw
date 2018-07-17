@@ -194,6 +194,19 @@ GetProteinsForGenome := proc(g)
     StoreResults(json(tab)):
 end:
 
+GetGroupData := proc()
+    global KeywordT, GroupIDs:
+    KeywordT := GroupIDs := []:
+    ReadProgram(ddir.'/Keywords.drw');
+    ReadProgram(ddir.'/Fingerprints');
+    if KeywordT = [] or GroupIDs = [] then
+        error('cannot load GroupData');
+    fi:
+    tab := table():
+    tab['Keywords'] := KeywordT:
+    tab['Fingerprints'] := Fingerprints;
+    StoreResults(json(tab));
+end:
 
 
 StoreResults := proc(res)

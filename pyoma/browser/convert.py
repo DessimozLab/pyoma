@@ -912,7 +912,7 @@ class DarwinExporter(object):
         return sizes
 
     def compute_domaincovered_sites(self):
-        dom_tab = self.h5.get_node('/Annotatioins/Domains')
+        dom_tab = self.h5.get_node('/Annotations/Domains')
         domains = pandas.DataFrame.from_records(dom_tab[:])
 
         def dlen(coords):
@@ -920,7 +920,7 @@ class DarwinExporter(object):
             return sum((doms[i + 1] - doms[i] + 1 for i in range(0, len(doms), 2)))
 
         # sum all parts of each domain region and store total length in DLen column
-        domains.iloc[:, 'DLen'] = domains['Coords'].apply(dlen)
+        domains = domains.assign(DLen=domains['Coords'].apply(dlen))
         # sum over all domains per protein
         cov_sites = domains.groupby('EntryNr').agg({'DLen': sum})
         return cov_sites
@@ -945,7 +945,7 @@ class DarwinExporter(object):
         assert numpy.all(numpy.equal(enr_col, numpy.arange(1, len(prot_tab)+1)))
 
         cov_sites = numpy.zeros(len(prot_tab), dtype=numpy.uint32)
-        for eNr, coverage in zip(cov_sites_df.index, cov_sites_df.values):
+        for eNr, coverage in zip(cov_sites_df.index, cov_sites_df.DLen.values):
             cov_sites[eNr-1] = coverage
         create_node = False
         try:

@@ -313,28 +313,31 @@ class PairwiseRelation(object):
 
     @property
     def distance(self):
-        return self._relation['Distance']
+        return float(self._relation['Distance'])
 
     @property
     def score(self):
-        return self._relation['Score']
+        return float(self._relation['Score'])
 
     @property
     def alignment_overlap(self):
-        return self._relation['AlignmentOverlap']
+        return float(self._relation['AlignmentOverlap'])
 
     @property
     def synteny_conservation_local(self):
-        return self._relation['SyntenyConservationLocal']
+        return float(self._relation['SyntenyConservationLocal'])
 
     @property
     def confidence(self):
-        return self._relation['Confidence']
+        return float(self._relation['Confidence'])
 
     @LazyProperty
     def rel_type(self):
-        type_map = self._db._get_pw_tab(self._relation['EntryNr1'], 'VPairs').get_enum("RelType")
-        return type_map(self._relation['RelType'])
+        if not isinstance(self._relation['RelType'], str):
+            type_map = self._db._get_pw_tab(self._relation['EntryNr1'], 'VPairs').get_enum("RelType")
+            return type_map(self._relation['RelType'])
+        else:
+            return self._relation['RelType']
 
     @LazyProperty
     def entry_1(self):

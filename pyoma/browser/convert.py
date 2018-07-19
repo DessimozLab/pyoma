@@ -1842,7 +1842,8 @@ def augment_genomes_json_download_file(fpath, h5, backup='.bak'):
             idx = numpy.searchsorted(tax['Name'], n, sorter=sorter)
             if tax['Name'][sorter[idx]] == n:
                 node['taxid'] = int(tax['NCBITaxonId'][sorter[idx]])
-            raise ValueError('not in taxonomy: {}'.format(n))
+            else:
+                raise ValueError('not in taxonomy: {}'.format(n))
         except Exception:
             common.package_logger.exception('Cannot identify taxonomy id')
 

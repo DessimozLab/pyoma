@@ -1,5 +1,7 @@
 from __future__ import division, print_function
 from builtins import str, chr, range, object, super, bytes
+
+import pandas
 from future.standard_library import hooks
 from PySAIS import sais
 from tempfile import NamedTemporaryFile
@@ -24,7 +26,6 @@ import hashlib
 import itertools
 import operator
 import fileinput
-import pandas as pd
 
 from .. import common
 from . import locus_parser
@@ -33,6 +34,7 @@ from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
 from .geneontology import GeneOntology, OntologyParser
 from .synteny import SyntenyScorer
+from .homoeologs import HomeologsConfidenceCalculator
 
 with hooks():
     import urllib.request
@@ -108,28 +110,31 @@ def gz_is_empty(fname):
 
 def load_tsv_to_numpy(args):
     fn, off1, off2, swap = args
-    relEnum = tablefmt.PairwiseRelationTable.columns['RelType'].enum._names
+    rel_desc = tablefmt.PairwiseRelationTable
+    # we need to get the enum as a dict to be able to extend it
+    # with the reversed labels, i.e. n:1
+    relEnum = rel_desc.columns['RelType'].enum._names
     relEnum['n:1'] = relEnum['m:1']
     relEnum['1:m'] = relEnum['1:n']
     relEnum['n:m'] = relEnum['m:n']
     read_dir = -1 if swap else 1
-    dtype = [('EntryNr1', 'i4'), ('EntryNr2', 'i4'), ('Score', 'f4'), ('RelType', 'i1'),
-             ('AlignmentOverlap', 'f2'), ('Distance', 'f4')]
+    tsv_dtype = [('EntryNr1', 'i4'), ('EntryNr2', 'i4'), ('Score', 'f4'), ('RelType', 'i1'),
+                 ('AlignmentOverlap', 'f2'), ('Distance', 'f4')]
     for curNr, curFn in enumerate([fn, fn.replace('.ext.', '.')]):
         try:
             if gz_is_empty(curFn):
-                return numpy.empty(0, dtype=tables.dtype_from_descr(tablefmt.PairwiseRelationTable))
+                return numpy.empty(0, dtype=tables.dtype_from_descr(rel_desc))
             with gzip.GzipFile(curFn) as fh:
-                augData = numpy.genfromtxt(fh, dtype=dtype,
-                                           names=[_[0] for _ in dtype],
-                                           delimiter='\t',
-                                           usecols=(0, 1, 2, 3, 4, 5),
-                                           converters={'EntryNr1': lambda nr: int(nr) + off1,
-                                                       'EntryNr2': lambda nr: int(nr) + off2,
-                                                       'RelType': lambda rel: (relEnum[rel[::read_dir].decode()]
-                                                                               if len(rel) <= 3
-                                                                               else relEnum[rel.decode()]),
-                                                       'Score': lambda score: float(score) / 100})
+                data = numpy.genfromtxt(fh, dtype=tsv_dtype,
+                                        names=[_[0] for _ in tsv_dtype],
+                                        delimiter='\t',
+                                        usecols=(0, 1, 2, 3, 4, 5),
+                                        converters={'EntryNr1': lambda nr: int(nr) + off1,
+                                                    'EntryNr2': lambda nr: int(nr) + off2,
+                                                    'RelType': lambda rel: (relEnum[rel[::read_dir].decode()]
+                                                                            if len(rel) <= 3
+                                                                            else relEnum[rel.decode()]),
+                                                    'Score': lambda score: float(score) / 100})
                 break
         except OSError as e:
             if curNr < 1:
@@ -139,12 +144,13 @@ def load_tsv_to_numpy(args):
                 raise e
 
     if swap:
-        reversed_cols = tuple(augData.dtype.names[z] for z in (1, 0, 2, 3, 4, 5))
-        augData.dtype.names = reversed_cols
-    full_table = numpy.empty(augData.size, dtype=tables.dtype_from_descr(tablefmt.PairwiseRelationTable))
-    full_table[0:] = augData
-    for col_not_in_tsv in set(full_table.dtype.names) - set(augData.dtype.names):
-        full_table[col_not_in_tsv] = -1
+        reversed_cols = tuple(data.dtype.names[z] for z in (1, 0, 2, 3, 4, 5))
+        data.dtype.names = reversed_cols
+    full_table = numpy.empty(data.size, dtype=tables.dtype_from_descr(rel_desc))
+    common_cols = list(data.dtype.names)
+    full_table[common_cols] = data[common_cols]
+    for col_not_in_tsv in set(full_table.dtype.names) - set(data.dtype.names):
+        full_table[col_not_in_tsv] = rel_desc.columns[col_not_in_tsv].dflt
     return full_table
 
 
@@ -164,7 +170,7 @@ def read_vps_from_tsv(gs, ref_genome):
         common.package_logger.info('adding job: {}'.format(tup))
         job_args.append(tup)
 
-    pool = mp.Pool()
+    pool = mp.Pool(processes=min(os.cpu_count(), 10))
     all_pairs = pool.map(load_tsv_to_numpy, job_args)
     pool.close()
     return numpy.lib.recfunctions.stack_arrays(all_pairs, usemask=False)
@@ -239,7 +245,7 @@ def get_or_create_tables_node(h5, path, desc=None):
 
 
 class DarwinExporter(object):
-    DB_SCHEMA_VERSION = '3.1'
+    DB_SCHEMA_VERSION = '3.2'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
 
     def __init__(self, path, logger=None, mode=None):
@@ -314,7 +320,8 @@ class DarwinExporter(object):
             data = self.call_darwin_export('GetGenomeData();')
         gstab = self.h5.create_table('/', 'Genome', tablefmt.GenomeTable,
                                      expectedrows=len(data['GS']))
-        self._write_to_table(gstab, data['GS'])
+        gs_data = self._parse_date_columns(data['GS'], gstab)
+        self._write_to_table(gstab, gs_data)
         gstab.cols.NCBITaxonId.create_csindex(filters=self._compr)
         gstab.cols.UniProtSpeciesCode.create_csindex(filters=self._compr)
         gstab.cols.EntryOff.create_csindex(filters=self._compr)
@@ -323,6 +330,32 @@ class DarwinExporter(object):
                                       expectedrows=len(data['Tax']))
         self._write_to_table(taxtab, _load_taxonomy_without_ref_to_itselfs(data['Tax']))
         taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
+
+    def _parse_date_columns(self, data, tab):
+        """convert str values in a date column to epoch timestamps"""
+        time_cols = [i for i, col in enumerate(tab.colnames) if tab.coldescrs[col].kind == 'time']
+        dflts = [tab.coldflts[col] for col in tab.colnames]
+
+        def map_data(col, data):
+            try:
+                val = data[col]
+                if col in time_cols and isinstance(val, str):
+                    for fmt in ('%b %d, %Y', '%B %d, %Y', '%d.%m.%Y', '%Y%m%d'):
+                        try:
+                            date = time.strptime(val, fmt)
+                            return time.mktime(date)
+                        except ValueError:
+                            pass
+                    raise ValueError("Cannot parse date of '{}'".format(val))
+                return val
+            except IndexError:
+                return dflts[col]
+
+        arr = numpy.empty(len(data), dtype=tab.dtype)
+        for i, row in enumerate(data):
+            as_tup = tuple(map_data(c, row) for c in range(len(dflts)))
+            arr[i] = as_tup
+        return arr
 
     def _convert_to_numpyarray(self, data, tab):
         """convert a list of list dataset into a numpy rec array that
@@ -417,24 +450,46 @@ class DarwinExporter(object):
         self.logger.info("Adding synteny scores for polyploid genomes")
         polyploid_genomes = self.h5.root.Genome.where('IsPolyploid==True')
         for genome in polyploid_genomes:
-            self.logger.info('compute synteny score for {}'
-                             .format(genome['UniProtSpeciesCode'].decode()))
-            synteny_scorer = SyntenyScorer(self.h5, genome['UniProtSpeciesCode'].decode())
+            genome_code = genome['UniProtSpeciesCode'].decode()
+            self.logger.info('compute synteny score for {}'.format(genome_code))
+            synteny_scorer = SyntenyScorer(self.h5, genome_code)
             rels = synteny_scorer.compute_scores()
-            self._callback_store_synteny_scores(genome['UniProtSpeciesCode'].decode(), rels)
+            self._callback_store_rel_data(
+                genome_code, rels, [('SyntenyConservationLocal', 'mean_synteny_score')])
 
-    def _callback_store_synteny_scores(self, genome, rels):
+    def add_homoeology_confidence(self):
+        """adds the homoeology confidence scores to the database.
+
+        This method should be called only after the synteny scores have
+        been computed and added to the database.
+
+        The computations are done using :mod:`homoeologs` module."""
+        self.logger.info("Adding homoeolog confidence scores")
+        polyploid_genomes = self.h5.root.Genome.where('IsPolyploid==True')
+        for genome in polyploid_genomes:
+            genome_code = genome['UniProtSpeciesCode'].decode()
+            self.logger.info("compute homoeolog confidence for {}".format(genome_code))
+            homoeolg_scorer = HomeologsConfidenceCalculator(self.h5, genome_code)
+            rels = homoeolg_scorer.calculate_scores()
+            self._callback_store_rel_data(
+                genome_code, rels, [("Confidence", "fuzzy_confidence_scaled")])
+
+    def _callback_store_rel_data(self, genome, rels_df, assignments):
         tab = self.h5.get_node('/PairwiseRelation/{}/within'.format(genome))
-        try:
-            rels_iter = rels.iterrows()
-            idx, cur_rel = next(rels_iter)
-            for row in tab:
-                if row['EntryNr1'] == cur_rel['entry_nr1'] and row['EntryNr2'] == cur_rel['entry_nr2']:
-                    row['SyntenyConservationLocal'] = cur_rel['mean_synteny_score']
-                    row.update()
-                    idx, cur_rel = next(rels_iter)
-        except StopIteration:
-            pass
+        df_all = pandas.DataFrame(tab.read())
+        if 'entry_nr1' in list(rels_df):
+            enr_col_names = ['entry_nr1', 'entry_nr2']
+        else:
+            enr_col_names = ['EntryNr1', 'EntryNr2']
+        merged = pandas.merge(df_all, rels_df, how="left", left_on=['EntryNr1', 'EntryNr2'],
+                              right_on=enr_col_names, validate='one_to_one')
+
+        for target, source in assignments:
+            # replace NaN in column from rels_df by the default value of the target column
+            merged.loc[merged[source].isnull(), source] = tab.coldescrs[target].dflt
+            # update the data in the target hdf5 column by the source column data
+            tab.modify_column(column=merged[source].as_matrix(), colname=target)
+        tab.flush()
 
     def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):
         # add ' ' after each sequence (Ascii is smaller than
@@ -465,6 +520,7 @@ class DarwinExporter(object):
                                         tables.StringAtom(1), (0,), 'concatenated cDNA sequences',
                                         expectedrows=3 * nrAA + nrProt)
         seqOff = cdnaOff = 0
+        loc_parser = locus_parser.LocusParser()
         for gs in gsNode.iterrows():
             genome = gs['UniProtSpeciesCode'].decode()
             cache_file = os.path.join(
@@ -500,12 +556,16 @@ class DarwinExporter(object):
 
                 locus_str = data['locs'][nr]
                 try:
-                    locus_tab = locus_parser.parse(eNr, locus_str)
+                    locus_tab = loc_parser.parse(locus_str, eNr)
                     locTab.append(locus_tab)
+                    len_cds = sum(z['End'] - z['Start']+1 for z in locus_tab)
+                    if len_cds != protTab.row['CDNABufferLength']-1:
+                        self.logger.warning("sum of exon lengths differ with cdna sequence for {}: {} vs {}"
+                                            .format(eNr, len_cds, protTab.row['CDNABufferLength']-1))
 
-                    protTab.row['LocusStart'] = locus_tab.Start.min()
-                    protTab.row['LocusEnd'] = locus_tab.End.max()
-                    protTab.row['LocusStrand'] = locus_tab[0].Strand
+                    protTab.row['LocusStart'] = locus_tab['Start'].min()
+                    protTab.row['LocusEnd'] = locus_tab['End'].max()
+                    protTab.row['LocusStrand'] = locus_tab[0]['Strand']
                 except ValueError as e:
                     self.logger.warning(e)
                 protTab.row['SubGenome'] = data['subgenome'][nr].encode('ascii')
@@ -520,7 +580,8 @@ class DarwinExporter(object):
         protTab.cols.MD5ProteinHash.create_csindex(filters=self._compr)
 
     def _write_to_table(self, tab, data):
-        tab.append(data)
+        if len(data)>0:
+            tab.append(data)
         self.logger.info('wrote %s : compression ratio %.3f%%' %
                          (tab._v_pathname, 100 * tab.size_on_disk / tab.size_in_memory))
 
@@ -592,9 +653,10 @@ class DarwinExporter(object):
 
         ec_tab = self.h5.create_table('/Annotations', 'EC', tablefmt.ECTable, 'Enzyme Commission annotations',
                                       expectedrows=1e7, createparents=True)
+        gs = self.h5.get_node('/Genome').read()
         with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man, \
              GeneOntologyManager(self.h5, '/Annotations/GeneOntology', '/Ontologies/GO') as go_man:
-            xref_importer = XRefImporter(db_parser, xref_tab, ec_tab, go_man, de_man)
+            xref_importer = XRefImporter(db_parser, gs, xref_tab, ec_tab, go_man, de_man)
             files = self.xref_databases()
             dbs_iter = fileinput.input(files=files)
             db_parser.parse_entrytags(dbs_iter)
@@ -656,7 +718,8 @@ class DarwinExporter(object):
         We take the first valid xref per gene with the ordering of xrefsources
         as given in the xrefsource_order."""
         xrefsource_order = ('UniProtKB/SwissProt', 'UniProtKB/TrEMBL',
-                            'Ensembl Gene', 'Ensembl Protein', 'FlyBase',)
+                            'Ensembl Gene', 'Ensembl Protein', 'FlyBase',
+                            'WormBase', 'EnsemblGenomes', 'RefSeq', 'SourceID')
 
         xrefs = self.h5.get_node('/XRef')
         source_enum = xrefs.get_enum('XRefSource')
@@ -667,15 +730,19 @@ class DarwinExporter(object):
             if xref['EntryNr'] != current_protein:
                 if current_protein:
                     past_proteins.add(current_protein)
-                    yield (current_protein, current_xrefs.pop()[1])
+                    yield (current_protein, current_xref[1])
                 current_protein = xref['EntryNr']
-                current_xrefs = [(1000, b'')]  # init with a sentinel
+                current_xref = (1000, b'')  # init with a sentinel
                 if current_protein in past_proteins:
-                    raise DataImportError('Data in /XRef is not sorted w.r.t. EntryNr')
-            if xref['XRefSource'] in canonical_sources and xref['XRefSource'] < current_xrefs[-1][0]:
-                current_xrefs.append((xref['XRefSource'], xref['XRefId']))
+                    raise DataImportError('Data in /XRef is not grouped w.r.t. EntryNr')
+            try:
+                rank = canonical_sources.index(xref['XRefSource'])
+                if rank < current_xref[0]:
+                    current_xref = (rank, xref['XRefId'])
+            except ValueError:
+                pass
         if current_protein:
-            yield (current_protein, current_xrefs.pop()[1])
+            yield (current_protein, current_xref[1])
 
     def add_canonical_id(self):
         """add one canonical xref id to the /Protein/Entries table."""
@@ -844,6 +911,20 @@ class DarwinExporter(object):
                 sizes[grp][grp_size] += 1
         return sizes
 
+    def compute_domaincovered_sites(self):
+        dom_tab = self.h5.get_node('/Annotations/Domains')
+        domains = pandas.DataFrame.from_records(dom_tab[:])
+
+        def dlen(coords):
+            doms = [int(pos) for pos in coords.split(b':')]
+            return sum((doms[i + 1] - doms[i] + 1 for i in range(0, len(doms), 2)))
+
+        # sum all parts of each domain region and store total length in DLen column
+        domains = domains.assign(DLen=domains['Coords'].apply(dlen))
+        # sum over all domains per protein
+        cov_sites = domains.groupby('EntryNr').agg({'DLen': sum})
+        return cov_sites
+
     def add_domain_covered_sites_counts(self):
         """Stores the number of AA covered by a DomainAnnotation.
 
@@ -857,13 +938,15 @@ class DarwinExporter(object):
         :return: covered fractions by domains for each protein
         :rtype: numpy.array"""
         self.logger.info("Counting covered sites by domains")
+        cov_sites_df = self.compute_domaincovered_sites()
+
         prot_tab = self.h5.get_node('/Protein/Entries')
-        dom_tab = self.h5.get_node('/Annotations/Domains')
+        enr_col = prot_tab.col('EntryNr')
+        assert numpy.all(numpy.equal(enr_col, numpy.arange(1, len(prot_tab)+1)))
+
         cov_sites = numpy.zeros(len(prot_tab), dtype=numpy.uint32)
-        for row in tqdm(dom_tab, 'Parsing domain annotations'):
-            assert prot_tab[row['EntryNr']-1]['EntryNr'] == row['EntryNr']
-            doms = [int(pos) for pos in row['Coords'].split(b':')]
-            cov_sites[row['EntryNr']-1] += sum((doms[i + 1]-doms[i] + 1 for i in range(0, len(doms), 2)))
+        for eNr, coverage in zip(cov_sites_df.index, cov_sites_df.DLen.values):
+            cov_sites[eNr-1] = coverage
         create_node = False
         try:
             dom_cov_tab = self.h5.get_node('/Protein/CoveredSitesByDomains')
@@ -955,12 +1038,11 @@ class DarwinExporter(object):
                 while (jj < len(sa)) and (seqs[sa[jj]:(sa[jj] + k)] == kmer):
                     jj += 1
                 kmer_lookup_arr.append(idx[ii:jj])
+                # New start
+                ii = jj
             else:
                 # End or not found
                 kmer_lookup_arr.append([])
-
-            # New start
-            ii = jj
 
         if db.filename != self.h5.filename:
             self.logger.info('storing external links to SequenceIndex and KmerLookup')
@@ -988,7 +1070,7 @@ class DarwinExporter(object):
         # Load the HOG -> Entry table to memory
         prot_tab = self.h5.root.Protein.Entries
         # TODO: work out how to do this in a neater way
-        df = pd.DataFrame.from_records(((z['EntryNr'], z['OmaHOG'], z['SeqBufferLength'])
+        df = pandas.DataFrame.from_records(((z['EntryNr'], z['OmaHOG'], z['SeqBufferLength'])
                                         for z in prot_tab.iterrows()),
                                        columns=['EntryNr', 'OmaHOG', 'SeqBufferLength'])
         # Strip singletons
@@ -998,7 +1080,7 @@ class DarwinExporter(object):
         df['OmaHOG'] = df['OmaHOG'].apply(lambda i: int(i[4:].split(b'.')[0]))
 
         # Load domains
-        domains = pd.DataFrame.from_records(self.h5.root.Annotations.Domains[:])
+        domains = pandas.DataFrame.from_records(self.h5.root.Annotations.Domains[:])
 
         # Ensure sorted by coordinate - TODO: move this to DA import function
         domains['start'] = domains['Coords'].apply(lambda c:
@@ -1008,7 +1090,7 @@ class DarwinExporter(object):
 
         # Merge domains / entry-hog tables. Keep entries with no domains
         # so that we can count the size of the HOGs.
-        df = pd.merge(df, domains, on='EntryNr', how='left')
+        df = pandas.merge(df, domains, on='EntryNr', how='left')
 
         # Gather entry-domain for each HOG.
         hog2dom = []
@@ -1070,17 +1152,23 @@ class DarwinExporter(object):
         tab.flush()  # Required?
 
 
-def download_url_if_not_present(url):
+def download_url_if_not_present(url, force_copy=False):
+    if url.startswith('file://') and not force_copy:
+        fname = url[len('file://'):]
+        if os.path.exists(fname):
+            common.package_logger.info('using file "{}" directly from source without copying.'.format(url))
+            return fname
     tmpfolder = os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH', '/tmp'), "Browser", "xref")
     basename = url.split('/')[-1]
     fname = os.path.join(tmpfolder, basename)
     if not os.path.exists(tmpfolder):
         os.makedirs(tmpfolder)
     if not os.path.exists(fname):
+        common.package_logger.info("downloading {} into {}".format(url, fname))
         try:
             urllib.request.urlretrieve(url, fname)
         except urllib.request.URLError:
-            common.package_logger.warn('cannot access domain url')
+            common.package_logger.warn('cannot download {}'.format(url))
     return fname
 
 
@@ -1089,10 +1177,36 @@ def iter_domains(url):
 
     fname = download_url_if_not_present(url)
     with gzip.open(fname, 'rt') as uncompressed:
-        csv_reader = csv.reader(uncompressed)
+        dialect = csv.Sniffer().sniff(uncompressed.read(4096))
+        uncompressed.seek(0)
+        csv_reader = csv.reader(uncompressed, dialect)
+        col_md5, col_id, col_coord = (None,) * 3
+        coord_fromat_trans = str.maketrans('-,', '::')
+
         for lineNr, row in enumerate(csv_reader):
+            if col_md5 is None:
+                # identify which tuples to use.
+                if len(row) >= 9:
+                    # representative_proteins format. use columns 5-7
+                    col_md5, col_id, col_coord = 4, 5, 6
+                elif len(row) == 3:
+                    # additionally created ones, minimal format
+                    col_md5, col_id, col_coord = 0, 1, 2
+                else:
+                    raise DataImportError("Unknown Domain Annotation format in {}".format(uncompressed.filename))
             try:
-                dom = DomainTuple(*row[0:3])
+                dom = DomainTuple(row[col_md5], row[col_id], row[col_coord].translate(coord_fromat_trans))
+                if lineNr < 10:
+                    # do some sanity checks on the first few lines
+                    if re.match(r'[0-9a-f]{32}$', dom.md5) is None:
+                        raise DataImportError("md5 hash of line {:d} has unexpected values: {}"
+                                              .format(lineNr, dom.md5))
+                    if re.match(r'([1-4]\.\d+\.\d+\.\d+|PF\d+)$', dom.id) is None:
+                        raise DataImportError("Domain-ID of line {:d} has unexpected value: {}"
+                                              .format(lineNr, dom.id))
+                    if re.match(r'\d+:\d+', dom.coords) is None:
+                        raise DataImportError("Domain coordinates in line {:d} has unexpected value: {}"
+                                              .format(lineNr, dom.coords))
                 yield dom
             except Exception:
                 common.package_logger.exception('cannot create tuple from line {}'.format(lineNr))
@@ -1105,7 +1219,29 @@ def only_pfam_or_cath_domains(iterable):
             yield dom
 
 
+def filter_duplicated_domains(iterable):
+    """filter duplicated domain annotations that come from different proteins
+    with the exact same sequence."""
+    seen = set([])
+    ignored = 0
+    for dom in iterable:
+        if not dom in seen:
+            seen.add(dom)
+            yield dom
+        else:
+            ignored += 1
+    common.package_logger.info("skipped {} duplicated domains. {} distinct domains yielded"
+                               .format(ignored, len(seen)))
+
+
 class OmaGroupMetadataLoader(object):
+    """OMA Group Meta data extractor.
+
+    This class provides the means to import the Keywords and Fingerprints
+    of the OMA Groups into the hdf5 database. The data is stored under
+    in the node defined by :attr:`meta_data_path`, which defaults to
+    /OmaGroups/MetaData.
+    """
     keyword_name = "Keywords.drw"
     finger_name = "Fingerprints"
 
@@ -1119,8 +1255,9 @@ class OmaGroupMetadataLoader(object):
         nr_groups = self._get_nr_of_groups()
         has_meta_data = self._check_textfiles_avail()
         if has_meta_data:
-            fingerprints = self._load_data(self.finger_name)
-            keywords = self._load_data(self.keyword_name)
+            data = self._load_data()
+            fingerprints = data['Fingerprints']
+            keywords = data['Keywords']
         else:
             common.package_logger.warning('No fingerprint nor keyword information available')
             fingerprints = [b'n/a'] * nr_groups
@@ -1130,6 +1267,7 @@ class OmaGroupMetadataLoader(object):
 
         grptab, keybuf = self._create_db_objects(nr_groups)
         self._fill_data_into_db(fingerprints, keywords, grptab, keybuf)
+        grptab.modify_column(column=self._get_group_member_counts(), colname='NrMembers')
         self._create_indexes(grptab)
 
     def _create_db_objects(self, nrows):
@@ -1160,11 +1298,13 @@ class OmaGroupMetadataLoader(object):
             key = numpy.ndarray((len(keywords[i]),), buffer=keywords[i],
                                 dtype=tables.StringAtom(1))
             key_buf.append(key)
+            buf_pos += len(keywords[i])
         grp_tab.flush()
         key_buf.flush()
 
     def _create_indexes(self, grp_tab):
         grp_tab.cols.Fingerprint.create_csindex()
+        grp_tab.cols.GroupNr.create_csindex()
 
     def _parse_darwin_string_list_file(self, fh):
         data = fh.read()
@@ -1177,9 +1317,8 @@ class OmaGroupMetadataLoader(object):
         as_list = json.loads(as_json.decode())
         return [el.encode('utf8') for el in as_list]
 
-    def _load_data(self, fname):
-        with open(os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), fname), 'rb') as fh:
-            return self._parse_darwin_string_list_file(fh)
+    def _load_data(self):
+        return callDarwinExport('GetGroupData()')
 
     def _get_nr_of_groups(self):
         etab = self.db.get_node('/Protein/Entries')
@@ -1187,6 +1326,13 @@ class OmaGroupMetadataLoader(object):
             return etab[etab.colindexes['OmaGroup'][-1]]['OmaGroup']
         except KeyError:
             return max(etab.col('OmaGroup'))
+
+    def _get_group_member_counts(self):
+        grp_nr, cnts = numpy.unique(self.db.get_node('/Protein/Entries').col('OmaGroup'), return_counts=True)
+        if grp_nr[0] == 0:
+            cnts = cnts[1:]
+        assert(len(cnts) == self._get_nr_of_groups())
+        return cnts
 
     def _check_textfiles_avail(self):
         rootdir = os.getenv('DARWIN_BROWSERDATA_PATH','')
@@ -1355,7 +1501,7 @@ class HogConverter(object):
         for fam in p.getToplevelGroups():
             m = self.fam_re.match(fam.get('og'))
             fam_nr = int(m.group('fam_nr'))
-            levs.extend([(fam_nr, n.getparent().get('og'), n.get('value'),)
+            levs.extend([(fam_nr, n.getparent().get('og'), n.get('value'),) + self.get_hog_scores(n.getparent())
                          for n in p._findSubNodes('property', root=fam)
                          if n.get('name') == "TaxRange"])
 
@@ -1367,12 +1513,36 @@ class HogConverter(object):
         return levs
 
     def write_hogs(self):
+        """update the Entry Table with the newly collected OmaHOG values for all
+        the proteins at once.
+
+        .. note: This method will overwrite any previous value of the OmaHOG column"""
         self.entry_tab.modify_column(0, len(self.entry_tab), 1, self.hogs[1:], 'OmaHOG')
         self.entry_tab.flush()
 
+    def get_hog_scores(self, og_node):
+        """extract the scores associated with an orthologGroup node
+
+        only scores that are defined in HOGsTable are extract. The method
+        returns a tuple with the scores in the order of the score fields."""
+        scores = collections.OrderedDict([(score, tablefmt.HOGsTable.columns[score].dflt)
+                                          for score in ('CompletenessScore', 'ImpliedLosses')])
+        for score in og_node.iterfind('{*}score'):
+            score_id = score.get("id")
+            if score_id == "CompletenessScore":
+                scores['CompletenessScore'] = float(score.get('value'))
+            elif score_id == "ImpliedLosses":
+                scores['ImpliedLosses'] = int(score.get('value'))
+        return tuple(scores.values())
+
 
 class XRefImporter(object):
-    def __init__(self, db_parser, xref_tab, ec_tab, go_manager, desc_manager):
+    """Object to import various types of crossreferences into hdf5.
+
+    The XRefImporter registers at a db_parser object various handlers
+    to import the various types of xrefs, namely ids, go-terms,
+    EC annotations and descriptions."""
+    def __init__(self, db_parser, genomes_tab, xref_tab, ec_tab, go_manager, desc_manager):
         self.xrefs = []
         self.ec = []
         self.xref_tab = xref_tab
@@ -1396,6 +1566,7 @@ class XRefImporter(object):
             'Synonyms': (xrefEnum['Synonym'], 'unchecked'),
             'HGNC_Id': (xrefEnum['HGNC'], 'unchecked'),
             'PMP': (xrefEnum['PMP'], 'exact'),
+            'PDB': (xrefEnum['PDB'], 'unchecked'),
             'EMBL': (xrefEnum['EMBL'], 'unchecked'),
             'ID': (xrefEnum['SourceID'], 'exact'),
             'AC': (xrefEnum['SourceAC'], 'exact'),
@@ -1416,28 +1587,51 @@ class XRefImporter(object):
                                       lambda key, enr, typ=xrefEnum['UniProtKB/TrEMBL']:
                                       self.remove_uniprot_code_handler(key, enr, typ))
 
+        # register the potential_flush as end_of_entry_notifier
+        db_parser.add_end_of_entry_notifier(self.potential_flush)
+
         self.db_parser = db_parser
         self.xrefEnum = xrefEnum
         self.ENS_RE = re.compile(r'ENS(?P<species>[A-Z]{0,3})(?P<typ>[GTP])(?P<num>\d{11})')
         self.FB_RE = re.compile(r'FB(?P<typ>[gnptr]{2})(?P<num>\d{7})')
         self.NCBI_RE = re.compile(r'[A-Z]{3}\d{5}\.\d$')
+        self.WB_RE = re.compile(r'WBGene\d{8}$')
         self.EC_RE = re.compile(r'\d+\.(\d+|-)\.(\d+|-)\.(\d+|-)')
+        self.ENSGENOME_RE = re.compile(b'Ensembl (Metazoa|Plant|Fungi|Protist|Bacteria)', re.IGNORECASE)
+
+        self.FLUSH_SIZE = 5e6
+
+        # info about current genome
+        self.genomes_tab = genomes_tab
+        self._cur_genome = None
+
+    def _get_genome_info(self, entry_nr):
+        if not (self._cur_genome is not None and self._cur_genome['EntryOff'] < entry_nr <=
+                self._cur_genome['EntryOff'] + self._cur_genome['TotEntries']):
+            self._cur_genome = self.genomes_tab[self.genomes_tab['EntryOff'].searchsorted(entry_nr+1)-1]
+        return self._cur_genome
+
+    def from_EnsemblGenome(self, entry_nr):
+        genome_info = self._get_genome_info(entry_nr)
+        return self.ENSGENOME_RE.search(genome_info['Release']) is not None
 
     def flush_buffers(self):
         common.package_logger.info('flushing xrefs and ec buffers')
         if len(self.xrefs) > 0:
-            self.xref_tab.append(self.xrefs)
+            self.xref_tab.append(sorted(uniq(self.xrefs)))
             self.xrefs = []
         if len(self.ec) > 0:
-            self.ec_tab.append(self.ec)
+            self.ec_tab.append(sorted(uniq(self.ec)))
             self.ec = []
+
+    def potential_flush(self):
+        if len(self.xrefs) > self.FLUSH_SIZE:
+            self.flush_buffers()
 
     def _add_to_xrefs(self, eNr, enum_nr, key, verif='unchecked'):
         if not isinstance(eNr, int):
             raise ValueError('eNr is of wrong type:' + str(eNr))
         self.xrefs.append((eNr, enum_nr, key.encode('utf-8'), self.verif_enum[verif], ))
-        if len(self.xrefs) > 5e6:
-            self.flush_buffers()
 
     def key_value_handler(self, key, eNr, enum_nr, verif='unchecked'):
         """basic handler that simply adds a key (the xref) under a given enum_nr"""
@@ -1447,6 +1641,8 @@ class XRefImporter(object):
         """try to split the myltikey field using '; ' as a delimiter and add each
         part individually under the passed enum_nr id type."""
         for key in multikey.split('; '):
+            if key.startswith('Rep'):
+                continue
             pos = key.find('.Rep')
             if pos > 0:
                 key = key[0:pos]
@@ -1470,11 +1666,13 @@ class XRefImporter(object):
                     'ensembl: ({}, {}, {})'.format(key, typ, enum_nr))
                 self._add_to_xrefs(eNr, enum_nr, key, 'exact')
 
-            for enum, regex in {'FlyBase': self.FB_RE, 'NCBI': self.NCBI_RE}.items():
+            for enum, regex in {'FlyBase': self.FB_RE, 'NCBI': self.NCBI_RE, 'WormBase': self.WB_RE}.items():
                 match = regex.match(key)
                 if match is not None:
                     enum_nr = self.xrefEnum[enum]
                     self._add_to_xrefs(eNr, enum_nr, key, 'unchecked')
+            if self.from_EnsemblGenome(eNr):
+                self._add_to_xrefs(eNr, self.xrefEnum.EnsemblGenomes, key, 'exact')
 
     def go_handler(self, gos, enr):
         self.go_manager.add_annotations(enr, gos)
@@ -1537,11 +1735,15 @@ class DarwinDbEntryParser:
         """Initializes a Parser for SGML formatted darwin database file
         """
         self.tag_handlers = collections.defaultdict(list)
+        self.end_of_entry_notifier = []
 
     def add_tag_handler(self, tag, handler):
         """add a callback handler for a certain tag"""
         self.tag_handlers[tag].append(handler)
         common.package_logger.debug('# handlers for {}: {}'.format(tag, len(self.tag_handlers[tag])))
+
+    def add_end_of_entry_notifier(self, handler):
+        self.end_of_entry_notifier.append(handler)
 
     def parse_entrytags(self, fh):
         """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,
@@ -1554,7 +1756,7 @@ class DarwinDbEntryParser:
         for line in fh:
             line = line.strip()
             if not line.startswith('<E>'):
-                common.package_logger.debug('skipping line:' + line.encode('utf-8'))
+                common.package_logger.debug('skipping line:' + line)
                 continue
 
             eNr += 1
@@ -1571,6 +1773,8 @@ class DarwinDbEntryParser:
                         handler(value, eNr)
                         # common.package_logger.debug('called handler {} with ({},{})'.format(
                         #    handler, value.encode('utf-8'), eNr))
+            for notifier in self.end_of_entry_notifier:
+                notifier()
 
 
 DomainDescription = collections.namedtuple('DomainDescription',
@@ -1600,23 +1804,75 @@ class PfamDomainNameParser(CathDomainNameParser):
     source = b'Pfam'
 
 
-def getDebugLogger():
+def augment_genomes_json_download_file(fpath, h5, backup='.bak'):
+    """Augment the genomes.json file in the download section with additional info
+
+    This function stores the ncbi taxonomy identifiers of internal nodes and adds
+    the number of ancestral genes to the internal nodes.
+
+    :param fpath: path to genomes.json file
+    :param h5: hdf5 database handle."""
+    common.package_logger.info("Augmenting genomes.json file with Nr of HOGs per level")
+    # load nr of ancestral genomes at each level
+    ancestral_hogs = collections.Counter()
+    step = 2**15
+    hog_tab = h5.get_node('/HogLevel')
+    for start in range(0, len(hog_tab), step):
+        ancestral_hogs.update((l.decode() for l in hog_tab.read(start, stop=start+step, field='Level')))
+    # load taxonomy and sorter by Name
+    tax = h5.get_node('/Taxonomy').read()
+    sorter = numpy.argsort(tax['Name'])
+    with open(fpath, 'rt') as fh:
+        genomes = json.load(fh)
+    os.rename(fpath, fpath + '.bak')
+
+    def traverse(node):
+        if 'children' not in node:
+            return
+        for child in node['children']:
+            traverse(child)
+        try:
+            node['nr_hogs'] = ancestral_hogs[node['name']]
+        except KeyError as e:
+            common.package_logger.warning('no ancestral hog counts for '+node['name'])
+            node['nr_hogs'] = 0
+
+        try:
+            n = node['name'].encode('utf-8')
+            idx = numpy.searchsorted(tax['Name'], n, sorter=sorter)
+            if tax['Name'][sorter[idx]] == n:
+                node['taxid'] = int(tax['NCBITaxonId'][sorter[idx]])
+            else:
+                raise ValueError('not in taxonomy: {}'.format(n))
+        except Exception:
+            common.package_logger.exception('Cannot identify taxonomy id')
+
+    traverse(genomes)
+    with open(fpath, 'wt') as fh:
+        json.dump(genomes, fh)
+
+
+def getLogger(level='DEBUG'):
     import logging
 
     log = logging.getLogger('pyoma')
-    log.setLevel(logging.DEBUG)
+    if isinstance(level, str):
+        level = logging.getLevelName(level.upper())
+        if not isinstance(level, int):
+            level = logging.DEBUG
+    log.setLevel(level)
     logHandler = logging.StreamHandler()
-    logHandler.setLevel(logging.DEBUG)
+    logHandler.setLevel(level)
     logHandler.setFormatter(logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     log.addHandler(logHandler)
     return log
 
 
-def main(name="OmaServer.h5", k=6, idx_name=None):
+def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level='INFO'):
     idx_name = (name + '.idx') if idx_name is None else idx_name
 
-    log = getDebugLogger()
+    log = getLogger(log_level)
     x = DarwinExporter(name, logger=log)
     x.add_version()
     x.add_species_data()
@@ -1626,10 +1882,14 @@ def main(name="OmaServer.h5", k=6, idx_name=None):
     x.add_hogs()
     x.add_xrefs()
     x.add_synteny_scores()
-    x.add_domain_info(only_pfam_or_cath_domains(itertools.chain(
-        iter_domains('http://download.cathdb.info/gene3d/CURRENT_RELEASE/mdas.csv.gz'),
+    x.add_homoeology_confidence()
+    if domains is None:
+        domains = ["file://dev/null"]
+    x.add_domain_info(filter_duplicated_domains(only_pfam_or_cath_domains(itertools.chain(
+        iter_domains('ftp://orengoftp.biochem.ucl.ac.uk/gene3d/CURRENT_RELEASE/' +
+                     'representative_uniprot_genome_assignments.csv.gz'),
         iter_domains('file://{}/additional_domains.mdas.csv.gz'.format(os.getenv('DARWIN_BROWSERDATA_PATH', '')))
-    )))
+    ))))
     x.add_domainname_info(itertools.chain(
         CathDomainNameParser('http://download.cathdb.info/cath/releases/latest-release/'
                              'cath-classification-data/cath-names.txt').parse(),
@@ -1643,4 +1903,8 @@ def main(name="OmaServer.h5", k=6, idx_name=None):
     x.create_indexes()
     x.add_sequence_suffix_array(k=k, fn=idx_name)
     x.update_summary_stats()
+
+    genomes_json_fname = os.path.normpath(os.path.join(
+        os.path.dirname(name), '..', 'downloads', 'genomes.json'))
+    augment_genomes_json_download_file(genomes_json_fname, x.h5)
     x.close()

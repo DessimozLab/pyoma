@@ -4,6 +4,8 @@ import os
 import Bio.Seq
 import Bio.Data.CodonTable
 import pyoma.browser.db as pyomadb
+import tables
+import numpy
 
 
 class DatabaseChecks(unittest.TestCase):
@@ -67,3 +69,14 @@ class DatabaseChecks(unittest.TestCase):
         for g in (b'YEAST', b'HUMAN', b'PLAF7', b'ARATH', b'MOUSE'):
             for row in genome_tab.read_where('UniProtSpeciesCode == g'):
                 self.assertFalse(row['IsPolyploid'], "{} is recorded to be a ployploid genome".format(g))
+
+    def test_synteny_scores_exist(self):
+        for g in ('WHEAT', 'BRANA', 'GOSHI'):
+            try:
+                t = self.db.get_hdf5_handle().get_node('/PairwiseRelation/{}/within'.format(g))
+            except tables.NoSuchNodeError:
+                # if species does not exist, we skip - not all datasets will have these genomes
+                continue
+            syn_col = t.col('SyntenyConservationLocal')
+            computed_pairs = numpy.where(syn_col >= 0)
+            self.assertLess(0, len(computed_pairs[0]), "No synteny values computed for {}".format(g))

@@ -17,6 +17,8 @@ class HOGsTable(tables.IsDescription):
     Fam = tables.Int32Col(pos=1)
     ID = tables.StringCol(255, pos=2)
     Level = tables.StringCol(255, pos=3)
+    CompletenessScore = tables.Float32Col(pos=4, dflt=-1)
+    ImpliedLosses = tables.Int32Col(pos=5, dflt=-1)
 
 
 class OrthoXmlHogTable(tables.IsDescription):
@@ -65,18 +67,21 @@ class PairwiseRelationTable(tables.IsDescription):
     Distance = tables.Float32Col(pos=4, dflt=-1)
     AlignmentOverlap = tables.Float16Col(pos=5, dflt=-1)
     SyntenyConservationLocal = tables.Float16Col(pos=6, dflt=-1)
-    SyntenyConservationChromosome = tables.Float16Col(pos=7, dflt=-1)
+    Confidence = tables.Float16Col(pos=7, dflt=-1)
 
 
 class XRefTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     XRefSource = tables.EnumCol(
-        tables.Enum(['UniProtKB/SwissProt', 'UniProtKB/TrEMBL', 'n/a', 'EMBL',
-                     'Ensembl Gene', 'Ensembl Transcript', 'Ensembl Protein',
-                     'RefSeq', 'EntrezGene', 'GI', 'WikiGene', 'IPI',
-                     'SourceID', 'SourceAC', 'PMP', 'NCBI', 'FlyBase',
-                     'HGNC', 'Gene Name', 'Synonym', 'Protein Name',
-                     'ORF Name', 'Ordered Locus Name']),
+        tables.Enum({'UniProtKB/SwissProt': 0, 'UniProtKB/TrEMBL': 10,
+                     'Ensembl Protein': 20, 'Ensembl Gene': 25,  'Ensembl Transcript': 30,
+                     'RefSeq': 40, 'EntrezGene': 50, 'FlyBase': 60, 'WormBase': 65,
+                     'EnsemblGenomes': 70, 'NCBI': 75, 'EMBL': 80,
+                     'SourceID': 95, 'SourceAC': 100,
+                     'HGNC': 105, 'Gene Name': 110, 'Synonym': 115, 'Protein Name': 120,
+                     'ORF Name': 125, 'Ordered Locus Name': 130,
+                     'PMP': 150, 'PDB': 155, 'WikiGene': 160,
+                     'IPI': 240, 'GI': 241, 'n/a': 255}),  # last line: deprecated systems
         'n/a', base='uint8', pos=2)
     XRefId = tables.StringCol(50, pos=3)
     Verification = tables.EnumCol(
@@ -108,7 +113,8 @@ class GenomeTable(tables.IsDescription):
     Release = tables.StringCol(128, pos=8)
     Url = tables.StringCol(255, pos=9)
     Source = tables.StringCol(255, pos=10)
-    IsPolyploid = tables.BoolCol(pos=11)
+    Date = tables.Time32Col(pos=11)
+    IsPolyploid = tables.BoolCol(pos=12)
 
 
 class TaxonomyTable(tables.IsDescription):
@@ -153,3 +159,4 @@ class OmaGroupTable(tables.IsDescription):
     Fingerprint = tables.StringCol(7, pos=1)
     KeywordOffset = tables.UInt32Col(pos=2)
     KeywordLength = tables.UInt16Col(pos=3)
+    NrMembers = tables.UInt16Col(pos=4)

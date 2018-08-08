@@ -21,6 +21,29 @@ which will create the OmaServer.h5 file in the release path. If the optional arg
 specified, the release is extracted from the environment variable *DARWIN_BROWSERDATA_PATH*.
 
 
+Note on CATH Domains
+####################
+CATH domains are available for uniprot's reference proteomes. The pipeline
+to compute CATH domains is available and can be used to also predict domains
+for sequences not annotated so far. The required steps are listed here:
+
+  - TODO: list steps.
+
+
+NCBI Linkout files
+##################
+
+Since 2017 we OMA is an accepted Linkout resource on the NCBI websites. For each new release
+the data needs to be converted and uploaded to NCBI's FTP server. Integration from there
+happens automatically every week or so. Details can be found on the
+`NCBI Linkout page <https://www.ncbi.nlm.nih.gov/projects/linkout/doc/nonbiblinkout.html>`_
+
+The script `bin/ncbi_linkout` does the conversion and also uploads the
+resulting files (each step can also be done separately, note the command
+line options for that). The password and user can be found on the group's
+intranet wiki page.
+
+
 Module documentation
 ####################
 

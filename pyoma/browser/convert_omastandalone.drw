@@ -7,7 +7,7 @@ ReadProgram(root_dir.'/parameters.drw');
 G := TimedCallSystem('find -L '.root_dir.'/DB -name "*.fa" -print')[2];
 G := sort(SearchDelim('\n',G));
 _next_new_taxid := -100;
-genomes := []: DBs := table(): GS := table(): TaxonIDs := table(): isContig := []:
+genomes := []: DBs := table(): GS := table(): TaxonIDs := table(): isContig := []: DBhashes := []:
 for g in G do
     off := SearchAllString('/', g);
     gname := g[off[-1]+1..-1];
@@ -24,6 +24,7 @@ for g in G do
     else
         TaxonIDs[gname] := tax;
     fi:
+    DBhashes := append(DBhashes, sha2(DB['string'])[1..16]):
 od:
 NS := length(genomes);
 Goff := CreateArray(1..NS+1):
@@ -116,8 +117,14 @@ GetGenomeData := proc()
         g := genomes[gNr];
         sciname := GS[g,SCINAME];
         if sciname='' then sciname := g fi:
+        last_modified := GS[g, 'DATE'];
+        if last_modified = '' then
+            fs := FileStat(GS[g,FileName]);
+            last_modified := fs['st_mtime'];
+        fi:
         gs := append(gs, [TaxonIDs[g], GS[g, '5LETTERNAME'], GS[g,TotEntries],
-            GS[g,TotAA], Goff[gNr], sciname, GS[g,DBRELEASE],
+            GS[g,TotAA], Goff[gNr], sciname ,GS[g,COMMONNAME], GS[g, SYNNAME],
+            GS[g,DBRELEASE], GS[g,URL], GS[g,SOURCE], last_modified,
             SubGenome[g]<>0]);
     od:
 

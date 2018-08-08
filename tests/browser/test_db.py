@@ -149,8 +149,9 @@ class DatabaseTests(unittest.TestCase):
             jj = random.randint(ii + min_length, elen)
 
             s = self.db.get_sequence(enr)[ii:jj]
-            self.assertTrue((enr in {z[0] for z in self.db.seq_search.search(s, is_sanitised=True)[1]}),
-                            'exact search for entry {} failed.'.format(i))
+            approx_search_results = self.db.seq_search.approx_search(s, is_sanitised=True)
+            self.assertIn(enr, {z[0] for z in approx_search_results},
+                          'approx search for entry {}[{}:{}] failed.'.format(i, ii, jj))
 
     def test_oma_group_from_numeric_id(self):
         group_id = 5
@@ -162,6 +163,11 @@ class DatabaseTests(unittest.TestCase):
     def test_fingerprint(self):
         fingerprint = 'ADRIANA'
 
+    def test_exon_structure(self):
+        query = 14677   # Q8I237
+        exons = self.db.get_exons(query)
+        self.assertEqual(3, len(exons))
+
 
 class XRefDatabaseMock(Database):
     def __init__(self):
@@ -169,7 +175,7 @@ class XRefDatabaseMock(Database):
                              driver_core_backing_store=0)
         xref = numpy.zeros(10, tables.dtype_from_descr(tablefmt.XRefTable))
         xref['EntryNr'] = numpy.arange(1, 6, 0.5).astype(numpy.int32)
-        xref['XRefSource'] = numpy.arange(10) % 5
+        xref['XRefSource'] = numpy.tile([0, 20], 5)
         xref['XRefId'] = ['XA{:03}g1.4'.format(i) for i in range(10)]
         f.create_table('/', 'XRef', tablefmt.XRefTable, obj=xref)
         f.create_group('/', 'XRef_Index')
@@ -250,9 +256,17 @@ class TaxonomyTest(unittest.TestCase):
     def test_induced_tax_simple_subtree(self):
         members = [559292, 284811]
         phylo = self.tax.get_induced_taxonomy(members)
+        expected = {"id": 0, "name": "LUCA", "children": [
+                        {"id": 284811, "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)"},
+                        {"id": 559292, "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"}]}
+        self.assertEqual(expected, phylo.as_dict())
+
+    def test_induced_tax_with_parents_subtree(self):
+        members = [559292, 284811]
+        phylo = self.tax.get_induced_taxonomy(members, augment_parents=True)
         expected = {"id": 4893, "name": "Saccharomycetaceae", "children": [
-                        {"id":284811, "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)"},
-                        {"id":559292, "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"}]}
+                        {"id": 284811, "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)"},
+                        {"id": 559292, "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"}]}
         self.assertEqual(expected, phylo.as_dict())
 
     def test_induced_tax_with_gaps(self):

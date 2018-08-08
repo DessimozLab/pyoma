@@ -65,7 +65,7 @@ class StandaloneExporter(DarwinExporter):
             os.environ['DARWIN_BROWSERDATA_PATH'],
             'EstimatedSpeciesTree.nwk')
 
-        hog_converter = StandaloneHogConverter(entryTab)
+        hog_converter = HogConverter(entryTab)
 
         if os.path.exists(tree_filename):
             hog_converter.attach_newick_taxonomy(tree_filename)
@@ -105,14 +105,8 @@ class StandaloneExporter(DarwinExporter):
         return self._get_genome_database_paths()
 
 
-class StandaloneHogConverter(HogConverter):
-    def __init__(self, entry_tab):
-        super(StandaloneHogConverter, self).__init__(entry_tab)
-        self.fam_re = re.compile(r'(?P<fam_nr>\d+)')
-
-
-def import_oma_run(path, outfile, add_domains=True):
-    log = getDebugLogger()
+def import_oma_run(path, outfile, add_domains=True, log_level='INFO'):
+    log = getLogger(log_level)
     x = StandaloneExporter(path, outfile, logger=log, mode='write')
     x.add_version()
     x.add_species_data()
@@ -120,18 +114,24 @@ def import_oma_run(path, outfile, add_domains=True):
     x.add_proteins()
     x.add_hogs()
     x.add_xrefs()
-    domain_url = 'ftp://ftp.biochem.ucl.ac.uk/pub/gene3d_data/CURRENT_RELEASE/mdas.csv.gz'
+    domain_url = ('ftp://orengoftp.biochem.ucl.ac.uk/gene3d/CURRENT_RELEASE/'+
+                  'representative_uniprot_genome_assignments.csv.gz')
     if not add_domains:
         domain_url = 'file:///dev/null'
     x.add_domain_info(only_pfam_or_cath_domains(iter_domains(domain_url)))
     x.add_domainname_info(itertools.chain(
-        CathDomainNameParser('ftp://ftp.biochem.ucl.ac.uk/pub/cath/latest_release/CathNames').parse(),
+        CathDomainNameParser('http://download.cathdb.info/cath/releases/latest-release/'
+                             'cath-classification-data/cath-names.txt').parse(),
         PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
     x.add_canonical_id()
+    x.add_group_metadata()
+    x.add_hog_domain_prevalence()
     x.close()
 
     x = StandaloneExporter(path, outfile, logger=log)
     x.create_indexes()
+    x.add_sequence_suffix_array()
+    x.update_summary_stats()
     x.close()
 
 

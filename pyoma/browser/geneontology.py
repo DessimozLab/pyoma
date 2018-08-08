@@ -312,7 +312,7 @@ class FreqAwareGeneOntology(GeneOntology):
     def estimate_freqs(self, annotations):
         for anno in annotations:
             try:
-                self._update_counts(self.term_by_id(anno.term_id))
+                self._update_counts(self.term_by_id(anno['TermNr']))
             except ValueError:
                 logging.info("invalid annotation term_id in freq estim:" +
                              str(anno.term_id))
@@ -320,7 +320,7 @@ class FreqAwareGeneOntology(GeneOntology):
     def _update_counts(self, term):
         for cur_term in self.get_superterms_incl_queryterm(term):
             self.cnts[cur_term.id] = self.cnts.get(cur_term.id, 0) + 1
-            self.tot_cnts[cur_term.aspect] += 1
+        self.tot_cnts[cur_term.aspect] += 1
 
     def get_term_frequency(self, term):
         term = self.ensure_term(term)

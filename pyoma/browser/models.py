@@ -1,6 +1,8 @@
-from __future__ import division, unicode_literals
+from __future__ import division
 
 import collections
+
+import time
 
 
 def format_sciname(sci, short=False):
@@ -115,6 +117,10 @@ class ProteinEntry(object):
     def strand(self):
         return int(self._entry['LocusStrand'])
 
+    @LazyProperty
+    def exons(self):
+        return ExonStructure.from_entry_nr(self._db, self.entry_nr)
+
     @property
     def oma_group(self):
         return int(self._entry['OmaGroup'])
@@ -168,6 +174,10 @@ class ProteinEntry(object):
     @LazyProperty
     def description(self):
         return self._db.get_description(self._entry).decode()
+
+    @property
+    def subgenome(self):
+        return self._entry['SubGenome'].decode()
 
     @LazyProperty
     def hog_family_nr(self):
@@ -247,6 +257,20 @@ class Genome(object):
         return self._genome['Release'].decode()
 
     @property
+    def last_modfied_timestamp(self):
+        return self._genome['Date']
+
+    @property
+    def last_modified(self):
+        return self.modification_date("%Y-%b-%d")
+
+    def modification_date(self, fmt):
+        if self._db.db_schema_version >= (3, 2):
+            return time.strftime(fmt, time.localtime(self.last_modfied_timestamp))
+        else:
+            return 'n/a'
+
+    @property
     def nr_entries(self):
         return int(self._genome['TotEntries'])
 
@@ -292,28 +316,31 @@ class PairwiseRelation(object):
 
     @property
     def distance(self):
-        return self._relation['Distance']
+        return float(self._relation['Distance'])
 
     @property
     def score(self):
-        return self._relation['Score']
+        return float(self._relation['Score'])
 
     @property
     def alignment_overlap(self):
-        return self._relation['AlignmentOverlap']
+        return float(self._relation['AlignmentOverlap'])
 
     @property
     def synteny_conservation_local(self):
-        return self._relation['SyntenyConservationLocal']
+        return float(self._relation['SyntenyConservationLocal'])
 
     @property
-    def synteny_conservation_chromosome(self):
-        return self._relation['SyntenyConservationChromosome']
+    def confidence(self):
+        return float(self._relation['Confidence'])
 
     @LazyProperty
     def rel_type(self):
-        type_map = self._db._get_pw_tab(self._relation['EntryNr1'], 'VPairs').get_enum("RelType")
-        return type_map(self._relation['RelType'])
+        if not isinstance(self._relation['RelType'], str):
+            type_map = self._db._get_pw_tab(self._relation['EntryNr1'], 'VPairs').get_enum("RelType")
+            return type_map(self._relation['RelType'])
+        else:
+            return self._relation['RelType']
 
     @LazyProperty
     def entry_1(self):
@@ -349,3 +376,54 @@ class GeneOntologyAnnotation(object):
     def aspect(self):
         from .geneontology import GOAspect
         return GOAspect.to_string(self.term.aspect)
+
+
+class ExonStructure(object):
+    def __init__(self, db, exons):
+        self._stored = exons
+        self._db = db
+
+    @LazyProperty
+    def _exons(self):
+        return (self._db.get_exons(self._stored)
+                if isinstance(self._stored, int)
+                else self._stored)
+
+    @classmethod
+    def from_entry_nr(cls, db, eNr):
+        return cls(db, int(eNr))
+
+    def _iter_exons(self):
+        if self._exons['Strand'][0] < 0:
+            self._exons[::-1].sort(order='Start')
+        else:
+            self._exons.sort(order='Start')
+        for exon in self._exons:
+            yield Exon(exon)
+
+    def __len__(self):
+        return len(self._exons)
+
+    def __repr__(self):
+        return "<{}(entry_nr={}, nr_exons={})>"\
+            .format(self.__class__.__name__,
+                    self._exons[0]['EntryNr'], len(self))
+
+    def __str__(self):
+        exs = list(str(e) for e in self._iter_exons())
+        if len(exs) > 1:
+            return "join({})".format(", ".join(exs))
+        else:
+            return exs[0]
+
+
+class Exon(object):
+    def __init__(self, exon):
+        self.exon = exon
+
+    def __str__(self):
+        if self.exon['Strand'] < 0:
+            template = "complement({}..{})"
+        else:
+            template = "{}..{}"
+        return template.format(self.exon['Start'], self.exon['End'])

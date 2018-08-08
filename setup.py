@@ -15,7 +15,7 @@ shutil.copyfile('bin/importdata.py', 'bin/oma2hdf')
 
 setup(
     name=name,
-    version='0.5.0',
+    version='0.6.0',
     author='Adrian Altenhoff',
     author_email='adrian.altenhoff@inf.ethz.ch',
     description='todoc',
@@ -36,7 +36,8 @@ setup(
     package_data={'pyoma': ['browser/*.drw']},
     install_requires=req_packages,
     extras_require={
-        'create_db': ['PySAIS', 'familyanalyzer'],
+        'create_db': ['PySAIS', 'familyanalyzer', 'matplotlib', 'scikit-learn',
+                      'scikit-fuzzy', 'lark-parser'],
     },
 )
 

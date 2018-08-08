@@ -10,10 +10,10 @@ import unittest
 from hashlib import md5
 
 import numpy
-
+import tables
 import pyoma.browser.tablefmt as tablefmt
 from pyoma.browser.convert import callDarwinExport, DarwinExporter, compute_ortholog_types,\
-    load_tsv_to_numpy
+    load_tsv_to_numpy, HogConverter
 
 
 def store_in_json(data, fn):
@@ -241,3 +241,22 @@ class H5HelpersTests(ImportDummyBase):
         self.darwin_exporter.create_table_if_needed('/', 'Example', obj=data, dump_data=False)
         res = self.darwin_exporter.h5.get_node('/Example').read()
         numpy.testing.assert_equal(res, expected)
+
+
+class HogConverterTest(unittest.TestCase):
+    orthoxml_file = os.path.join(os.path.dirname(__file__), 'hog-example.orthoXML')
+
+    def setUp(self):
+        self.h5 = tables.open_file('test', 'w', driver="H5FD_CORE", driver_core_backing_store=0)
+        self.h5.create_table('/', 'Entries', tablefmt.ProteinTable,
+                             obj=numpy.zeros(6, tables.dtype_from_descr(tablefmt.ProteinTable)))
+
+    def test_extract_levels(self):
+        conv = HogConverter(self.h5.root.Entries)
+        levels = conv.convert_file(self.orthoxml_file)
+        self.assertEqual(3, len(levels))
+        self.assertEqual(len(tables.dtype_from_descr(tablefmt.HOGsTable)),
+                         len(levels[0]))
+        mammalia = next((x for x in levels if x[2] == 'Mammalia'), None)
+        self.assertLess(mammalia[3], 0)
+        self.assertEqual(mammalia[4], 1)

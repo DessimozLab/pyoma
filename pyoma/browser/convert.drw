@@ -63,7 +63,7 @@ GetGenomeData := proc()
         gs := append(gs, [parse(GS[g,TAXONID]), g, GS[g,TotEntries], 
             GS[g,TotAA], Goff[gNr],
             GS[g,SCINAME], GS[g,COMMONNAME], GS[g, SYNNAME],
-            GS[g,DBRELEASE], GS[g,URL], GS[g,SOURCE], SubGenome[g]<>0]);
+            GS[g,DBRELEASE], GS[g,URL], GS[g,SOURCE], GS[g,DATE], SubGenome[g]<>0]);
     od:
     
     _parents := []: _next_new_taxid := -1:
@@ -194,6 +194,19 @@ GetProteinsForGenome := proc(g)
     StoreResults(json(tab)):
 end:
 
+GetGroupData := proc()
+    global KeywordT, GroupIDs:
+    KeywordT := GroupIDs := []:
+    ReadProgram(ddir.'/Keywords.drw');
+    ReadProgram(ddir.'/Fingerprints');
+    if KeywordT = [] or GroupIDs = [] then
+        error('cannot load GroupData');
+    fi:
+    tab := table():
+    tab['Keywords'] := KeywordT:
+    tab['Fingerprints'] := Fingerprints;
+    StoreResults(json(tab));
+end:
 
 
 StoreResults := proc(res)

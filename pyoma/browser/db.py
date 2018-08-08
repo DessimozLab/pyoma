@@ -80,6 +80,7 @@ class Database(object):
                 logger.warning("outdated database version, but only minor version change: "
                                "{} != {}. Some functions might fail"
                                .format(db_version, self.EXPECTED_DB_SCHEMA))
+        self.db_schema_version = tuple(int(z) for z in db_version.split("."))
 
         try:
             self.seq_search = SequenceSearch(self)

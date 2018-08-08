@@ -265,7 +265,10 @@ class Genome(object):
         return self.modification_date("%Y-%b-%d")
 
     def modification_date(self, fmt):
-        return time.strftime(fmt, time.localtime(self.last_modfied_timestamp))
+        if self._db.db_schema_version >= (3, 2):
+            return time.strftime(fmt, time.localtime(self.last_modfied_timestamp))
+        else:
+            return 'n/a'
 
     @property
     def nr_entries(self):

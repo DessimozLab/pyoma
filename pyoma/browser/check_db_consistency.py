@@ -79,4 +79,4 @@ class DatabaseChecks(unittest.TestCase):
                 continue
             syn_col = t.col('SyntenyConservationLocal')
             computed_pairs = numpy.where(syn_col >= 0)
-            self.assertGreater(0, len(computed_pairs[0]), "No synteny values computed for {}".format(g))
+            self.assertLess(0, len(computed_pairs[0]), "No synteny values computed for {}".format(g))

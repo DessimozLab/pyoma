@@ -71,9 +71,15 @@ class Database(object):
 
         logger.info('database version: {}'.format(db_version))
         if db_version != self.EXPECTED_DB_SCHEMA:
-            #raise DBVersionError('Unsupported database version: {} != {} ({})'
-            #                     .format(db_version, self.EXPECTED_DB_SCHEMA, self.db.filename))
-            pass
+            exp_tup = self.EXPECTED_DB_SCHEMA.split('.')
+            db_tup = db_version.split('.')
+            if db_tup[0] != exp_tup[0]:
+                raise DBVersionError('Unsupported database version: {} != {} ({})'
+                                     .format(db_version, self.EXPECTED_DB_SCHEMA, self.db.filename))
+            else:
+                logger.warning("outdated database version, but only minor version change: "
+                               "{} != {}. Some functions might fail"
+                               .format(db_version, self.EXPECTED_DB_SCHEMA))
 
         try:
             self.seq_search = SequenceSearch(self)

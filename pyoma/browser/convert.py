@@ -245,7 +245,7 @@ def get_or_create_tables_node(h5, path, desc=None):
 
 
 class DarwinExporter(object):
-    DB_SCHEMA_VERSION = '3.1'
+    DB_SCHEMA_VERSION = '3.2'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
 
     def __init__(self, path, logger=None, mode=None):

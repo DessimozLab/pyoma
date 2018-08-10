@@ -18,8 +18,9 @@ import os
 import collections
 import logging
 from .KmerEncoder import KmerEncoder
-from .models import LazyProperty, KeyWrapper, ProteinEntry
+from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome
 from .geneontology import GeneOntology, OntologyParser, AnnotationParser, GOAspect
+from xml.etree import ElementTree as et
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,9 @@ class Database(object):
             self.seq_search = object()
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
-        self.tax = Taxonomy(self.db.root.Taxonomy.read())
+        genomes = [Genome(self, g) for g in self.db.root.Genome.read()]
+        self.tax = Taxonomy(self.db.root.Taxonomy.read(),
+                            genomes={g.ncbi_taxon_id: g for g in genomes})
         self._re_fam = None
         self.format_hogid = None
         self._set_hogid_schema()
@@ -1202,13 +1205,16 @@ class Taxonomy(object):
     The input data is the same as what is stored in the Database in
     table "/Taxonomy"."""
 
-    def __init__(self, data):
+    def __init__(self, data, genomes=None, _valid_levels=None):
         if not isinstance(data, numpy.ndarray):
             raise ValueError('Taxonomy expects a numpy table.')
+        self.genomes = genomes if genomes is not None else {}
         self.tax_table = data
         self.taxid_key = self.tax_table.argsort(order=('NCBITaxonId'))
         self.parent_key = self.tax_table.argsort(order=('ParentTaxonId'))
-        self._load_valid_taxlevels()
+        self.all_hog_levels = _valid_levels
+        if _valid_levels is None:
+            self._load_valid_taxlevels()
 
     def _load_valid_taxlevels(self):
         forbidden_chars = re.compile(r'[^A-Za-z. -]')
@@ -1364,7 +1370,7 @@ class Taxonomy(object):
             if len(rem) > 0:
                 idx = taxids_to_keep.searchsorted(rem)
                 return self.get_induced_taxonomy(numpy.delete(taxids_to_keep, idx))
-        return Taxonomy(subtaxdata)
+        return Taxonomy(subtaxdata, genomes=self.genomes, _valid_levels=self.all_hog_levels)
 
     def newick(self):
         """Get a Newick representation of the Taxonomy
@@ -1400,6 +1406,12 @@ class Taxonomy(object):
                 children.append(_rec_phylogeny(child))
             if len(children) > 0:
                 res['children'] = children
+            else:
+                try:
+                    g = self.genomes[res['id']]
+                    res['code'] = g.uniprot_species_code
+                except KeyError:
+                    pass
             return res
 
         return _rec_phylogeny(self._get_root_taxon())

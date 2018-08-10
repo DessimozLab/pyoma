@@ -553,6 +553,8 @@ class Database(object):
                 group_id = group_id.encode('utf-8')
             if group_id == b'n/a':
                 raise InvalidId('Invalid ID (n/a) for an OMA Group')
+            if not self.seq_search.contains_only_valid_chars(group_id):
+                raise InvalidId("Invalid ID: non-amino-accids characters in Fingerprint or sequence pattern")
             if len(group_id) == 7:
                 # most likely a fingerprint. let's check that first
                 group_meta_tab = self.db.get_node('/OmaGroups/MetaData')

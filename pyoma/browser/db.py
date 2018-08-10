@@ -573,6 +573,9 @@ class Database(object):
             group_nrs.discard(0)
             if len(group_nrs) == 1:
                 return int(group_nrs.pop())
+            elif len(group_nrs) == 0:
+                raise InvalidId("Sequence with pattern '{}' does not belong to any group"
+                                .format(group_id.decode()))
             else:
                 raise AmbiguousID("sequence pattern matches several oma groups", candidates=group_nrs)
         raise InvalidId('Invalid type to determine OMA Group: {} (type: {})'.format(group_id, type(group_id)))

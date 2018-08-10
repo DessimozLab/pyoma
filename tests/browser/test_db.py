@@ -127,6 +127,14 @@ class DatabaseTests(unittest.TestCase):
         rng = self.db.id_mapper['OMA'].genome_range(query)
         mains = self.db.main_isoforms(query)
         self.assertGreaterEqual(rng[1]-rng[0]+1, len(mains))
+
+    def test_valid_protein_seq_check(self):
+        for c in (b'ADRIAN', 'adrian', b'XaMGAt'):
+            self.assertTrue(self.db.seq_search.contains_only_valid_chars(c),
+                            "'{}' should be a valid protein seq".format(c))
+        for c in (b'XBra', 'T5HSE', 'xxnnebqpynn', ' '):
+            self.assertFalse(self.db.seq_search.contains_only_valid_chars(c),
+                             "'{}' should be an invalid protein seq".format(c))
     
     def test_exact_search(self):
         # Test for 10 random 

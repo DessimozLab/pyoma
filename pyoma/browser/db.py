@@ -900,6 +900,19 @@ class SequenceSearch(object):
         '''
         return (numpy.searchsorted(self.entry_idx, ii) + 1)
 
+    def contains_only_valid_chars(self, seq):
+        """returns true iff `seq` contains only valid AA chars.
+
+        The method ignores the case of the seq, i.e. upper
+        or lower case chars both match.
+
+        :param (bytes, str) seq: sequence to be checked
+        :returns bool
+        """
+        if isinstance(seq, bytes):
+            seq = seq.decode()
+        return all(map(lambda c: c in self.PROTEIN_CHARS, seq.upper()))
+
     def _sanitise_seq(self, seq):
         '''
             Sanitise a string protein sequence. Deletes "invalid" characters.

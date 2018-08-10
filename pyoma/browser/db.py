@@ -1416,6 +1416,38 @@ class Taxonomy(object):
 
         return _rec_phylogeny(self._get_root_taxon())
 
+    def as_phyloxml(self):
+        """Encode the Taxonomy as phyloxml output"""
+
+        def _rec_phyloxml(node):
+            n = et.Element("clade")
+            tax = et.SubElement(n, "taxonomy")
+            id_ = et.SubElement(tax, "id", provider="uniprot")
+            id_.text = str(node['NCBITaxonId'])
+
+            children = []
+            for child in self._direct_children_taxa(node['NCBITaxonId']):
+                children.append(_rec_phyloxml(child))
+            if len(children) == 0:
+                try:
+                    g = self.genomes[int(node['NCBITaxonId'])]
+                    code = et.SubElement(tax, 'code')
+                    code.text = g.uniprot_species_code
+                except ValueError:
+                    pass
+            sci = et.SubElement(tax, 'scientific_name')
+            sci.text = node['Name'].decode()
+            n.extend(children)
+            return n
+
+        root = et.Element('phyloxml', xmlns="http://www.phyloxml.org")
+        phylo = et.SubElement(root, "phylogeny", rooted="true", rerootable="false")
+        name = et.SubElement(phylo, "name")
+        name.text = "(Partial) species phylogeny from OMA Browser"
+        phylo.append(_rec_phyloxml(self._get_root_taxon()))
+
+        return et.tostring(root, encoding='utf-8')
+
 
 class InvalidTaxonId(Exception):
     pass

@@ -18,8 +18,9 @@ import os
 import collections
 import logging
 from .KmerEncoder import KmerEncoder
-from .models import LazyProperty, KeyWrapper, ProteinEntry
+from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome
 from .geneontology import GeneOntology, OntologyParser, AnnotationParser, GOAspect
+from xml.etree import ElementTree as et
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,9 @@ class Database(object):
             self.seq_search = object()
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
-        self.tax = Taxonomy(self.db.root.Taxonomy.read())
+        genomes = [Genome(self, g) for g in self.db.root.Genome.read()]
+        self.tax = Taxonomy(self.db.root.Taxonomy.read(),
+                            genomes={g.ncbi_taxon_id: g for g in genomes})
         self._re_fam = None
         self.format_hogid = None
         self._set_hogid_schema()
@@ -553,6 +556,8 @@ class Database(object):
                 group_id = group_id.encode('utf-8')
             if group_id == b'n/a':
                 raise InvalidId('Invalid ID (n/a) for an OMA Group')
+            if not self.seq_search.contains_only_valid_chars(group_id):
+                raise InvalidId("Invalid ID: non-amino-accids characters in Fingerprint or sequence pattern")
             if len(group_id) == 7:
                 # most likely a fingerprint. let's check that first
                 group_meta_tab = self.db.get_node('/OmaGroups/MetaData')
@@ -571,6 +576,9 @@ class Database(object):
             group_nrs.discard(0)
             if len(group_nrs) == 1:
                 return int(group_nrs.pop())
+            elif len(group_nrs) == 0:
+                raise InvalidId("Sequence with pattern '{}' does not belong to any group"
+                                .format(group_id.decode()))
             else:
                 raise AmbiguousID("sequence pattern matches several oma groups", candidates=group_nrs)
         raise InvalidId('Invalid type to determine OMA Group: {} (type: {})'.format(group_id, type(group_id)))
@@ -900,6 +908,19 @@ class SequenceSearch(object):
         '''
         return (numpy.searchsorted(self.entry_idx, ii) + 1)
 
+    def contains_only_valid_chars(self, seq):
+        """returns true iff `seq` contains only valid AA chars.
+
+        The method ignores the case of the seq, i.e. upper
+        or lower case chars both match.
+
+        :param (bytes, str) seq: sequence to be checked
+        :returns bool
+        """
+        if isinstance(seq, bytes):
+            seq = seq.decode()
+        return all(map(lambda c: c in self.PROTEIN_CHARS, seq.upper()))
+
     def _sanitise_seq(self, seq):
         '''
             Sanitise a string protein sequence. Deletes "invalid" characters.
@@ -1184,13 +1205,16 @@ class Taxonomy(object):
     The input data is the same as what is stored in the Database in
     table "/Taxonomy"."""
 
-    def __init__(self, data):
+    def __init__(self, data, genomes=None, _valid_levels=None):
         if not isinstance(data, numpy.ndarray):
             raise ValueError('Taxonomy expects a numpy table.')
+        self.genomes = genomes if genomes is not None else {}
         self.tax_table = data
         self.taxid_key = self.tax_table.argsort(order=('NCBITaxonId'))
         self.parent_key = self.tax_table.argsort(order=('ParentTaxonId'))
-        self._load_valid_taxlevels()
+        self.all_hog_levels = _valid_levels
+        if _valid_levels is None:
+            self._load_valid_taxlevels()
 
     def _load_valid_taxlevels(self):
         forbidden_chars = re.compile(r'[^A-Za-z. -]')
@@ -1346,7 +1370,7 @@ class Taxonomy(object):
             if len(rem) > 0:
                 idx = taxids_to_keep.searchsorted(rem)
                 return self.get_induced_taxonomy(numpy.delete(taxids_to_keep, idx))
-        return Taxonomy(subtaxdata)
+        return Taxonomy(subtaxdata, genomes=self.genomes, _valid_levels=self.all_hog_levels)
 
     def newick(self):
         """Get a Newick representation of the Taxonomy
@@ -1382,9 +1406,47 @@ class Taxonomy(object):
                 children.append(_rec_phylogeny(child))
             if len(children) > 0:
                 res['children'] = children
+            else:
+                try:
+                    g = self.genomes[res['id']]
+                    res['code'] = g.uniprot_species_code
+                except KeyError:
+                    pass
             return res
 
         return _rec_phylogeny(self._get_root_taxon())
+
+    def as_phyloxml(self):
+        """Encode the Taxonomy as phyloxml output"""
+
+        def _rec_phyloxml(node):
+            n = et.Element("clade")
+            tax = et.SubElement(n, "taxonomy")
+            id_ = et.SubElement(tax, "id", provider="uniprot")
+            id_.text = str(node['NCBITaxonId'])
+
+            children = []
+            for child in self._direct_children_taxa(node['NCBITaxonId']):
+                children.append(_rec_phyloxml(child))
+            if len(children) == 0:
+                try:
+                    g = self.genomes[int(node['NCBITaxonId'])]
+                    code = et.SubElement(tax, 'code')
+                    code.text = g.uniprot_species_code
+                except ValueError:
+                    pass
+            sci = et.SubElement(tax, 'scientific_name')
+            sci.text = node['Name'].decode()
+            n.extend(children)
+            return n
+
+        root = et.Element('phyloxml', xmlns="http://www.phyloxml.org")
+        phylo = et.SubElement(root, "phylogeny", rooted="true", rerootable="false")
+        name = et.SubElement(phylo, "name")
+        name.text = "(Partial) species phylogeny from OMA Browser"
+        phylo.append(_rec_phyloxml(self._get_root_taxon()))
+
+        return et.tostring(root, encoding='utf-8')
 
 
 class InvalidTaxonId(Exception):

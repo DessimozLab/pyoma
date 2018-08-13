@@ -125,7 +125,7 @@ class GenesResource(Resource):
         return "https://omabrowser.org/oma/info/"
 
     def rule_url(self, acc):
-        return next(iter(acc.values())) + "/"
+        return next(iter(acc.values())) + "/",
 
     def database(self):
         return "Gene"

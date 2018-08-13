@@ -122,10 +122,10 @@ class GenesResource(Resource):
     base_name = 'resource_genes'
 
     def base_url(self):
-        return "https://omabrowser.org/cgi-bin/gateway.pl/"
+        return "https://omabrowser.org/oma/info/"
 
     def rule_url(self, acc):
-        return "?f=DisplayEntry&p1=" + next(iter(acc.values())),
+        return next(iter(acc.values())) + "/"
 
     def database(self):
         return "Gene"

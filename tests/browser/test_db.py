@@ -3,6 +3,7 @@ from builtins import chr, bytes
 import random
 import types
 import unittest
+import unittest.mock
 import numpy
 import os
 from pyoma.browser.db import *
@@ -279,6 +280,54 @@ class TaxonomyTest(unittest.TestCase):
 
     def test_induced_tax_with_gaps(self):
         pass
+
+
+class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
+    """This test asserts that species A, which is also an internal level
+    of the taxonomy is still reported as an external species via a
+    <sciname> (disambiguate <code>) leaf."""
+
+    taxtab = numpy.array([(10, 0, b"Root"), (20, 10, b"Outgroup"), (30, 10, b"A"), (40, 30, b"B")],
+                         dtype=tables.dtype_from_descr(tablefmt.TaxonomyTable))
+
+    def setUp(self):
+        patcher = unittest.mock.patch('pyoma.browser.models.Genome')
+        self.addCleanup(patcher.stop)
+        genome = patcher.start()
+        type(genome).uniprot_species_code = unittest.mock.PropertyMock(return_value="HELLO")
+        self.tax = Taxonomy(self.taxtab, genomes={20: genome, 30: genome, 40: genome})
+
+    def test_newick(self):
+        exp = "(Outgroup,(B,A_[disambiguate_HELLO])A)Root;"
+        self.assertEqual(exp, self.tax.newick())
+
+    def test_phyloxml(self):
+        ins = (b'<scientific_name>A (disambiguate HELLO)</scientific_name>',
+               b'<scientific_name>A</scientific_name>',
+               b'<scientific_name>B</scientific_name>',
+               b'<scientific_name>Outgroup</scientific_name>')
+        outs = (b'<scientific_name>B (disambiguate', b'<scientific_name>Outgroup (disambiguate')
+        res = self.tax.as_phyloxml()
+        for part in ins:
+            self.assertIn(part, res)
+        for part in outs:
+            self.assertNotIn(part, res)
+
+    def test_dict_repr(self):
+        res = self.tax.as_dict()
+        self.assertDictEqual({'name': 'Root', 'id': 10, 'children': [
+            {'name': 'Outgroup', 'id': 20, 'code': 'HELLO'},
+            {'name': 'A', 'id': 30, 'children':[
+                {'name': 'B', 'id': 40, 'code':'HELLO'},
+                {'name': 'A (disambiguate HELLO)', 'id': 30, 'code': 'HELLO'}
+            ]}
+        ]}, res)
+
+    def test_induced_subtree_retains_internal_species(self):
+        phylo = self.tax.get_induced_taxonomy([20, 40], augment_parents=True)
+        self.assertIn(30, phylo.tax_table['NCBITaxonId'])
+
+
 
 class DBMock(object):
     def __init__(self, h5):

@@ -1,26 +1,29 @@
 from __future__ import division, print_function
-from builtins import chr, range, object, zip, bytes
+
+import collections
 import io
 import itertools
-import time
-from Bio.UniProt import GOA
-from bisect import bisect_left
-import dateutil
-import pandas as pd
+import json
+import logging
+import os
 import pyopa
-import tables
+import re
 import threading
+import time
+from bisect import bisect_left
+from builtins import chr, range, object, zip, bytes
+from xml.etree import ElementTree as et
+
+import dateutil
 import numpy
 import numpy.lib.recfunctions
-import re
-import json
-import os
-import collections
-import logging
+import pandas as pd
+import tables
+from Bio.UniProt import GOA
+
 from .KmerEncoder import KmerEncoder
+from .geneontology import GeneOntology, OntologyParser, GOAspect
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome
-from .geneontology import GeneOntology, OntologyParser, AnnotationParser, GOAspect
-from xml.etree import ElementTree as et
 
 logger = logging.getLogger(__name__)
 
@@ -1366,7 +1369,7 @@ class Taxonomy(object):
             nr_children = collections.defaultdict(int)
             for p in subtaxdata['ParentTaxonId']:
                 nr_children[p] += 1
-            rem = [p for (p, cnt) in nr_children.items() if cnt == 1 and p != 0]
+            rem = [p for (p, cnt) in nr_children.items() if cnt == 1 and p != 0 and p not in self.genomes]
             if len(rem) > 0:
                 idx = taxids_to_keep.searchsorted(rem)
                 return self.get_induced_taxonomy(numpy.delete(taxids_to_keep, idx))
@@ -1388,6 +1391,14 @@ class Taxonomy(object):
             if len(children) == 0:
                 return newick_enc(node['Name'].decode())
             else:
+                if int(node['NCBITaxonId']) in self.genomes:
+                    # this is a special case where the current internal level is also
+                    # an extant species in OMA. we resolve this by adding the current
+                    # level also as an extra child
+                    children.append(newick_enc("{:s} (disambiguate {:s})".format(
+                        node['Name'].decode(),
+                        self.genomes[int(node['NCBITaxonId'])].uniprot_species_code)))
+
                 t = ",".join(children)
                 return '(' + t + ')' + newick_enc(node['Name'].decode())
 
@@ -1405,6 +1416,14 @@ class Taxonomy(object):
             for child in self._direct_children_taxa(node['NCBITaxonId']):
                 children.append(_rec_phylogeny(child))
             if len(children) > 0:
+                if res['id'] in self.genomes:
+                    # this is a special case where the current internal level is also
+                    # an extant species in OMA. we resolve this by adding the current
+                    # level also as an extra child
+                    code = self.genomes[res['id']].uniprot_species_code
+                    node_cpy = {'name': "{:s} (disambiguate {:s})".format(res['name'], code),
+                                'id': res['id'], 'code': code}
+                    children.append(node_cpy)
                 res['children'] = children
             else:
                 try:
@@ -1428,12 +1447,26 @@ class Taxonomy(object):
             children = []
             for child in self._direct_children_taxa(node['NCBITaxonId']):
                 children.append(_rec_phyloxml(child))
+            if len(children) > 0 and int(node['NCBITaxonId']) in self.genomes:
+                # this is a special case where the current internal level is also
+                # an extant species in OMA. we resolve this by adding the current
+                # level also as an extra child
+                cp_n = et.Element("clade")
+                cp_tax = et.SubElement(cp_n, "taxonomy")
+                cp_id = et.SubElement(cp_tax, "id", provider="uniprot")
+                cp_id.text = str(node['NCBITaxonId'])
+                cp_code = et.SubElement(cp_tax, 'code')
+                cp_code.text = self.genomes[int(node['NCBITaxonId'])].uniprot_species_code
+                cp_sci = et.SubElement(cp_tax, "scientific_name")
+                cp_sci.text = "{:s} (disambiguate {:s})".format(node['Name'].decode(), cp_code.text)
+                children.append(cp_n)
+
             if len(children) == 0:
                 try:
                     g = self.genomes[int(node['NCBITaxonId'])]
                     code = et.SubElement(tax, 'code')
                     code.text = g.uniprot_species_code
-                except ValueError:
+                except (ValueError, KeyError):
                     pass
             sci = et.SubElement(tax, 'scientific_name')
             sci.text = node['Name'].decode()

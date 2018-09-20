@@ -8,6 +8,9 @@ import numpy
 import os
 from pyoma.browser.db import *
 from pyoma.browser import tablefmt
+from Bio.SeqRecord import SeqRecord
+from Bio.Seq import Seq
+from Bio.Alphabet import IUPAC
 
 
 class TestHelperFunctions(unittest.TestCase):
@@ -146,21 +149,38 @@ class DatabaseTests(unittest.TestCase):
             self.assertTrue((enr in set(self.db.seq_search.search(s, is_sanitised=True)[1])),
                             'exact search for entry {} failed.'.format(i))
 
+    def get_random_subsequence(self, minlen=10):
+        i = random.randint(0, len(self.db.db.root.Protein.Entries))
+        elen = self.db.db.root.Protein.Entries[i]['SeqBufferLength'] - 1
+        enr = i + 1
+
+        ii = random.randint(0, elen - minlen)
+        jj = random.randint(ii + minlen, elen)
+
+        s = self.db.get_sequence(enr)[ii:jj]
+        return s, enr, ii, jj
+
     def test_approx_search(self):
         # Test for random subsequence of 10 random sequences.
-        min_length = 10 
         for _ in range(10):
-            i = random.randint(0, len(self.db.db.root.Protein.Entries))
-            elen = self.db.db.root.Protein.Entries[i]['SeqBufferLength']-1
-            enr = i+1
-
-            ii = random.randint(0, elen - min_length)
-            jj = random.randint(ii + min_length, elen)
-
-            s = self.db.get_sequence(enr)[ii:jj]
+            s, enr, start_idx, end_idx = self.get_random_subsequence()
             approx_search_results = self.db.seq_search.approx_search(s, is_sanitised=True)
             self.assertIn(enr, {z[0] for z in approx_search_results},
-                          'approx search for entry {}[{}:{}] failed.'.format(i, ii, jj))
+                          'approx search for entry {}[{}:{}] failed.'.format(enr-1, start_idx, end_idx))
+
+    def test_map_to_hog(self):
+        hog_mapper = SimpleSeqToHOGMapper(self.db)
+        seqs = []
+        entry_nrs = []
+        for _ in range(10):
+            s, enr, start_idx, end_idx = self.get_random_subsequence()
+            entry_nrs.append(enr)
+            seqs.append(SeqRecord(Seq(s.decode(), IUPAC.protein), id=str(enr)))
+        res = list(filter(lambda x: x.query == str(x.closest_entry_nr), hog_mapper.imap_sequences(seqs)))
+        self.assertEqual(10, len(res))
+        for case in res:
+            self.assertTrue(0 < case.distance < 1)
+
 
     def test_oma_group_from_numeric_id(self):
         group_id = 5

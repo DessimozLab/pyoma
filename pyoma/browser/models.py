@@ -199,6 +199,12 @@ class ProteinEntry(object):
                 for e in self._db.get_splicing_variants(self._entry)
                 if e['EntryNr'] != self.entry_nr]
 
+    def get_main_isoform(self):
+        if self.is_main_isoform:
+            return self
+        else:
+            return ProteinEntry(self._db, self._entry['AltSpliceVariant'])
+
     def __repr__(self):
         return "<{}({}, {})>".format(self.__class__.__name__, self.entry_nr, self.omaid)
 

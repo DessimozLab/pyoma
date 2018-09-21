@@ -541,6 +541,7 @@ class DarwinExporter(object):
                                           genome, tablefmt.LocusTable, createparents=True,
                                           expectedrows=gs['TotEntries'] * 4)
 
+            cnt_missmatch_locus = 0
             for nr in range(gs['TotEntries']):
                 eNr = data['off'] + nr + 1
                 protTab.row['EntryNr'] = eNr
@@ -560,8 +561,9 @@ class DarwinExporter(object):
                     locTab.append(locus_tab)
                     len_cds = sum(z['End'] - z['Start']+1 for z in locus_tab)
                     if len_cds != protTab.row['CDNABufferLength']-1:
-                        self.logger.warning("sum of exon lengths differ with cdna sequence for {}: {} vs {}"
+                        self.logger.debug("sum of exon lengths differ with cdna sequence for {}: {} vs {}"
                                             .format(eNr, len_cds, protTab.row['CDNABufferLength']-1))
+                        cnt_missmatch_locus += 1
 
                     protTab.row['LocusStart'] = locus_tab['Start'].min()
                     protTab.row['LocusEnd'] = locus_tab['End'].max()
@@ -572,6 +574,8 @@ class DarwinExporter(object):
                 protTab.row.append()
             protTab.flush()
             seqArr.flush()
+            if cnt_missmatch_locus > 0:
+                self.logger.warning('{} missmatches in exon-lengths compared to locus info'.format(cnt_missmatch_locus))
             for n in (protTab, seqArr, locTab):
                 if n.size_in_memory != 0:
                     self.logger.info('worte %s: compression ratio %3f%%' %

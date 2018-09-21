@@ -35,7 +35,7 @@ def main(args):
                         help="Increase verbosity level to INFO or DEBUG level")
 
     options = parser.parse_args(args)
-    log_level = 30 - (10 * max(options.v, 2))
+    log_level = 30 - (10 * min(options.v, 2))
     if options.standalone:
         pyoma.browser.convert_omastandalone.import_oma_run(
             options.release,

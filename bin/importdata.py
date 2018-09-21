@@ -24,6 +24,10 @@ def main(args):
     parser.add_argument('-s', '--standalone', action='store_true',
                         help="a flag which needs to be set if you intend to import "
                              "the results from an OmaStandalone run.")
+    parser.add_argument('-d', '--domains', nargs="+", 
+                        help="absolute path or url to domain annotations in mdas.csv format. "
+                             "Not specifying any domains is equivalent to the --no-domains "
+                             "option.")
     parser.add_argument('--no-domains', action='store_false',
                         help="do not include CATH domain information. This flag is only "
                              "considered for oma standalone imports. (see -s/--standalone flag")
@@ -42,8 +46,7 @@ def main(args):
         if options.release:
             os.environ['DARWIN_BROWSERDATA_PATH'] = options.release
         print(options.out)
-
-        pyoma.browser.convert.main(options.out, log_level=log_level)
+        pyoma.browser.convert.main(options.out, domains=options.domains, log_level=log_level)
 
 
 if __name__ == '__main__':

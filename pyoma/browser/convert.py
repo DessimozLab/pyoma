@@ -1885,11 +1885,15 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level='INFO'
     x.add_homoeology_confidence()
     if domains is None:
         domains = ["file://dev/null"]
-    x.add_domain_info(filter_duplicated_domains(only_pfam_or_cath_domains(itertools.chain(
-        iter_domains('ftp://orengoftp.biochem.ucl.ac.uk/gene3d/CURRENT_RELEASE/' +
-                     'representative_uniprot_genome_assignments.csv.gz'),
-        iter_domains('file://{}/additional_domains.mdas.csv.gz'.format(os.getenv('DARWIN_BROWSERDATA_PATH', '')))
-    ))))
+    else:
+        domains = list(map(lambda url: 'file://'+url if url.startswith('/') else url, domains))
+    log.info('loading domain annotations from {}'.format(domains))
+    x.add_domain_info(filter_duplicated_domains(only_pfam_or_cath_domains(
+        itertools.chain.from_iterable(map(iter_domains, domains))
+        )))
+        #iter_domains('file:///scratch/beegfs/monthly/aaltenho/Browser/cath/all_domains.csv.gz'),
+        #iter_domains('file:///scratch/beegfs/monthly/aaltenho/Browser/cath/additional_domains.mdas.csv.gz')
+#    ))))
     x.add_domainname_info(itertools.chain(
         CathDomainNameParser('http://download.cathdb.info/cath/releases/latest-release/'
                              'cath-classification-data/cath-names.txt').parse(),

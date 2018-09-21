@@ -1260,8 +1260,8 @@ class OmaGroupMetadataLoader(object):
         has_meta_data = self._check_textfiles_avail()
         if has_meta_data:
             data = self._load_data()
-            fingerprints = data['Fingerprints']
-            keywords = data['Keywords']
+            fingerprints = [x.encode('ascii') for x in data['Fingerprints']]
+            keywords = [x.encode('utf-8') for x in data['Keywords']]
         else:
             common.package_logger.warning('No fingerprint nor keyword information available')
             fingerprints = [b'n/a'] * nr_groups

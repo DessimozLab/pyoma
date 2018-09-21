@@ -340,7 +340,9 @@ class DarwinExporter(object):
             try:
                 val = data[col]
                 if col in time_cols and isinstance(val, str):
-                    for fmt in ('%b %d, %Y', '%B %d, %Y', '%d.%m.%Y', '%Y%m%d'):
+                    if val=="":
+                        return dflts[col]
+                    for fmt in ('%b %d, %Y', '%B %d, %Y', '%d.%m.%Y', '%Y%m%d', '%Y-%m-%d', '%d-%m-%Y'):
                         try:
                             date = time.strptime(val, fmt)
                             return time.mktime(date)

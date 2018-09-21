@@ -23,14 +23,17 @@ if __name__ == "__main__":
     hog_mapper = pyoma.browser.db.SimpleSeqToHOGMapper(db)
     outfn = conf.out + ".txt"
     with open(outfn, 'wt') as fout:
-        csv_writer = csv.writer(fout, seperator="\t")
+        csv_writer = csv.writer(fout, delimiter="\t")
         for infn in conf.fasta:
             with open(infn, 'rt') as fin:
                 seqs = Bio.SeqIO.parse(fin, 'fasta')
                 it = hog_mapper.imap_sequences(seqs)
 
                 for map_res in it:
-                    csv_writer.write(map_res.query, map_res.target.omaid,
-                                     map_res.target.entry_nr == map_res.closest_entry_nr,
-                                     map_res.target.hog_fam_nr,
-                                     map_res.distance, map_res.score)
+                    if map_res.target.hog_family_nr != 0:
+                        hog_id = db.format_hogid(map_res.target.hog_family_nr)
+                    else:
+                        hog_id = "n/a"
+                    csv_writer.writerow([map_res.query, map_res.target.omaid,
+                                         map_res.target.entry_nr == map_res.closest_entry_nr,
+                                         hog_id, map_res.distance, map_res.score])

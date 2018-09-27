@@ -1915,6 +1915,6 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level='INFO'
     x.update_summary_stats()
 
     genomes_json_fname = os.path.normpath(os.path.join(
-        os.path.dirname(name), '..', 'downloads', 'genomes.json'))
+        os.path.dirname(x.h5.filename), '..', 'downloads', 'genomes.json'))
     augment_genomes_json_download_file(genomes_json_fname, x.h5)
     x.close()

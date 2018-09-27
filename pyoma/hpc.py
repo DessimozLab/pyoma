@@ -27,7 +27,9 @@ class JobArray(object):
         return "Jobarray process {} of {}".format(self.this_proc_nr, self.nr_procs)
 
 
-def detect_hpc_jobarray(nr_procs):
+def detect_hpc_jobarray(nr_procs, this_proc_nr=None):
+    if this_proc_nr is not None:
+        return JobArray(nr_procs, int(this_proc_nr))
     if os.getenv("LSB_JOBID"):
         return JobArray(nr_procs, os.getenv('LSB_JOBINDEX', "1"))
     elif os.getenv("SGE_TASK_ID"):

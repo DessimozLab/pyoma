@@ -17,13 +17,14 @@ if __name__ == "__main__":
     parser.add_argument('fasta', nargs="+", help="File(s) with fasta formatted protein sequences")
     parser.add_argument('--out', default="map2hog", help="filename prefix of output file.")
     parser.add_argument('-n', '--nr_proc', type=int, help="Nr of processes to use")
+    parser.add_argument('-p', '--procnr', type=int, help="This process nr")
     parser.add_argument('-v', action='count', default=0, help="Increase verbosity to INFO/DEBUG")
     conf = parser.parse_args()
     logging.basicConfig(level=30 - 10*min(conf.v, 2))
     nr_procs = conf.nr_proc
     if nr_procs is None:
         nr_procs = int(os.getenv('NR_PROCESSES', "1"))
-    pInf = pyoma.hpc.detect_hpc_jobarray(nr_procs)
+    pInf = pyoma.hpc.detect_hpc_jobarray(nr_procs, this_proc_nr=conf.procnr)
     logger.info(pInf)
 
     db = pyoma.browser.db.Database(conf.hdf5)

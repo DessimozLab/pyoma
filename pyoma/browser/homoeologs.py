@@ -196,6 +196,20 @@ class HomeologsConfidenceCalculator(object):
         df['fuzzy_confidence_scaled'] = min_max_scaler.fit_transform(df['fuzzy_confidence'].values.reshape(-1, 1))
         return df
 
+    def augment_ids(self, df):
+        xref_tab = self.h5_handle.root.XRef
+        xrefs = pandas.DataFrame(xref_tab.read_where('(EntryNr >= {}) & (EntryNr <= {}) & (XRefSource == {})'
+                                                 .format(*self.genome_range, xref_tab.get_enum('XRefSource')['SourceID'])))
+        xrefs.drop(columns=['XRefSource','Verification'], inplace=True)
+        xrefs['XRefId'] = xrefs['XRefId'].str.decode("utf-8")
+
+        xrefs_one_ref = xrefs.drop_duplicates(subset='EntryNr', keep="first")
+        new_df = pandas.merge(pandas.merge(df, xrefs_one_ref, how='left', left_on="EntryNr1", right_on="EntryNr"),
+                              xrefs_one_ref, how='left', left_on="EntryNr2", right_on="EntryNr")
+        new_df.drop(columns=['EntryNr_x','EntryNr_y'], inplace=True)
+        new_df.rename(columns={'XRefId_x': 'SourceID1', 'XRefId_y': 'SourceID2'}, inplace=True)
+        return new_df
+
 
 class HomeologsConfidenceCalculatorFromTSV(HomeologsConfidenceCalculator):
     def __init__(self, infile):
@@ -204,6 +218,9 @@ class HomeologsConfidenceCalculatorFromTSV(HomeologsConfidenceCalculator):
         if len(set(expected_columns) - set(self.relations_df.columns.values)) > 0:
             raise KeyError("provided inputfile does not have all expected columns. "
                            "Expected columns are {}".format(expected_columns))
+
+    def augment_ids(self):
+        raise NotImplementedError("cannot map to source ids from TSV input")
 
 
 if __name__ == "__main__":
@@ -235,4 +252,8 @@ if __name__ == "__main__":
     else:
         scorer = HomeologsConfidenceCalculatorFromTSV(args.csv)
     data = scorer.calculate_scores()
+    try:
+        data = scorer.augment_ids(data)
+    except NotImplementedError:
+        pass
     data.to_csv(args.outfile, sep='\t', header=True, index=True)

@@ -1323,6 +1323,35 @@ class Taxonomy(object):
             res = it
         return res
 
+    def get_subtaxonomy_rooted_at(self, root):
+        rid = self._get_taxids_from_any([root])
+        subtree = [rid]
+
+        def get_children(id):
+            children = self._direct_children_taxa(id)
+            if len(children) > 0:
+                for child in children:
+                    child_id = child['NCBITaxonId']
+                    subtree.append(child_id)
+                    get_children(child_id)
+
+        get_children(rid)
+        return self.get_induced_taxonomy(subtree)
+
+    def get_taxid_of_extent_genomes(self):
+        """returns a list of ncbi taxon ids of the extent genomes within the taxonomy"""
+        def _traverse(node):
+            children = self._direct_children_taxa(node['NCBITaxonId'])
+            for child in children:
+                _traverse(child)
+
+            if len(children) == 0 or (int(node['NCBITaxonId']) in self.genomes):
+                extent_genomes.append(int(node['NCBITaxonId']))
+
+        extent_genomes = []
+        _traverse(self._get_root_taxon())
+        return extent_genomes
+
     def get_induced_taxonomy(self, members, collapse=True, augment_parents=False):
         """Extract the taxonomy induced by a given set of `members`.
 

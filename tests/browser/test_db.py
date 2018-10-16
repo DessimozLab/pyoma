@@ -298,6 +298,16 @@ class TaxonomyTest(unittest.TestCase):
                         {"id": 559292, "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"}]}
         self.assertEqual(expected, phylo.as_dict())
 
+    def test_subtree_tax(self):
+        clade = "Fungi"
+        subtax = self.tax.get_subtaxonomy_rooted_at(clade)
+        self.assertIn(4893, subtax.tax_table['NCBITaxonId'])
+        self.assertNotIn(36329, subtax.tax_table['NCBITaxonId'])
+
+    def test_taxid_of_extent_genomes(self):
+        taxids = set(self.tax.get_taxid_of_extent_genomes())
+        self.assertEqual({284811, 559292, 284812, 36329}, taxids)
+
     def test_induced_tax_with_gaps(self):
         pass
 

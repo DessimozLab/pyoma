@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
     cols = ["OmaID", "GO_ID", "Evidence", "DB:Reference"]
     if conf.xref_type is not None:
-        cols.insert(conf.xref_type, 1)
+        cols.insert(1, conf.xref_type)
 
     csv_writer = csv.DictWriter(conf.out, cols, extrasaction="ignore", delimiter="\t")
     csv_writer.writerows(annotations.to_dict('records'))

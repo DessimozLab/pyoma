@@ -761,7 +761,7 @@ class Database(object):
             if stop is None:
                 query = 'EntryNr == {:d}'.format(entry_nr)
             else:
-                if not isinstance(stop, int) or stop < entry_nr:
+                if not isinstance(stop, (numpy.integer, int)) or stop < entry_nr:
                     raise TypeError("stop argument needs to be a entry number that is larger than 'entry_nr'")
                 query = '(EntryNr >= {:d}) & (EntryNr < {:d})'.format(entry_nr, stop)
             annots = self.db.root.Annotations.GeneOntology.read_where(query)

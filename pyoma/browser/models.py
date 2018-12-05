@@ -137,6 +137,10 @@ class ProteinEntry(object):
     def canonicalid(self):
         return self._entry['CanonicalId'].decode()
 
+    @LazyProperty
+    def xrefs(self):
+        return self._db.id_mapper['Xref'].map_entry_nr(self._entry['EntryNr'])
+
     @property
     def sequence_md5(self):
         return self._entry['MD5ProteinHash'].decode()

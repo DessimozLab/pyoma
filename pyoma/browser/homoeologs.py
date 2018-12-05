@@ -91,7 +91,7 @@ def get_synteny_mf(df, synteny, view=False):
     # synteny (gaussian)
     synteny['low'] = gaussmf(synteny.universe, 0, .15)
     synteny['med'] = gaussmf(synteny.universe, .3, .15)
-    synteny['high'] = gaussmf(synteny.universe, .7, .25)
+    synteny['high'] = gaussmf(synteny.universe, 1, .4)
     return synteny
 
 

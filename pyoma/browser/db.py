@@ -1062,6 +1062,7 @@ class OmaIdMapper(object):
         self._genome_keys = self.genome_table.argsort(
             order=('UniProtSpeciesCode'))
         self._taxid_keys = self.genome_table.argsort(order=('NCBITaxonId'))
+        self._sciname_keys = self.genome_table.argsort(order=('SciName'))
         self._omaid_re = re.compile(r'(?P<genome>[A-Z][A-Z0-9]{4})(?P<nr>\d+)')
         self._db = db
 
@@ -1090,6 +1091,19 @@ class OmaIdMapper(object):
             raise UnknownSpecies('{} is unknown'.format(code))
         return genome
 
+    def genome_from_SciName(self, name):
+        name = name.encode('ascii')
+        idx = self.genome_table['SciName'].searchsorted(
+            name, sorter=self._sciname_keys)
+        try:
+            genome = self.genome_table[self._sciname_keys[idx]]
+        except IndexError:
+            raise UnknownSpecies('{} is unknown'.format(name))
+
+        if genome['SciName'] != name:
+            raise UnknownSpecies('{} is unknown'.format(name))
+        return genome
+
     def genome_from_taxid(self, taxid):
         try:
             taxid = int(taxid)
@@ -1103,12 +1117,17 @@ class OmaIdMapper(object):
         return genome
 
     def identify_genome(self, code):
-        """identify genome based on either a UniProtSpeciesCode or an
-        NCBI Taxonomy Id"""
+        """identify genome based on either a UniProtSpeciesCode,
+        NCBI Taxonomy Id or species name"""
         if isinstance(code, int) or code.isdigit():
             return self.genome_from_taxid(code)
         else:
-            return self.genome_from_UniProtCode(code)
+            if len(code) == 5:
+                try:
+                    return self.genome_from_UniProtCode(code)
+                except UnknownSpecies:
+                    pass
+            return self.genome_from_SciName(code)
 
     def omaid_to_entry_nr(self, omaid):
         """returns the internal numeric entrynr from a

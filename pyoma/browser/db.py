@@ -761,7 +761,7 @@ class Database(object):
             if stop is None:
                 query = 'EntryNr == {:d}'.format(entry_nr)
             else:
-                if not isinstance(stop, int) or stop < entry_nr:
+                if not isinstance(stop, (numpy.integer, int)) or stop < entry_nr:
                     raise TypeError("stop argument needs to be a entry number that is larger than 'entry_nr'")
                 query = '(EntryNr >= {:d}) & (EntryNr < {:d})'.format(entry_nr, stop)
             annots = self.db.root.Annotations.GeneOntology.read_where(query)
@@ -892,6 +892,7 @@ class SequenceSearch(object):
         self.k = self.kmer_lookup._f_getattr('k')
         self.encoder = KmerEncoder(self.k)
         logger.info('KmerLookup of size k={} loaded'.format(self.k))
+        self.multienv_align = None
 
     def get_entry_length(self, ii):
         """Get length of a particular entry."""
@@ -933,7 +934,7 @@ class SequenceSearch(object):
         return ''.join(filter(lambda c: c in self.PROTEIN_CHARS,
                               seq.upper())).encode('ascii')
 
-    def search(self, seq, n=None, coverage=None, is_sanitised=None):
+    def search(self, seq, n=None, coverage=None, is_sanitised=None, compute_distance=False):
         '''
             Searches the database for entries that match. If can't find an exact
             match performs a kmer + local alignment approach to approximate
@@ -944,7 +945,8 @@ class SequenceSearch(object):
         # TODO: taxonomic filtering.
         if len(m) == 0:
             # Do approximate search
-            m = self.approx_search(seq, n=n, coverage=coverage, is_sanitised=True)
+            m = self.approx_search(seq, n=n, coverage=coverage, is_sanitised=True,
+                                   compute_distance=compute_distance)
             # TODO: taxonomic filtering.
             return ('approx', m) if m is not [] else None
         else:
@@ -980,7 +982,7 @@ class SequenceSearch(object):
         # Nothing found.
         return []
 
-    def approx_search(self, seq, n=None, is_sanitised=None, coverage=None):
+    def approx_search(self, seq, n=None, is_sanitised=None, coverage=None, compute_distance=False):
         '''
             Performs an exact match search using the suffix array.
         '''
@@ -1007,22 +1009,38 @@ class SequenceSearch(object):
         if len(c) > 0:
             return sorted([(m[0], {'kmer_coverage': m[1],
                                    'score': a[0],
-                                   'alignment': a[1]})
-                           for (m, a) in self._align_entries(seq, c)],
-                          key=lambda z: z[1]['score'],
-                      reverse=True)
+                                   'alignment': a[1],
+                                   'distance': a[2] if compute_distance else None,
+                                   'distvar': a[3] if compute_distance else None})
+                           for (m, a) in self._align_entries(seq, c, compute_distance)],
+                          key=lambda q: q[1]['score'],
+                          reverse=True)
         return []
 
-    def _align_entries(self, seq, matches):
+    def _align_entries(self, seq, matches, compute_distance=False):
         # Does the alignment for the approximate search
         def align(s1, s2s, env, aligned):
             for s2 in s2s:
                 z = pyopa.align_double(s1, s2, env, False, False, True)
                 a = pyopa.align_strings(s1, s2, env, False, z)
-                aligned.append((z[0], ((a[0].convert_readable(),
-                                        (z[3], z[1])),
-                                       (a[1].convert_readable(),
-                                        (z[4], z[2])))))
+                if compute_distance:
+                    score, pam, pamvar = self.multienv_align.estimate_pam(*a[0:2])
+                    res_ds = (score, ((a[0].convert_readable(),
+                                       (z[3], z[1])),
+                                      (a[1].convert_readable(),
+                                       (z[4], z[2]))),
+                              pam, pamvar)
+                else:
+                    res_ds = (z[0], ((a[0].convert_readable(),
+                                      (z[3], z[1])),
+                                     (a[1].convert_readable(),
+                                      (z[4], z[2]))))
+                aligned.append(res_ds)
+
+        if compute_distance and self.multienv_align is None:
+            # lazy loading of MultipleAlEnv datastructure
+            envs = pyopa.load_default_environments()
+            self.multienv_align = pyopa.MutipleAlEnv(envs['environments'], envs['log_pam1'])
 
         aligned = []
         query = pyopa.Sequence(seq.decode('ascii'))
@@ -1304,6 +1322,35 @@ class Taxonomy(object):
         else:
             res = it
         return res
+
+    def get_subtaxonomy_rooted_at(self, root):
+        rid = self._get_taxids_from_any([root])
+        subtree = [rid]
+
+        def get_children(id):
+            children = self._direct_children_taxa(id)
+            if len(children) > 0:
+                for child in children:
+                    child_id = child['NCBITaxonId']
+                    subtree.append(child_id)
+                    get_children(child_id)
+
+        get_children(rid)
+        return self.get_induced_taxonomy(subtree)
+
+    def get_taxid_of_extent_genomes(self):
+        """returns a list of ncbi taxon ids of the extent genomes within the taxonomy"""
+        def _traverse(node):
+            children = self._direct_children_taxa(node['NCBITaxonId'])
+            for child in children:
+                _traverse(child)
+
+            if len(children) == 0 or (int(node['NCBITaxonId']) in self.genomes):
+                extent_genomes.append(int(node['NCBITaxonId']))
+
+        extent_genomes = []
+        _traverse(self._get_root_taxon())
+        return extent_genomes
 
     def get_induced_taxonomy(self, members, collapse=True, augment_parents=False):
         """Extract the taxonomy induced by a given set of `members`.
@@ -1801,3 +1848,40 @@ class FastMapper(object):
         file.write('!Contact Email: contact@omabrowser.org\n')
         for anno in self.iter_projected_goannotations(seqrecords):
             GOA.writerec(anno, file, GOA.GAF20FIELDS)
+
+
+HogMapperTuple = collections.namedtuple("HogMapperTuple", "query, closest_entry_nr, target, distance, score")
+
+
+class SimpleSeqToHOGMapper(object):
+    """Fast mapper of sequeces to closest sequence and taken their HOG annotation"""
+    def __init__(self, db, threaded=False):
+        self.db = Database(db.get_hdf5_handle().filename) if threaded else db
+
+    def _get_main_protein_from_entrynr(self, enr):
+        entry = ProteinEntry(self.db, self.db.entry_by_entry_nr(enr))
+        return entry.get_main_isoform()
+
+    def imap_sequences(self, seqrecords):
+        """maps an iterator of Bio.Seq.SeqRecords to database and
+        yields the mappings."""
+        for rec in seqrecords:
+            logger.debug('projecting {} to closest sequence'.format(rec))
+            r = self.db.seq_search.search(str(rec.seq), compute_distance=True)
+            if r is not None:
+                if r[0] == 'exact':
+                    # r[1] contains list of entry nr with exact sequence match (full length)
+                    for enr in r[1]:
+                        p = self._get_main_protein_from_entrynr(enr)
+                        # TODO: good score for identical sequences
+                        yield HogMapperTuple(rec.id, enr, p, 0, 0)
+                else:
+                    candidate_matches = r[1]
+                    # Take best matches, up to score>80 & score_i > .5*score_max
+                    score_max = candidate_matches[0][1]['score']
+                    for enr, match_res in candidate_matches:
+                        if match_res['score'] < 80 or match_res['score'] < 0.5*score_max:
+                            break
+                        p = self._get_main_protein_from_entrynr(enr)
+                        #score, distance, distvar = pyopa.MutipleAlEnv
+                        yield HogMapperTuple(rec.id, enr, p, match_res['distance'], match_res['score'])

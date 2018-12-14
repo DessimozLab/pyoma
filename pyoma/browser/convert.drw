@@ -204,7 +204,7 @@ GetGroupData := proc()
     fi:
     tab := table():
     tab['Keywords'] := KeywordT:
-    tab['Fingerprints'] := Fingerprints;
+    tab['Fingerprints'] := GroupIDs;
     StoreResults(json(tab));
 end:
 

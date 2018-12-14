@@ -1,7 +1,7 @@
 from __future__ import division
 
 import collections
-
+import numpy
 import time
 
 
@@ -93,7 +93,7 @@ class ProteinEntry(object):
     @LazyProperty
     def _entry(self):
         return (self._db.entry_by_entry_nr(self._stored_entry)
-                if isinstance(self._stored_entry, int)
+                if isinstance(self._stored_entry, (int, numpy.integer))
                 else self._stored_entry)
 
     @classmethod
@@ -136,6 +136,10 @@ class ProteinEntry(object):
     @property
     def canonicalid(self):
         return self._entry['CanonicalId'].decode()
+
+    @LazyProperty
+    def xrefs(self):
+        return self._db.id_mapper['Xref'].map_entry_nr(self._entry['EntryNr'])
 
     @property
     def sequence_md5(self):
@@ -198,6 +202,12 @@ class ProteinEntry(object):
         return [ProteinEntry(self._db, e)
                 for e in self._db.get_splicing_variants(self._entry)
                 if e['EntryNr'] != self.entry_nr]
+
+    def get_main_isoform(self):
+        if self.is_main_isoform:
+            return self
+        else:
+            return ProteinEntry(self._db, self._entry['AltSpliceVariant'])
 
     def __repr__(self):
         return "<{}({}, {})>".format(self.__class__.__name__, self.entry_nr, self.omaid)

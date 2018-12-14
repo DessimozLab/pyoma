@@ -56,10 +56,10 @@ def callDarwinExport(func, drwfile=None):
             drwfile = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
         # with open(os.devnull, 'w') as DEVNULL:
         stacksize = resource.getrlimit(resource.RLIMIT_STACK)
-        common.package_logger.info('current stacklimit: {}'.format(stacksize))
-        common.package_logger.info('setting stacklimit: {}'.format((max(stacksize)-1, stacksize[1])))
+        common.package_logger.debug('current stacklimit: {}'.format(stacksize))
+        common.package_logger.debug('setting stacklimit: {}'.format((max(stacksize)-1, stacksize[1])))
         resource.setrlimit(resource.RLIMIT_STACK, (min(stacksize), stacksize[1]))
-        p = subprocess.Popen(['darwin', '-q', '-E', '-B'], stdin=subprocess.PIPE,
+        p = subprocess.Popen(['darwin', '-q', '-E'], stdin=subprocess.PIPE,
                              stderr=subprocess.PIPE, stdout=subprocess.PIPE)
         drw_cmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
             tmpfile.name,
@@ -71,6 +71,8 @@ def callDarwinExport(func, drwfile=None):
             raise DarwinException(p.stderr.read())
 
         trans_tab = "".join(str(chr(x)) for x in range(128)) + " " * 128
+        if not os.path.exists(tmpfile.name) or os.path.getsize(tmpfile.name) == 0:
+            raise DarwinException(p.stderr.read())
         with open(tmpfile.name, 'r') as jsonData:
             rawdata = jsonData.read()
             return json.loads(rawdata.translate(trans_tab))
@@ -340,7 +342,9 @@ class DarwinExporter(object):
             try:
                 val = data[col]
                 if col in time_cols and isinstance(val, str):
-                    for fmt in ('%b %d, %Y', '%B %d, %Y', '%d.%m.%Y', '%Y%m%d'):
+                    if val=="":
+                        return dflts[col]
+                    for fmt in ('%b %d, %Y', '%B %d, %Y', '%d.%m.%Y', '%Y%m%d', '%Y-%m-%d', '%d-%m-%Y'):
                         try:
                             date = time.strptime(val, fmt)
                             return time.mktime(date)
@@ -541,6 +545,7 @@ class DarwinExporter(object):
                                           genome, tablefmt.LocusTable, createparents=True,
                                           expectedrows=gs['TotEntries'] * 4)
 
+            cnt_missmatch_locus = 0
             for nr in range(gs['TotEntries']):
                 eNr = data['off'] + nr + 1
                 protTab.row['EntryNr'] = eNr
@@ -560,8 +565,9 @@ class DarwinExporter(object):
                     locTab.append(locus_tab)
                     len_cds = sum(z['End'] - z['Start']+1 for z in locus_tab)
                     if len_cds != protTab.row['CDNABufferLength']-1:
-                        self.logger.warning("sum of exon lengths differ with cdna sequence for {}: {} vs {}"
+                        self.logger.debug("sum of exon lengths differ with cdna sequence for {}: {} vs {}"
                                             .format(eNr, len_cds, protTab.row['CDNABufferLength']-1))
+                        cnt_missmatch_locus += 1
 
                     protTab.row['LocusStart'] = locus_tab['Start'].min()
                     protTab.row['LocusEnd'] = locus_tab['End'].max()
@@ -572,6 +578,8 @@ class DarwinExporter(object):
                 protTab.row.append()
             protTab.flush()
             seqArr.flush()
+            if cnt_missmatch_locus > 0:
+                self.logger.warning('{} missmatches in exon-lengths compared to locus info'.format(cnt_missmatch_locus))
             for n in (protTab, seqArr, locTab):
                 if n.size_in_memory != 0:
                     self.logger.info('worte %s: compression ratio %3f%%' %
@@ -1256,8 +1264,8 @@ class OmaGroupMetadataLoader(object):
         has_meta_data = self._check_textfiles_avail()
         if has_meta_data:
             data = self._load_data()
-            fingerprints = data['Fingerprints']
-            keywords = data['Keywords']
+            fingerprints = [x.encode('ascii') for x in data['Fingerprints']]
+            keywords = [x.encode('utf-8') for x in data['Keywords']]
         else:
             common.package_logger.warning('No fingerprint nor keyword information available')
             fingerprints = [b'n/a'] * nr_groups
@@ -1885,11 +1893,15 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level='INFO'
     x.add_homoeology_confidence()
     if domains is None:
         domains = ["file://dev/null"]
-    x.add_domain_info(filter_duplicated_domains(only_pfam_or_cath_domains(itertools.chain(
-        iter_domains('ftp://orengoftp.biochem.ucl.ac.uk/gene3d/CURRENT_RELEASE/' +
-                     'representative_uniprot_genome_assignments.csv.gz'),
-        iter_domains('file://{}/additional_domains.mdas.csv.gz'.format(os.getenv('DARWIN_BROWSERDATA_PATH', '')))
-    ))))
+    else:
+        domains = list(map(lambda url: 'file://'+url if url.startswith('/') else url, domains))
+    log.info('loading domain annotations from {}'.format(domains))
+    x.add_domain_info(filter_duplicated_domains(only_pfam_or_cath_domains(
+        itertools.chain.from_iterable(map(iter_domains, domains))
+        )))
+        #iter_domains('file:///scratch/beegfs/monthly/aaltenho/Browser/cath/all_domains.csv.gz'),
+        #iter_domains('file:///scratch/beegfs/monthly/aaltenho/Browser/cath/additional_domains.mdas.csv.gz')
+#    ))))
     x.add_domainname_info(itertools.chain(
         CathDomainNameParser('http://download.cathdb.info/cath/releases/latest-release/'
                              'cath-classification-data/cath-names.txt').parse(),
@@ -1905,6 +1917,6 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level='INFO'
     x.update_summary_stats()
 
     genomes_json_fname = os.path.normpath(os.path.join(
-        os.path.dirname(name), '..', 'downloads', 'genomes.json'))
+        os.path.dirname(x.h5.filename), '..', 'downloads', 'genomes.json'))
     augment_genomes_json_download_file(genomes_json_fname, x.h5)
     x.close()

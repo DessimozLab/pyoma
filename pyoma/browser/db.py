@@ -439,13 +439,16 @@ class Database(object):
         """
         hog_range = self._hog_lex_range(hog_id)
         # get the proteins which have that HOG number
-        memb = self.db.root.Protein.Entries.read_where(
+        members = self.db.root.Protein.Entries.read_where(
             '({!r} <= OmaHOG) & (OmaHOG < {!r})'.format(*hog_range))
         if level is not None:
-            memb = [x for x in memb if level.encode('ascii') in self.tax.get_parent_taxa(
-                self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
-
-        return memb
+            keep = numpy.array(
+                [level.encode('ascii') in self.tax.get_parent_taxa(
+                    self.id_mapper['OMA'].genome_of_entry_nr(enr)['NCBITaxonId'])['Name']
+                 for enr in members['EntryNr']],
+                dtype=numpy.bool)
+            members = members[keep]
+        return members
 
     def iter_members_of_hog_id(self, hog_id):
         """iterates over all proteins that belong to a specific hog_id.
@@ -508,8 +511,12 @@ class Database(object):
         members = self.member_of_hog_id(hoglev['ID'])
         if level != 'LUCA':
             # last, we need to filter the proteins to the tax range of interest
-            members = [x for x in members if level.encode('ascii') in self.tax.get_parent_taxa(
-                self.id_mapper['OMA'].genome_of_entry_nr(x['EntryNr'])['NCBITaxonId'])['Name']]
+            keep = numpy.array(
+                [level.encode('ascii') in self.tax.get_parent_taxa(
+                    self.id_mapper['OMA'].genome_of_entry_nr(enr)['NCBITaxonId'])['Name']
+                 for enr in members['EntryNr']],
+                dtype=numpy.bool)
+            members = members[keep]
         return members
 
     def get_orthoxml(self, fam):

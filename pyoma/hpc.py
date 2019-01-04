@@ -26,6 +26,12 @@ class JobArray(object):
     def __str__(self):
         return "Jobarray process {} of {}".format(self.this_proc_nr, self.nr_procs)
 
+    def modify_filename(self, basename):
+        if self.nr_procs > 1:
+            base, ext = os.path.splitext(basename)
+            return "{}_{}-{}{}".format(base, self.this_proc_nr, self.nr_procs, ext)
+        return basename
+
 
 def detect_hpc_jobarray(nr_procs, this_proc_nr=None):
     if this_proc_nr is not None:

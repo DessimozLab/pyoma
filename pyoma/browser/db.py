@@ -21,6 +21,7 @@ import pandas as pd
 import tables
 from Bio.UniProt import GOA
 
+from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .KmerEncoder import KmerEncoder
 from .geneontology import GeneOntology, OntologyParser, GOAspect
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome
@@ -831,37 +832,6 @@ class Database(object):
                  '\n'))
 
 
-class SuffixSearcher(object):
-    def __init__(self, suffix_index_node, buffer=None, lookup=None):
-        if isinstance(suffix_index_node, tables.Group):
-            self.buffer_arr = buffer if buffer else suffix_index_node._f_get_child('buffer')
-            self.suffix_arr = suffix_index_node._f_get_child('suffix')
-            self.lookup_arr = lookup if lookup else suffix_index_node._f_get_child('offset')
-        else:
-            self.buffer_arr = buffer
-            self.suffix_arr = suffix_index_node
-            self.lookup_arr = lookup
-        self.lookup_arr = self.lookup_arr[:]
-
-    def find(self, query):
-        n = len(query)
-        if n > 0:
-            slicer = KeyWrapper(self.suffix_arr,
-                                key=lambda i:
-                                self.buffer_arr[i:(i + n)].tobytes())
-            ii = bisect_left(slicer, query)
-            if ii and (slicer[ii] == query):
-                # Left most found.
-                jj = ii + 1
-                while (jj < len(slicer)) and (slicer[jj] == query):
-                    # zoom to end -> -> ->
-                    jj += 1
-
-                # Find entry numbers and filter to remove incorrect entries
-                return numpy.searchsorted(self.lookup_arr, self.suffix_arr[ii:jj]+1) - 1
-        return []
-
-
 class SequenceSearch(object):
     '''
         Contains all the methods for searching the sequence
@@ -1619,7 +1589,12 @@ class XrefIdMapper(object):
         self.xref_tab = db.get_hdf5_handle().get_node('/XRef')
         self.xrefEnum = self.xref_tab.get_enum('XRefSource')
         self.idtype = frozenset(list(self.xrefEnum._values.keys()))
-        self.xref_index = SuffixSearcher(db.get_hdf5_handle().get_node('/XRef_Index'))
+        try:
+            self.xref_index = SuffixSearcher.from_tablecolumn(self.xref_tab, 'XRefId')
+        except SuffixIndexError:
+            # compability mode
+            idx_node = db.get_hdf5_handle().get_node('/XRef_Index')
+            self.xref_index = SuffixSearcher.from_index_node(idx_node)
 
     def map_entry_nr(self, entry_nr):
         """returns the XRef entries associated with the query protein.

@@ -229,42 +229,47 @@ def create_suffix_index(tab, col, buffer=None, index_group=None, ignore_case=Tru
     return suffixbuilder()
 
 
-
 class SuffixSearcher(object):
-    def __init__(self, table, column, offset=None, ignore_case=False):
-        if isinstance(table, tables.Table) and isinstance(column, str):
-            h5 = table._v_file
-            try:
-                idx_node = h5.get_node_attr(table, column+"_suffixindexnode")
-                idx_node = h5.get_node(idx_node)
-            except (AttributeError, tables.NoSuchNodeError) as e:
-                raise SuffixIndexError("Column {} of table {} does not seem to have a suffix index"
-                                       .format(column, table))
-            try:
-                self.suffix_arr = h5.get_node(idx_node, column+"_suffix")
-                self.buffer_arr = h5.get_node(h5.get_node_attr(idx_node, column + "_buffer"))
-                self.offset_arr = h5.get_node(h5.get_node_attr(idx_node, column + "_offset"))
-            except (tables.NoSuchNodeError, AttributeError) as e:
-                raise SuffixIndexInconsitency("not all suffix index elements available: {}".format(e))
-            try:
-                self.ignore_case = bool(h5.get_node_attr(idx_node, column+"_ignore_case"))
-            except AttributeError:
-                self.ignore_case = False
+    @classmethod
+    def from_tablecolumn(cls, table, column, ignore_case=False):
+        h5 = table._v_file
+        try:
+            idx_node = h5.get_node_attr(table, column+"_suffixindexnode")
+            idx_node = h5.get_node(idx_node)
+        except (AttributeError, tables.NoSuchNodeError) as e:
+            raise SuffixIndexError("Column {} of table {} does not seem to have a suffix index"
+                                   .format(column, table))
+        try:
+            suffix_arr = h5.get_node(idx_node, column+"_suffix")
+            buffer_arr = h5.get_node(h5.get_node_attr(idx_node, column + "_buffer"))
+            offset_arr = h5.get_node(h5.get_node_attr(idx_node, column + "_offset"))
+        except (tables.NoSuchNodeError, AttributeError) as e:
+            raise SuffixIndexInconsitency("not all suffix index elements available: {}".format(e))
+        try:
+            ignore_case = bool(h5.get_node_attr(idx_node, column+"_ignore_case"))
+        except AttributeError:
+            ignore_case = False
+        return cls(suffix_arr, buffer_arr, offset_arr, ignore_case)
 
-        else:
-            import warnings
-            warnings.warn("initializing SuffixSearcher should no longer use this form. Use (table, columnname) instead")
-            if isinstance(table, tables.Group):
-                self.buffer_arr = column if column else table._f_get_child('buffer')
-                self.suffix_arr = table._f_get_child('suffix')
-                self.offset_arr = offset if offset else table._f_get_child('offset')
-            else:
-                self.buffer_arr = column
-                self.suffix_arr = table
-                self.offset_arr = offset
-            self.ignore_case = ignore_case
+    @classmethod
+    def from_index_node(cls, index_node, buffer=None, offset=None):
+        import warnings
+        warnings.warn("initializing SuffixSearcher this way is deprecated. Use from_tablecolumn(table, columnname) instead")
+        if not isinstance(index_node, tables.Group):
+            raise TypeError("expected a tables.Group node pointing to the index")
+        try:
+            buffer_arr = buffer if buffer else index_node._f_get_child('buffer')
+            suffix_arr = index_node._f_get_child('suffix')
+            offset_arr = offset if offset else index_node._f_get_child('offset')
+            return cls(suffix_arr, buffer_arr, offset_arr, ignore_case=True)
+        except tables.NoSuchNodeError as e:
+            raise SuffixIndexInconsitency("suffix array data missing: {}".formate(e))
 
-        self.offset_arr = self.offset_arr[:]
+    def __init__(self, suffix, buffer, offset, ignore_case):
+        self.suffix_arr = suffix
+        self.buffer_arr = buffer
+        self.offset_arr = offset[:]
+        self.ignore_case = bool(ignore_case)
 
     def find(self, query):
         if isinstance(query, str):

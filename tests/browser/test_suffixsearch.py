@@ -101,7 +101,7 @@ class SuffixArraySearchTests(unittest.TestCase):
     def test_search_case_insensitive(self):
         tab = self.h5.get_node('/test/table')
         suffixsearch.SuffixIndexBuilderStringCol(tab, 'CharCol50', '/test', ignore_case=True)()
-        search = suffixsearch.SuffixSearcher(tab, 'CharCol50')
+        search = suffixsearch.SuffixSearcher.from_tablecolumn(tab, 'CharCol50')
         target_row = numpy.random.randint(0, len(tab), size=200)
         for k, full_query in enumerate(tab.read_coordinates(target_row, field='CharCol50')):
             if len(full_query) < 2:
@@ -118,7 +118,7 @@ class SuffixArraySearchTests(unittest.TestCase):
     def test_search_string_instance(self):
         tab = self.h5.get_node('/test/table')
         suffixsearch.SuffixIndexBuilderStringCol(tab, 'CharCol50', '/test', ignore_case=True)()
-        search = suffixsearch.SuffixSearcher(tab, 'CharCol50')
+        search = suffixsearch.SuffixSearcher.from_tablecolumn(tab, 'CharCol50')
         query = tab[5]['CharCol50'].decode()
         res = search.find(query[2:])
         self.assertIn(5, res)
@@ -171,7 +171,7 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
 
     def test_search_pattern(self):
         tab = self.h5.get_node('/test/table')
-        search = suffixsearch.SuffixSearcher(tab, 'VarCharOff')
+        search = suffixsearch.SuffixSearcher.from_tablecolumn(tab, 'VarCharOff')
         target_row = numpy.random.randint(0, len(tab), size=200)
         for k, full_query in enumerate(tab.read_coordinates(target_row, field='CharCol')):
             if len(full_query) < 2:

@@ -743,6 +743,25 @@ class Database(object):
 
         return fam_row, sim_fams_df
 
+    def entrynrs_with_go_annotation(self, term, evidence=None):
+        """Retrieve protein entry numbers that have a certain GO annotation term
+
+        :param term: numeric term or GO-identifier"""
+        if isinstance(term, str) and term.startswith("GO:"):
+            term = term[3:]
+
+        try:
+            term = int(term)
+        except ValueError:
+            raise InvalidId('Invalid GO ID: {}'.format(term))
+
+        gotab = self.get_hdf5_handle().get_node('/Annotations/GeneOntology')
+        query = "(TermNr == {})".format(term)
+        if evidence is not None:
+            query += "& (Evidence == {!r})".format(evidence.encode('utf-8'))
+        entrynrs = {row['EntryNr'] for row in gotab.where(query)}
+        return entrynrs
+
     def get_gene_ontology_annotations(self, entry_nr, stop=None, as_dataframe=False, as_gaf=False):
         """Retrieve the gene ontology annotations for an entry or entry_range
 

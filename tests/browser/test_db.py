@@ -181,7 +181,6 @@ class DatabaseTests(unittest.TestCase):
         for case in res:
             self.assertTrue(0 < case.distance < 1)
 
-
     def test_oma_group_from_numeric_id(self):
         group_id = 5
         grp =  self.db.oma_group_members(group_id)
@@ -190,12 +189,23 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(group_id, e['OmaGroup'])
 
     def test_fingerprint(self):
-        fingerprint = 'ADRIANA'
+        fingerprint, grp_nr = 'ESRTELL', 2617
+        grp = self.db.oma_group_members(fingerprint)
+        self.assertLessEqual(2, len(grp))
+        for e in grp:
+            self.assertEqual(grp_nr, e['OmaGroup'])
 
     def test_exon_structure(self):
         query = 14677   # Q8I237
         exons = self.db.get_exons(query)
         self.assertEqual(3, len(exons))
+
+    def test_go_term_search(self):
+        query = "GO:0004575"
+        nrs = self.db.entrynrs_with_go_annotation(query, evidence='IDA')
+        self.assertGreaterEqual(len(nrs), 1, "query GO term is known to occure at least in MAL32_YEAST")
+        for enr in nrs:
+            self.assertIn(4575, self.db.get_gene_ontology_annotations(enr)['TermNr'])
 
 
 class XRefDatabaseMock(Database):

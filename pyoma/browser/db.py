@@ -743,11 +743,19 @@ class Database(object):
 
         return fam_row, sim_fams_df
 
+    def entrynrs_with_ec_annotation(self, ec):
+        if isinstance(ec, str):
+            ec = ec.encode('utf-8')
+        ectab = self.get_hdf5_handle().get_node('/Annotations/EC')
+        entrynrs = {row['EntryNr'] for row in ectab.where('(ECacc == {!r})'.format(ec))}
+        return entrynrs
+
     def entrynrs_with_go_annotation(self, term, evidence=None):
         """Retrieve protein entry numbers that have a certain GO annotation term
 
         :param term: numeric term or GO-identifier"""
-        if isinstance(term, str) and term.startswith("GO:"):
+        if ((isinstance(term, str) and term.startswith("GO:")) or
+                (isinstance(term, bytes) and term.startswith(b'GO:'))):
             term = term[3:]
 
         try:

@@ -412,3 +412,9 @@ class GenomeIdResolverTest(unittest.TestCase):
     def test_resolve_nonexisting_code(self):
         with self.assertRaises(UnknownSpecies):
             self.OmaIdMapper.identify_genome(2)
+
+    def test_approx_search_genome(self):
+        query = 'sacero cervesa'
+        expect = 'YEAST'
+        cands = self.OmaIdMapper.approx_search_genomes(query)
+        self.assertIn(expect, [g.uniprot_species_code for g in cands])

@@ -1069,7 +1069,7 @@ class OmaIdMapper(object):
         self._sciname_keys = self.genome_table.argsort(order=('SciName'))
         self._omaid_re = re.compile(r'(?P<genome>[A-Z][A-Z0-9]{4})(?P<nr>\d+)')
         self._db = db
-        self.approx_genome_matcher = self._init_fuzzy_matcher_with_genome_infos()
+        self._approx_genome_matcher = self._init_fuzzy_matcher_with_genome_infos()
 
     def _init_fuzzy_matcher_with_genome_infos(self):
         values = []
@@ -1147,7 +1147,7 @@ class OmaIdMapper(object):
             return self.genome_from_SciName(code)
 
     def approx_search_genomes(self, pattern):
-        candidates = self.approx_genome_matcher.search_approx(pattern)
+        candidates = self._approx_genome_matcher.search_approx(pattern)
         return [Genome(self._db, self.genome_table[z[2]]) for z in candidates]
 
     def omaid_to_entry_nr(self, omaid):

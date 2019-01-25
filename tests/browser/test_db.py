@@ -1,5 +1,5 @@
-from __future__ import division, print_function
-from builtins import chr, bytes
+from __future__ import division, print_function, unicode_literals
+from builtins import chr, bytes, str
 import random
 import types
 import unittest

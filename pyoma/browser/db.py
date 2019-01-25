@@ -1,4 +1,5 @@
-from __future__ import division, print_function
+from __future__ import division, print_function, unicode_literals
+from builtins import chr, range, object, zip, bytes, str
 
 import collections
 import io
@@ -11,7 +12,6 @@ import re
 import threading
 import time
 from bisect import bisect_left
-from builtins import chr, range, object, zip, bytes
 from xml.etree import ElementTree as et
 import fuzzyset
 import dateutil

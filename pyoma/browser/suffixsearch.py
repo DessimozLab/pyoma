@@ -203,7 +203,7 @@ def create_suffix_index(tab, col, buffer=None, index_group=None, ignore_case=Tru
     :param force: overwrite existing suffix array data"""
     if not isinstance(tab, tables.Table):
         raise TypeError("tab arguments must be a tables.Table (is a {})".format(type(tab)))
-    if not isinstance(col, str) or not col in tab.colnames:
+    if not isinstance(col, str) or col not in tab.colnames:
         raise ValueError("table {} does not have a column named '{}'".format(tab, col))
     typ = tab.coldtypes[col]
     if numpy.issubdtype(typ.type, numpy.bytes_):

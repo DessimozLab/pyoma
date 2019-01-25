@@ -198,8 +198,9 @@ class HomeologsConfidenceCalculator(object):
 
     def augment_ids(self, df):
         xref_tab = self.h5_handle.root.XRef
-        xrefs = pandas.DataFrame(xref_tab.read_where('(EntryNr >= {}) & (EntryNr <= {}) & (XRefSource == {})'
-                                                 .format(*self.genome_range, xref_tab.get_enum('XRefSource')['SourceID'])))
+        xrefs = pandas.DataFrame(xref_tab.read_where(
+            '(EntryNr >= {}) & (EntryNr <= {}) & (XRefSource == {})'
+            .format(self.genome_range[0], self.genome_range[1], xref_tab.get_enum('XRefSource')['SourceID'])))
         xrefs.drop(columns=['XRefSource','Verification'], inplace=True)
         xrefs['XRefId'] = xrefs['XRefId'].str.decode("utf-8")
 

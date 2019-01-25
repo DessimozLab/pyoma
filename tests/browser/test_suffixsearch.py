@@ -1,4 +1,6 @@
 from __future__ import unicode_literals
+from future.standard_library import install_aliases
+install_aliases()
 
 import random
 import re
@@ -10,11 +12,13 @@ except ImportError:
 import numpy
 import tables
 import string
+import collections
 from pyoma.browser import suffixsearch
+
+CHARS = numpy.fromiter(collections.ChainMap(string.ascii_letters, string.digits, '-_.'), dtype='S1')
 
 
 class StringGenerator(object):
-    CHARS = numpy.fromiter(string.ChainMap(string.digits, string.ascii_letters, '.-_'), dtype='S1')
 
     def __init__(self):
         self.buffer = None
@@ -22,7 +26,7 @@ class StringGenerator(object):
         self.fill_buffer()
 
     def fill_buffer(self):
-        self.buffer = numpy.random.choice(self.CHARS, 2 ** 20)
+        self.buffer = numpy.random.choice(CHARS, 2 ** 20)
         self.pos = 0
 
     def get_string(self, length):

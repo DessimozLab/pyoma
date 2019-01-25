@@ -3,7 +3,10 @@ from builtins import chr, bytes
 import random
 import types
 import unittest
-import unittest.mock
+try:
+    import unittest.mock as mock
+except ImportError:
+    import mock
 import numpy
 import os
 from pyoma.browser.db import *
@@ -331,10 +334,10 @@ class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
                          dtype=tables.dtype_from_descr(tablefmt.TaxonomyTable))
 
     def setUp(self):
-        patcher = unittest.mock.patch('pyoma.browser.models.Genome')
+        patcher = mock.patch('pyoma.browser.models.Genome')
         self.addCleanup(patcher.stop)
         genome = patcher.start()
-        type(genome).uniprot_species_code = unittest.mock.PropertyMock(return_value="HELLO")
+        type(genome).uniprot_species_code = mock.PropertyMock(return_value="HELLO")
         self.tax = Taxonomy(self.taxtab, genomes={20: genome, 30: genome, 40: genome})
 
     def test_newick(self):

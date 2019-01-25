@@ -11,7 +11,8 @@ matplotlib
 scikit-learn
 scikit-fuzzy
 lark-parser
---no-binary pyopa pyopa
+pyopa>=0.8
+fuzzyset>=0.0.17
 
 -e git+ssh://gitolite@lab.dessimoz.org:2222/family-analyzer@master#egg=familyanalyzer
 -e .

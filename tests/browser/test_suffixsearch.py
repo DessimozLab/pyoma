@@ -203,16 +203,16 @@ class SuffixBuilderFactoryTester(unittest.TestCase):
     def tearDown(self):
         self.h5.close()
 
-    @unittest.mock.patch('pyoma.browser.suffixsearch.SuffixIndexBuilderVarStringCol')
-    @unittest.mock.patch('pyoma.browser.suffixsearch.SuffixIndexBuilderStringCol')
+    @mock.patch('pyoma.browser.suffixsearch.SuffixIndexBuilderVarStringCol')
+    @mock.patch('pyoma.browser.suffixsearch.SuffixIndexBuilderStringCol')
     def test_fix_string_column(self, FixStrSuffixMock, VarStrSuffixMock):
         tab = self.h5.get_node('/test/table')
         suffixsearch.create_suffix_index(tab, 'CharCol', ignore_case=True)
         FixStrSuffixMock.assert_called_once_with(tab, 'CharCol', self.h5.get_node('/test/_si_table'), ignore_case=True)
         VarStrSuffixMock.assert_not_called()
 
-    @unittest.mock.patch('pyoma.browser.suffixsearch.SuffixIndexBuilderVarStringCol')
-    @unittest.mock.patch('pyoma.browser.suffixsearch.SuffixIndexBuilderStringCol')
+    @mock.patch('pyoma.browser.suffixsearch.SuffixIndexBuilderVarStringCol')
+    @mock.patch('pyoma.browser.suffixsearch.SuffixIndexBuilderStringCol')
     def test_var_string_column(self, FixStrSuffixMock, VarStrSuffixMock):
         tab = self.h5.get_node('/test/table')
         buf = '/test/buffer'

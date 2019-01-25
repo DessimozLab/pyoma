@@ -13,7 +13,7 @@ import time
 from bisect import bisect_left
 from builtins import chr, range, object, zip, bytes
 from xml.etree import ElementTree as et
-
+import fuzzyset
 import dateutil
 import numpy
 import numpy.lib.recfunctions
@@ -1069,6 +1069,19 @@ class OmaIdMapper(object):
         self._sciname_keys = self.genome_table.argsort(order=('SciName'))
         self._omaid_re = re.compile(r'(?P<genome>[A-Z][A-Z0-9]{4})(?P<nr>\d+)')
         self._db = db
+        self.approx_genome_matcher = self._init_fuzzy_matcher_with_genome_infos()
+
+    def _init_fuzzy_matcher_with_genome_infos(self):
+        values = []
+        maps_to = []
+        fields = {'SciName', 'SynName', 'CommonName', 'UniProtSpeciesCode'}.intersection(self.genome_table.dtype.names)
+        for col in fields:
+            for row in range(len(self.genome_table)):
+                val = self.genome_table[col][row].decode()
+                if len(val) > 0:
+                    values.append(val)
+                    maps_to.append(row)
+        return FuzzyMatcher(values, maps_to)
 
     def genome_of_entry_nr(self, e_nr):
         """returns the genome code belonging to a given entry_nr"""
@@ -1133,6 +1146,9 @@ class OmaIdMapper(object):
                     pass
             return self.genome_from_SciName(code)
 
+    def approx_search_genomes(self, pattern):
+        pass
+
     def omaid_to_entry_nr(self, omaid):
         """returns the internal numeric entrynr from a
         UniProtSpeciesCode+nr id. this is the inverse
@@ -1190,6 +1206,41 @@ class OmaIdMapper(object):
             sort_key[g] = (-k, lin_g)
         sorted_genomes = sorted(list(sort_key.keys()), key=lambda g: sort_key[g])
         return {g.decode(): v for v, g in enumerate(sorted_genomes)}
+
+
+class FuzzyMatcher(object):
+    def __init__(self, values, maps_to=None):
+        """FuzzyMatcher allows to search for approximate matches of a list of values.
+        It is a thin wrapper to the :class:`fuzzyset.FuzzySet datastructure.
+
+        FuzzyMatcher can be initialized with either a pure list of values or including
+        a seperate list with mapping objects. The values (repetitions are possible)
+        indicate to what object they should be mapped
+        On a search (see :meth:`search_approx`) the object associated with the key
+        will be returned.
+
+        :param values: an iterable/mapping
+        """
+        if maps_to is not None:
+            self.fuzzySet = fuzzyset.FuzzySet(rel_sim_cutoff=0.8)
+            self.mapping = collections.defaultdict(list)
+            for val, map_source in zip(values, maps_to):
+                self.fuzzySet.add(val)
+                self.mapping[val].append(map_source)
+        else:
+            self.fuzzySet = fuzzyset.FuzzySet(values, rel_sim_cutoff=0.8)
+            self.mapping = None
+
+    def search_approx(self, key):
+        matches = self.fuzzySet.get(key)
+        if self.mapping:
+            bests = {}
+            for score, val in matches:
+                src = self.mapping[val]
+                if src not in bests or score > bests[src][0]:
+                    bests[src] = (score, val, src)
+            matches = list(bests.values())
+        return matches
 
 
 class AmbiguousID(Exception):

@@ -1,6 +1,8 @@
 from __future__ import unicode_literals
 import unittest
 from pyoma.browser import locus_parser
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 
 class LocusParserTest(unittest.TestCase):

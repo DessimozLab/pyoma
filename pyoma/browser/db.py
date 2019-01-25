@@ -1081,7 +1081,7 @@ class OmaIdMapper(object):
                 if len(val) > 0:
                     values.append(val)
                     maps_to.append(row)
-        return FuzzyMatcher(values, maps_to)
+        return FuzzyMatcher(values, maps_to, rel_sim_cutoff=0.6)
 
     def genome_of_entry_nr(self, e_nr):
         """returns the genome code belonging to a given entry_nr"""
@@ -1147,7 +1147,8 @@ class OmaIdMapper(object):
             return self.genome_from_SciName(code)
 
     def approx_search_genomes(self, pattern):
-        pass
+        candidates = self.approx_genome_matcher.search_approx(pattern)
+        return [Genome(self._db, self.genome_table[z[2]]) for z in candidates]
 
     def omaid_to_entry_nr(self, omaid):
         """returns the internal numeric entrynr from a
@@ -1209,7 +1210,7 @@ class OmaIdMapper(object):
 
 
 class FuzzyMatcher(object):
-    def __init__(self, values, maps_to=None):
+    def __init__(self, values, maps_to=None, rel_sim_cutoff=0.8):
         """FuzzyMatcher allows to search for approximate matches of a list of values.
         It is a thin wrapper to the :class:`fuzzyset.FuzzySet datastructure.
 
@@ -1222,13 +1223,13 @@ class FuzzyMatcher(object):
         :param values: an iterable/mapping
         """
         if maps_to is not None:
-            self.fuzzySet = fuzzyset.FuzzySet(rel_sim_cutoff=0.8)
+            self.fuzzySet = fuzzyset.FuzzySet(rel_sim_cutoff=rel_sim_cutoff)
             self.mapping = collections.defaultdict(list)
             for val, map_source in zip(values, maps_to):
                 self.fuzzySet.add(val)
                 self.mapping[val].append(map_source)
         else:
-            self.fuzzySet = fuzzyset.FuzzySet(values, rel_sim_cutoff=0.8)
+            self.fuzzySet = fuzzyset.FuzzySet(values, rel_sim_cutoff=rel_sim_cutoff)
             self.mapping = None
 
     def search_approx(self, key):
@@ -1236,9 +1237,10 @@ class FuzzyMatcher(object):
         if self.mapping:
             bests = {}
             for score, val in matches:
-                src = self.mapping[val]
-                if src not in bests or score > bests[src][0]:
-                    bests[src] = (score, val, src)
+                sources = self.mapping[val]
+                for src in sources:
+                    if src not in bests or score > bests[src][0]:
+                        bests[src] = (score, val, src)
             matches = list(bests.values())
         return matches
 

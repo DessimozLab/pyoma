@@ -1,4 +1,5 @@
-from __future__ import division, print_function
+from __future__ import division, print_function, unicode_literals
+from builtins import chr, range, object, zip, bytes, str
 
 import collections
 import io
@@ -11,9 +12,8 @@ import re
 import threading
 import time
 from bisect import bisect_left
-from builtins import chr, range, object, zip, bytes
 from xml.etree import ElementTree as et
-
+import fuzzyset
 import dateutil
 import numpy
 import numpy.lib.recfunctions
@@ -21,6 +21,7 @@ import pandas as pd
 import tables
 from Bio.UniProt import GOA
 
+from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .KmerEncoder import KmerEncoder
 from .geneontology import GeneOntology, OntologyParser, GOAspect
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome
@@ -742,6 +743,33 @@ class Database(object):
 
         return fam_row, sim_fams_df
 
+    def entrynrs_with_ec_annotation(self, ec):
+        if isinstance(ec, str):
+            ec = ec.encode('utf-8')
+        ectab = self.get_hdf5_handle().get_node('/Annotations/EC')
+        entrynrs = {row['EntryNr'] for row in ectab.where('(ECacc == {!r})'.format(ec))}
+        return entrynrs
+
+    def entrynrs_with_go_annotation(self, term, evidence=None):
+        """Retrieve protein entry numbers that have a certain GO annotation term
+
+        :param term: numeric term or GO-identifier"""
+        if ((isinstance(term, str) and term.startswith("GO:")) or
+                (isinstance(term, bytes) and term.startswith(b'GO:'))):
+            term = term[3:]
+
+        try:
+            term = int(term)
+        except ValueError:
+            raise InvalidId('Invalid GO ID: {}'.format(term))
+
+        gotab = self.get_hdf5_handle().get_node('/Annotations/GeneOntology')
+        query = "(TermNr == {})".format(term)
+        if evidence is not None:
+            query += "& (Evidence == {!r})".format(evidence.encode('utf-8'))
+        entrynrs = {row['EntryNr'] for row in gotab.where(query)}
+        return entrynrs
+
     def get_gene_ontology_annotations(self, entry_nr, stop=None, as_dataframe=False, as_gaf=False):
         """Retrieve the gene ontology annotations for an entry or entry_range
 
@@ -829,37 +857,6 @@ class Database(object):
                 ('!gaf-version: {}\n'.format(GAF_VERSION) +
                  '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) +
                  '\n'))
-
-
-class SuffixSearcher(object):
-    def __init__(self, suffix_index_node, buffer=None, lookup=None):
-        if isinstance(suffix_index_node, tables.Group):
-            self.buffer_arr = buffer if buffer else suffix_index_node._f_get_child('buffer')
-            self.suffix_arr = suffix_index_node._f_get_child('suffix')
-            self.lookup_arr = lookup if lookup else suffix_index_node._f_get_child('offset')
-        else:
-            self.buffer_arr = buffer
-            self.suffix_arr = suffix_index_node
-            self.lookup_arr = lookup
-        self.lookup_arr = self.lookup_arr[:]
-
-    def find(self, query):
-        n = len(query)
-        if n > 0:
-            slicer = KeyWrapper(self.suffix_arr,
-                                key=lambda i:
-                                self.buffer_arr[i:(i + n)].tobytes())
-            ii = bisect_left(slicer, query)
-            if ii and (slicer[ii] == query):
-                # Left most found.
-                jj = ii + 1
-                while (jj < len(slicer)) and (slicer[jj] == query):
-                    # zoom to end -> -> ->
-                    jj += 1
-
-                # Find entry numbers and filter to remove incorrect entries
-                return numpy.searchsorted(self.lookup_arr, self.suffix_arr[ii:jj]+1) - 1
-        return []
 
 
 class SequenceSearch(object):
@@ -1072,6 +1069,19 @@ class OmaIdMapper(object):
         self._sciname_keys = self.genome_table.argsort(order=('SciName'))
         self._omaid_re = re.compile(r'(?P<genome>[A-Z][A-Z0-9]{4})(?P<nr>\d+)')
         self._db = db
+        self._approx_genome_matcher = self._init_fuzzy_matcher_with_genome_infos()
+
+    def _init_fuzzy_matcher_with_genome_infos(self):
+        values = []
+        maps_to = []
+        fields = {'SciName', 'SynName', 'CommonName', 'UniProtSpeciesCode'}.intersection(self.genome_table.dtype.names)
+        for col in fields:
+            for row in range(len(self.genome_table)):
+                val = self.genome_table[col][row].decode()
+                if len(val) > 0:
+                    values.append(val)
+                    maps_to.append(row)
+        return FuzzyMatcher(values, maps_to, rel_sim_cutoff=0.6)
 
     def genome_of_entry_nr(self, e_nr):
         """returns the genome code belonging to a given entry_nr"""
@@ -1136,6 +1146,10 @@ class OmaIdMapper(object):
                     pass
             return self.genome_from_SciName(code)
 
+    def approx_search_genomes(self, pattern):
+        candidates = self._approx_genome_matcher.search_approx(pattern)
+        return [Genome(self._db, self.genome_table[z[2]]) for z in candidates]
+
     def omaid_to_entry_nr(self, omaid):
         """returns the internal numeric entrynr from a
         UniProtSpeciesCode+nr id. this is the inverse
@@ -1193,6 +1207,42 @@ class OmaIdMapper(object):
             sort_key[g] = (-k, lin_g)
         sorted_genomes = sorted(list(sort_key.keys()), key=lambda g: sort_key[g])
         return {g.decode(): v for v, g in enumerate(sorted_genomes)}
+
+
+class FuzzyMatcher(object):
+    def __init__(self, values, maps_to=None, rel_sim_cutoff=0.8):
+        """FuzzyMatcher allows to search for approximate matches of a list of values.
+        It is a thin wrapper to the :class:`fuzzyset.FuzzySet datastructure.
+
+        FuzzyMatcher can be initialized with either a pure list of values or including
+        a seperate list with mapping objects. The values (repetitions are possible)
+        indicate to what object they should be mapped
+        On a search (see :meth:`search_approx`) the object associated with the key
+        will be returned.
+
+        :param values: an iterable/mapping
+        """
+        if maps_to is not None:
+            self.fuzzySet = fuzzyset.FuzzySet(rel_sim_cutoff=rel_sim_cutoff)
+            self.mapping = collections.defaultdict(list)
+            for val, map_source in zip(values, maps_to):
+                self.fuzzySet.add(val)
+                self.mapping[val].append(map_source)
+        else:
+            self.fuzzySet = fuzzyset.FuzzySet(values, rel_sim_cutoff=rel_sim_cutoff)
+            self.mapping = None
+
+    def search_approx(self, key):
+        matches = self.fuzzySet.get(key)
+        if self.mapping:
+            bests = {}
+            for score, val in matches:
+                sources = self.mapping[val]
+                for src in sources:
+                    if src not in bests or score > bests[src][0]:
+                        bests[src] = (score, val, src)
+            matches = list(bests.values())
+        return matches
 
 
 class AmbiguousID(Exception):
@@ -1619,7 +1669,12 @@ class XrefIdMapper(object):
         self.xref_tab = db.get_hdf5_handle().get_node('/XRef')
         self.xrefEnum = self.xref_tab.get_enum('XRefSource')
         self.idtype = frozenset(list(self.xrefEnum._values.keys()))
-        self.xref_index = SuffixSearcher(db.get_hdf5_handle().get_node('/XRef_Index'))
+        try:
+            self.xref_index = SuffixSearcher.from_tablecolumn(self.xref_tab, 'XRefId')
+        except SuffixIndexError:
+            # compability mode
+            idx_node = db.get_hdf5_handle().get_node('/XRef_Index')
+            self.xref_index = SuffixSearcher.from_index_node(idx_node)
 
     def map_entry_nr(self, entry_nr):
         """returns the XRef entries associated with the query protein.

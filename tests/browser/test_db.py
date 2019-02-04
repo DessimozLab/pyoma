@@ -1,9 +1,12 @@
-from __future__ import division, print_function
-from builtins import chr, bytes
+from __future__ import division, print_function, unicode_literals
+from builtins import chr, bytes, str
 import random
 import types
 import unittest
-import unittest.mock
+try:
+    import unittest.mock as mock
+except ImportError:
+    import mock
 import numpy
 import os
 from pyoma.browser.db import *
@@ -181,7 +184,6 @@ class DatabaseTests(unittest.TestCase):
         for case in res:
             self.assertTrue(0 < case.distance < 1)
 
-
     def test_oma_group_from_numeric_id(self):
         group_id = 5
         grp =  self.db.oma_group_members(group_id)
@@ -190,12 +192,23 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(group_id, e['OmaGroup'])
 
     def test_fingerprint(self):
-        fingerprint = 'ADRIANA'
+        fingerprint, grp_nr = 'ESRTELL', 2617
+        grp = self.db.oma_group_members(fingerprint)
+        self.assertLessEqual(2, len(grp))
+        for e in grp:
+            self.assertEqual(grp_nr, e['OmaGroup'])
 
     def test_exon_structure(self):
         query = 14677   # Q8I237
         exons = self.db.get_exons(query)
         self.assertEqual(3, len(exons))
+
+    def test_go_term_search(self):
+        query = "GO:0004575"
+        nrs = self.db.entrynrs_with_go_annotation(query, evidence='IDA')
+        self.assertGreaterEqual(len(nrs), 1, "query GO term is known to occure at least in MAL32_YEAST")
+        for enr in nrs:
+            self.assertIn(4575, self.db.get_gene_ontology_annotations(enr)['TermNr'])
 
 
 class XRefDatabaseMock(Database):
@@ -321,10 +334,10 @@ class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
                          dtype=tables.dtype_from_descr(tablefmt.TaxonomyTable))
 
     def setUp(self):
-        patcher = unittest.mock.patch('pyoma.browser.models.Genome')
+        patcher = mock.patch('pyoma.browser.models.Genome')
         self.addCleanup(patcher.stop)
         genome = patcher.start()
-        type(genome).uniprot_species_code = unittest.mock.PropertyMock(return_value="HELLO")
+        type(genome).uniprot_species_code = mock.PropertyMock(return_value="HELLO")
         self.tax = Taxonomy(self.taxtab, genomes={20: genome, 30: genome, 40: genome})
 
     def test_newick(self):
@@ -399,3 +412,9 @@ class GenomeIdResolverTest(unittest.TestCase):
     def test_resolve_nonexisting_code(self):
         with self.assertRaises(UnknownSpecies):
             self.OmaIdMapper.identify_genome(2)
+
+    def test_approx_search_genome(self):
+        query = 'sacero cervesa'
+        expect = 'YEAST'
+        cands = self.OmaIdMapper.approx_search_genomes(query)
+        self.assertIn(expect, [g.uniprot_species_code for g in cands])

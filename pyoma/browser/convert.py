@@ -708,7 +708,7 @@ class DarwinExporter(object):
 
         self.logger.info('creating index for EC (EntryNr)')
         ec_tab = self.h5.get_node('/Annotations/EC')
-        create_index_for_columns(ec_tab, 'EntryNr')
+        create_index_for_columns(ec_tab, 'EntryNr', 'ECacc')
 
         self.logger.info('creating index for domains (EntryNr)')
         domtab = self.h5.get_node('/Annotations/Domains')

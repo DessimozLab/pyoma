@@ -120,7 +120,7 @@ class SuffixIndexBuilderVarStringCol(SuffixIndexBuilderStringCol):
     def check_column_types_or_raise(self):
         if not numpy.issubdtype(self.orig_buffer.dtype.type, numpy.bytes_):
             raise TypeError("buffer '{}' must be a character type column".format(self.orig_buffer._v_pathname))
-        if not numpy.issubdtype(self.tab.coldtypes[self.col].type, numpy.int):
+        if not numpy.issubdtype(self.tab.coldtypes[self.col].type, numpy.integer):
             raise TypeError("column '{}' must be an integer argument with offsets into the '{}' buffer array"
                             .format(self.col, self.orig_buffer._v_pathname))
 

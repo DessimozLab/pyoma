@@ -50,10 +50,10 @@ def create_h5_with_table(nr_row):
     return f
 
 
-def create_h5_with_varlen_string_col(nr_row):
+def create_h5_with_varlen_string_col(nr_row, off_col_type):
     f = tables.open_file("testsuffix.h5", "w", driver="H5FD_CORE",
                          driver_core_backing_store=0)
-    tab_def = numpy.dtype([('CharCol', 'S800'), ('VarCharOff', 'i8'), ('VarCharLen', 'i4')])
+    tab_def = numpy.dtype([('CharCol', 'S800'), ('VarCharOff', off_col_type), ('VarCharLen', 'i4')])
     buf = f.create_earray('/test', 'buffer', tables.StringAtom(1), (0,), createparents=True)
     tab = numpy.zeros(nr_row, tab_def)
     generator = StringGenerator()
@@ -137,7 +137,7 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
     ignore_case = True
 
     def setUp(self):
-        self.h5 = create_h5_with_varlen_string_col(5000)
+        self.h5 = create_h5_with_varlen_string_col(5000, numpy.int32)
         self.build_index()
 
     def build_index(self):
@@ -201,8 +201,10 @@ class SuffixArrayVarLenSearchTestsCaseSensitive(SuffixArrayVarLenSearchTestsCase
 
 
 class SuffixBuilderFactoryTester(unittest.TestCase):
+    offset_col_type = numpy.int16
+
     def setUp(self):
-        self.h5 = create_h5_with_varlen_string_col(100)
+        self.h5 = create_h5_with_varlen_string_col(100, self.offset_col_type)
 
     def tearDown(self):
         self.h5.close()
@@ -225,3 +227,6 @@ class SuffixBuilderFactoryTester(unittest.TestCase):
         VarStrSuffixMock.called_once_with(tab, 'VarCharOff', self.h5.get_node(buf),
                                           self.h5.get_node('/test/_si_table'), ignore_case=True)
 
+
+class SuffixBuilderFactoryTesterUnsignedColOffset(SuffixBuilderFactoryTester):
+    offset_col_type = numpy.uint64

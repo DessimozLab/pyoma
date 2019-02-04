@@ -27,6 +27,7 @@ import itertools
 import operator
 import fileinput
 
+from pyoma.browser import suffixsearch
 from .. import common
 from . import locus_parser
 from . import tablefmt
@@ -676,7 +677,6 @@ class DarwinExporter(object):
             dbs_iter = fileinput.input(files=files)
             db_parser.parse_entrytags(dbs_iter)
             xref_importer.flush_buffers()
-            xref_importer.build_suffix_index()
 
     def add_group_metadata(self):
         m = OmaGroupMetadataLoader(self.h5)
@@ -698,9 +698,15 @@ class DarwinExporter(object):
         entryTab = self.h5.get_node('/Protein/Entries')
         create_index_for_columns(entryTab, 'EntryNr', 'OmaHOG', 'OmaGroup', 'MD5ProteinHash')
 
+        self.logger.info('creating suffix index for Descriptions')
+        desc_buffer = self.h5.get_node('/Protein/DescriptionBuffer')
+        suffixsearch.create_suffix_index(entryTab, 'DescriptionOffset', desc_buffer)
+
         self.logger.info('creating index for xrefs (EntryNr and XRefId)')
         xrefTab = self.h5.get_node('/XRef')
         create_index_for_columns(xrefTab, 'EntryNr', 'XRefId')
+        self.logger.info('creating suffix index for XRefId')
+        suffixsearch.create_suffix_index(xrefTab, 'XRefId')
 
         self.logger.info('creating index for go (EntryNr and TermNr)')
         goTab = self.h5.get_node('/Annotations/GeneOntology')

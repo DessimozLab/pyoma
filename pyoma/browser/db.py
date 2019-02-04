@@ -670,6 +670,10 @@ class Database(object):
         desc = descArr[entry['DescriptionOffset']:entry['DescriptionOffset'] + entry['DescriptionLength']]
         return desc.tostring()
 
+    def get_ec_annotations(self, entry_nr):
+        ec_tab = self.db.get_node('/Annotations/EC')
+        return [row['ECacc'].decode() for row in ec_tab.where('EntryNr == {}'.format(entry_nr))]
+
     def get_release_name(self):
         return str(self.db.get_node_attr('/', 'oma_version'))
 

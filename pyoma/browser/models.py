@@ -179,6 +179,10 @@ class ProteinEntry(object):
     def description(self):
         return self._db.get_description(self._entry).decode()
 
+    @LazyProperty
+    def ec_numbers(self):
+        return self._db.get_ec_annotations(self.entry_nr)
+
     @property
     def subgenome(self):
         return self._entry['SubGenome'].decode()

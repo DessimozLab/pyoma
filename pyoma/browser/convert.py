@@ -246,6 +246,16 @@ def get_or_create_tables_node(h5, path, desc=None):
     return grp
 
 
+def create_index_for_columns(tab, *cols):
+    if not isinstance(tab, tables.Table):
+        raise TypeError("tab argument must be table node")
+    for col in cols:
+        if not tab.colindexed[col]:
+            tab.colinstances[col].create_csindex()
+        else:
+            tab.colinstances[col].reindex_dirty()
+
+
 class DarwinExporter(object):
     DB_SCHEMA_VERSION = '3.2'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
@@ -324,14 +334,12 @@ class DarwinExporter(object):
                                      expectedrows=len(data['GS']))
         gs_data = self._parse_date_columns(data['GS'], gstab)
         self._write_to_table(gstab, gs_data)
-        gstab.cols.NCBITaxonId.create_csindex(filters=self._compr)
-        gstab.cols.UniProtSpeciesCode.create_csindex(filters=self._compr)
-        gstab.cols.EntryOff.create_csindex(filters=self._compr)
+        create_index_for_columns(gstab, 'NCBITaxonId', 'UniProtSpeciesCode', 'EntryOff')
 
         taxtab = self.h5.create_table('/', 'Taxonomy', tablefmt.TaxonomyTable,
                                       expectedrows=len(data['Tax']))
         self._write_to_table(taxtab, _load_taxonomy_without_ref_to_itselfs(data['Tax']))
-        taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
+        create_index_for_columns(taxtab, 'NCBITaxonId')
 
     def _parse_date_columns(self, data, tab):
         """convert str values in a date column to epoch timestamps"""
@@ -416,7 +424,7 @@ class DarwinExporter(object):
                 if numpy.any(data['RelType'] >= tablefmt.PairwiseRelationTable.columns.get('RelType').enum['n/a']):
                     compute_ortholog_types(data, genome_offs)
                 self._write_to_table(vp_tab, data)
-                vp_tab.cols.EntryNr1.create_csindex()
+                create_index_for_columns(vp_tab, 'EntryNr1')
 
     def add_same_species_relations(self):
         for gs in self.h5.root.Genome.iterrows():
@@ -438,7 +446,7 @@ class DarwinExporter(object):
                 if isinstance(data, list):
                     data = self._convert_to_numpyarray(data, ss_tab)
                 self._write_to_table(ss_tab, data)
-                ss_tab.cols.EntryNr1.create_csindex()
+                create_index_for_columns(ss_tab, 'EntryNr1')
 
     def add_synteny_scores(self):
         """add synteny scores of pairwise relations to database.
@@ -584,8 +592,7 @@ class DarwinExporter(object):
                 if n.size_in_memory != 0:
                     self.logger.info('worte %s: compression ratio %3f%%' %
                                      (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory))
-        protTab.cols.EntryNr.create_csindex(filters=self._compr)
-        protTab.cols.MD5ProteinHash.create_csindex(filters=self._compr)
+        create_index_for_columns(protTab, 'EntryNr', 'MD5ProteinHash')
 
     def _write_to_table(self, tab, data):
         if len(data)>0:
@@ -683,42 +690,36 @@ class DarwinExporter(object):
     def create_indexes(self):
         self.logger.info('creating indexes for HogLevel table')
         hogTab = self.h5.get_node('/HogLevel')
-        for col in ('Fam', 'ID', 'Level'):
-            if not hogTab.colindexed[col]:
-                hogTab.colinstances[col].create_csindex()
+        create_index_for_columns(hogTab, 'Fam', 'ID', 'Level')
         orthoxmlTab = self.h5.get_node('/OrthoXML/Index')
-        orthoxmlTab.cols.Fam.create_csindex()
+        create_index_for_columns(orthoxmlTab, 'Fam')
 
         self.logger.info('creating missing indexes for Entries table')
         entryTab = self.h5.get_node('/Protein/Entries')
-        for col in ('EntryNr', 'OmaHOG', 'OmaGroup', 'MD5ProteinHash'):
-            if not entryTab.colindexed[col]:
-                entryTab.colinstances[col].create_csindex()
+        create_index_for_columns(entryTab, 'EntryNr', 'OmaHOG', 'OmaGroup', 'MD5ProteinHash')
 
         self.logger.info('creating index for xrefs (EntryNr and XRefId)')
         xrefTab = self.h5.get_node('/XRef')
-        xrefTab.cols.EntryNr.create_csindex()
-        xrefTab.cols.XRefId.create_csindex()
+        create_index_for_columns(xrefTab, 'EntryNr', 'XRefId')
 
         self.logger.info('creating index for go (EntryNr and TermNr)')
         goTab = self.h5.get_node('/Annotations/GeneOntology')
-        goTab.cols.EntryNr.create_csindex()
-        goTab.cols.TermNr.create_index()
+        create_index_for_columns(goTab, 'EntryNr', 'TermNr')
 
         self.logger.info('creating index for EC (EntryNr)')
         ec_tab = self.h5.get_node('/Annotations/EC')
-        ec_tab.cols.EntryNr.create_csindex()
+        create_index_for_columns(ec_tab, 'EntryNr')
 
         self.logger.info('creating index for domains (EntryNr)')
         domtab = self.h5.get_node('/Annotations/Domains')
-        domtab.cols.EntryNr.create_csindex()
+        create_index_for_columns(domtab, 'EntryNr')
 
         self.logger.info('creating indexes for HOG to prevalent domains '
                          '(Fam and DomainId)')
         dom2hog_tab = self.h5.get_node('/HOGAnnotations/Domains')
-        dom2hog_tab.cols.DomainId.create_csindex()
+        create_index_for_columns(dom2hog_tab, 'DomainId')
         domprev_tab = self.h5.get_node('/HOGAnnotations/DomainArchPrevalence')
-        domprev_tab.cols.Fam.create_csindex()
+        create_index_for_columns(domprev_tab, 'Fam')
 
     def _iter_canonical_xref(self):
         """extract one canonical xref id for each protein.
@@ -1311,8 +1312,7 @@ class OmaGroupMetadataLoader(object):
         key_buf.flush()
 
     def _create_indexes(self, grp_tab):
-        grp_tab.cols.Fingerprint.create_csindex()
-        grp_tab.cols.GroupNr.create_csindex()
+        create_index_for_columns(grp_tab, 'Fingerprint', 'GroupNr')
 
     def _parse_darwin_string_list_file(self, fh):
         data = fh.read()

@@ -141,6 +141,14 @@ class SuffixIndexBuilderVarStringCol(SuffixIndexBuilderStringCol):
         off_data = self.h5.get_node(self.tab).read(field=self.col)
         if self.ignore_case:
             starts = off_data
+            # first, we need to fix cases where starts is 0 in the middle of an array,
+            # simply because it has not been set as its length is also 0. We do this
+            # by setting the offsets to the next starting offset of a non-zero length
+            # entry (by copying the next value from the back)
+            zero_positions = numpy.where(starts == 0)[0]
+            for idx in zero_positions[:0:-1]:  # skip position 0, as this is the true value there
+                starts[idx] = starts[idx + 1]
+            # now, set the stop position by using the next start postion (shift array by 1)
             stops = numpy.roll(off_data, -1)
             stops[-1] = len(self.orig_buffer)
             buf_arr = self.get_aux_array_handle('buffer')

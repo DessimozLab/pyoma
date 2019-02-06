@@ -165,7 +165,7 @@ class SuffixIndexBuilderVarStringCol(SuffixIndexBuilderStringCol):
             if tmp_buf_idx > 0:
                 buf_arr.append(numpy.char.lower(tmp_buf[0:tmp_buf_idx]))
             # add one extra position to each string that contains a '\x00'
-            off_data += numpy.arange(0, len(off_data), 1, dtype='i4')
+            off_data += numpy.arange(0, len(off_data), 1, dtype=off_data.dtype)
 
         off_arr = self.get_aux_array_handle('offset')
         off_arr.append(off_data)

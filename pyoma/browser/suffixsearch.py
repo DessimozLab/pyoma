@@ -4,7 +4,6 @@ from bisect import bisect_left
 import os
 import numpy
 import tables
-from PySAIS import sais
 from .models import KeyWrapper
 import logging
 logger = logging.getLogger(__name__)
@@ -95,6 +94,7 @@ class SuffixIndexBuilderStringCol(object):
             total_offset += tot_len
 
     def build_suffix_array(self):
+        from PySAIS import sais
         data = self.get_aux_array_handle('buffer')[:]
         suffix = sais(data)
         self.h5.create_carray(self.index_group, self._arrayname('suffix'), obj=suffix)

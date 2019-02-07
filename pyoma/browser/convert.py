@@ -718,7 +718,7 @@ class DarwinExporter(object):
 
         self.logger.info('creating index for domains (EntryNr)')
         domtab = self.h5.get_node('/Annotations/Domains')
-        create_index_for_columns(domtab, 'EntryNr')
+        create_index_for_columns(domtab, 'EntryNr', 'DomainId')
 
         self.logger.info('creating indexes for HOG to prevalent domains '
                          '(Fam and DomainId)')

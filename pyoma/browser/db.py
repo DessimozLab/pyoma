@@ -754,6 +754,13 @@ class Database(object):
         entrynrs = {row['EntryNr'] for row in ectab.where('(ECacc == {!r})'.format(ec))}
         return entrynrs
 
+    def entrynrs_with_domain_id(self, domain_id):
+        if isinstance(domain_id, str):
+            domain_id = domain_id.encode('utf-8')
+        domtab = self.get_hdf5_handle().get_node('/Annotations/Domains')
+        entrynrs = {row['EntryNr'] for row in domtab.where('DomainId =={!r}'.format(domain_id))}
+        return entrynrs
+
     def entrynrs_with_go_annotation(self, term, evidence=None):
         """Retrieve protein entry numbers that have a certain GO annotation term
 

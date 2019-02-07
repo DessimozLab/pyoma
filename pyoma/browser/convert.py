@@ -727,6 +727,11 @@ class DarwinExporter(object):
         domprev_tab = self.h5.get_node('/HOGAnnotations/DomainArchPrevalence')
         create_index_for_columns(domprev_tab, 'Fam')
 
+        self.logger.info('createing indexes for Domain Descriptions')
+        domdesc = self.h5.get_node('/Annotations/DomainDescription')
+        create_index_for_columns(domdesc, 'DomainId')
+        suffixsearch.create_suffix_index(domdesc, 'Description')
+
     def _iter_canonical_xref(self):
         """extract one canonical xref id for each protein.
 

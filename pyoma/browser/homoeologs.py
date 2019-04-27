@@ -130,6 +130,8 @@ def get_conf_score(simulation, input_dic):
 
 
 class HomeologsConfidenceCalculator(object):
+    fields_to_load = ['EntryNr1', 'EntryNr2', 'SyntenyConservationLocal', 'Distance']
+
     def __init__(self, h5_handle, genome):
         self.h5_handle = h5_handle
         self.genome = genome
@@ -156,7 +158,7 @@ class HomeologsConfidenceCalculator(object):
         df = pandas.DataFrame(
             self.h5_handle.get_node('/PairwiseRelation/{}/within'.format(self.genome)).read_where('RelType == 5'))
         df = df[df['EntryNr1'].isin(self.genome_df['EntryNr']) & df['EntryNr2'].isin(self.genome_df['EntryNr'])]
-        return df[['EntryNr1', 'EntryNr2', 'SyntenyConservationLocal', 'Distance']]
+        return df[self.fields_to_load]
 
     def _count_homeologs_per_entry(self, df):
         return collections.Counter(df['EntryNr1'])
@@ -196,18 +198,23 @@ class HomeologsConfidenceCalculator(object):
         df['fuzzy_confidence_scaled'] = min_max_scaler.fit_transform(df['fuzzy_confidence'].values.reshape(-1, 1))
         return df
 
-    def augment_ids(self, df):
+    def augment_ids(self, df, keep=None):
         xref_tab = self.h5_handle.root.XRef
         xrefs = pandas.DataFrame(xref_tab.read_where(
             '(EntryNr >= {}) & (EntryNr <= {}) & (XRefSource == {})'
             .format(self.genome_range[0], self.genome_range[1], xref_tab.get_enum('XRefSource')['SourceID'])))
-        xrefs.drop(columns=['XRefSource','Verification'], inplace=True)
+        xrefs.drop(columns=['XRefSource', 'Verification'], inplace=True)
         xrefs['XRefId'] = xrefs['XRefId'].str.decode("utf-8")
 
-        xrefs_one_ref = xrefs.drop_duplicates(subset='EntryNr', keep="first")
+        if keep is None or keep == 'first':
+            xrefs_one_ref = xrefs.drop_duplicates(subset='EntryNr', keep="first")
+        elif keep == 'agg':
+            xrefs_one_ref = xrefs.groupby('EntryNr')['XRefId'].agg(lambda x: '; '.join(x.values)).to_frame()
+        else:
+            raise ValueError('argument "keep" must be either "first" or "agg"')
         new_df = pandas.merge(pandas.merge(df, xrefs_one_ref, how='left', left_on="EntryNr1", right_on="EntryNr"),
                               xrefs_one_ref, how='left', left_on="EntryNr2", right_on="EntryNr")
-        new_df.drop(columns=['EntryNr_x','EntryNr_y'], inplace=True)
+        new_df.drop(columns=['EntryNr_x', 'EntryNr_y'], inplace=True, errors="ignore")
         new_df.rename(columns={'XRefId_x': 'SourceID1', 'XRefId_y': 'SourceID2'}, inplace=True)
         return new_df
 

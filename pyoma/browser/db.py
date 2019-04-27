@@ -1244,7 +1244,7 @@ class FuzzyMatcher(object):
             self.mapping = None
 
     def search_approx(self, key):
-        matches = self.fuzzySet.get(key)
+        matches = self.fuzzySet.get(key, [])
         if self.mapping:
             bests = {}
             for score, val in matches:

@@ -173,7 +173,7 @@ def read_vps_from_tsv(gs, ref_genome):
         common.package_logger.info('adding job: {}'.format(tup))
         job_args.append(tup)
 
-    pool = mp.Pool(processes=min(os.cpu_count(), 10))
+    pool = mp.Pool(processes=min(os.cpu_count(), 20))
     all_pairs = pool.map(load_tsv_to_numpy, job_args)
     pool.close()
     return numpy.lib.recfunctions.stack_arrays(all_pairs, usemask=False)

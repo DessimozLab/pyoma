@@ -55,15 +55,21 @@ class GenomeFilter(object):
 
 
 class PairsExtractor(object):
-    def __init__(self, db, filter):
+    def __init__(self, db, filter, augment_ids=False):
         self.filter = filter
         self.db = db
         self._xrefs_cache = {}
+        self._augment_ids = augment_ids
 
     def process(self, outfh):
-        cols = ['Protein1', 'ProteinAC1', 'GeneID1', 'Protein2', 'ProteinAC2', 'GeneID2',
-                'OrthologyType', 'Score', 'Distance']
-        labs = (*cols[:7], 'AlignmentScore', 'PamDistance')
+        if self._augment_ids:
+            cols = ['Protein1', 'ProteinAC1', 'GeneID1', 'Protein2', 'ProteinAC2', 'GeneID2',
+                    'OrthologyType', 'Score', 'Distance']
+            labs = (*cols[:7], 'AlignmentScore', 'PamDistance')
+        else:
+            cols = ['Protein1', 'Protein2', 'OrthologyType', 'Score', 'Distance']
+            labs = (*cols[:3], 'AlignmentScore', 'PamDistance')
+
         csv_writer = ColumnRenameDictWriter(outfh, cols, labs,
                                     extrasaction='ignore', delimiter='\t')
         csv_writer.writeheader()
@@ -111,8 +117,9 @@ class PairsExtractor(object):
             lambda enr: "{}{:05d}".format(g1.uniprot_species_code, enr - g1.entry_nr_offset))
         df['Protein2'] = df['EntryNr2'].apply(
             lambda enr: "{}{:05d}".format(g2.uniprot_species_code, enr - g2.entry_nr_offset))
-        df = self.augment_with_ids(df, g1, g2, 'SourceAC', 'ProteinAC')
-        df = self.augment_with_ids(df, g1, g2, 'SourceID', 'GeneID')
+        if self._augment_ids:
+            df = self.augment_with_ids(df, g1, g2, 'SourceAC', 'ProteinAC')
+            df = self.augment_with_ids(df, g1, g2, 'SourceID', 'GeneID')
         yield from df.to_dict('records')
 
 
@@ -121,6 +128,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export Pairwise Orthologs in TSV format suitable for GeneVestigator")
     parser.add_argument('--out', '-o', default='-', type=argparse.FileType('w'),
                         help='Path to output file. Defaults to stdout')
+    parser.add_argument('--augment', action='store_true',
+                        help="Augment the relations with the ProteinIDs and GeneIDs from the "
+                             "SourceAC and SourceID xrefs. Needed for BASF, but not for GeneVestigator")
     parser.add_argument('db', help="Path to hdf5 database")
     parser.add_argument('taxon', nargs="+", help="Taxon names of species/clades to be included. "
                                                  "Can be scientific name or ncbi taxon id.")

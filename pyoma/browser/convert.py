@@ -746,6 +746,7 @@ class DarwinExporter(object):
         xrefs = self.h5.get_node('/XRef')
         source_enum = xrefs.get_enum('XRefSource')
         canonical_sources = [source_enum[z] for z in xrefsource_order]
+        max_acceptable_verif_value = xrefs.get_enum('Verification')['unchecked']
         current_protein = None
         past_proteins = set([])
         for xref in xrefs:
@@ -758,6 +759,8 @@ class DarwinExporter(object):
                 if current_protein in past_proteins:
                     raise DataImportError('Data in /XRef is not grouped w.r.t. EntryNr')
             try:
+                if xref['Verification'] > max_acceptable_verif_value:
+                    continue
                 rank = canonical_sources.index(xref['XRefSource'])
                 if rank < current_xref[0]:
                     current_xref = (rank, xref['XRefId'])

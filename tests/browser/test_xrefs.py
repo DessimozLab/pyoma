@@ -1,5 +1,7 @@
 # This Python file uses the following encoding: latin-1
 from __future__ import unicode_literals
+
+import tempfile
 import unittest
 try:
     import unittest.mock as mock
@@ -29,9 +31,10 @@ class XRefParsingTest(unittest.TestCase):
         self.db_parser = pyoma.DarwinDbEntryParser()
         self.desc_manager = mock.Mock()
         self.go_manager = mock.Mock()
+        self.approx_adder = pyoma.ApproximateXRefImporter()
         self.xref_tab = mock.Mock()
         self.gs = self._create_genome_info()
-        self.importer = pyoma.XRefImporter(self.db_parser, self.gs, self.xref_tab, None, self.go_manager, self.desc_manager)
+        self.importer = pyoma.XRefImporter(self.db_parser, self.gs, self.xref_tab, None, self.go_manager, self.desc_manager, self.approx_adder)
 
     def test_standard_handler(self):
         self.db_parser.parse_entrytags(self.data)
@@ -54,7 +57,7 @@ class XRefParsingTest(unittest.TestCase):
 
     def test_potential_flush_gets_called(self):
         callback = mock.MagicMock(name="potential_flush")
-        self.db_parser.add_end_of_entry_notifier(callback)
+        self.db_parser.add_post_entry_handler(callback)
         self.db_parser.parse_entrytags(self.data)
         self.assertEqual(callback.call_count, 4)
 
@@ -205,3 +208,35 @@ class GeneOntologyManagerTest(unittest.TestCase):
         self.assertEqual("dummy-test/2017-04-18", obo._f_getattr('ontology_release'))
 
 
+class ApproxXRefImporterTest(unittest.TestCase):
+    def setUp(self):
+        with tempfile.NamedTemporaryFile(delete=False) as fh:
+            self.approx_fname = fh.name
+            fh.write("""1315\tGeneName\tFca\tmodified
+1315\tProtName\tFCA protein\tmodified
+1315\tUniProtKB/TrEMBL\tQ6XJS3\tmodified
+1406\tORFNames\tAALP_AA5G153500\tmodified
+1229\tORFNames\tL914_11153\tmodified""".encode('utf-8'))
+        self.approx = pyoma.ApproximateXRefImporter(self.approx_fname)
+
+    def test_non_existing(self):
+        self.assertEqual(len(list(self.approx.iter_approx_xrefs_for(10))), 0)
+
+    def test_exitsting(self):
+        res = list(self.approx.iter_approx_xrefs_for(1229))
+        self.assertEqual(1, len(res), res)
+        self.assertEqual(res[0][0], 1229)
+
+    def test_non_sorted_access_raises(self):
+        list(self.approx.iter_approx_xrefs_for(100))
+        with self.assertRaises(pyoma.InvarianceException):
+            list(self.approx.iter_approx_xrefs_for(90))
+
+    def test_return_all_for_large_range(self):
+        res = []
+        for enr in range(2000):
+            res.extend(self.approx.iter_approx_xrefs_for(enr))
+        self.assertEqual(len(self.approx.xrefs), len(res))
+
+    def tearDown(self):
+        os.remove(self.approx_fname)

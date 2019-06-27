@@ -670,9 +670,11 @@ class DarwinExporter(object):
         ec_tab = self.h5.create_table('/Annotations', 'EC', tablefmt.ECTable, 'Enzyme Commission annotations',
                                       expectedrows=1e7, createparents=True)
         gs = self.h5.get_node('/Genome').read()
+        approx_adder = ApproximateXRefImporter(
+            os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH'), 'approximate_xrefs.tsv'))
         with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man, \
              GeneOntologyManager(self.h5, '/Annotations/GeneOntology', '/Ontologies/GO') as go_man:
-            xref_importer = XRefImporter(db_parser, gs, xref_tab, ec_tab, go_man, de_man)
+            xref_importer = XRefImporter(db_parser, gs, xref_tab, ec_tab, go_man, de_man, approx_adder)
             files = self.xref_databases()
             dbs_iter = fileinput.input(files=files)
             db_parser.parse_entrytags(dbs_iter)
@@ -1561,13 +1563,14 @@ class XRefImporter(object):
     The XRefImporter registers at a db_parser object various handlers
     to import the various types of xrefs, namely ids, go-terms,
     EC annotations and descriptions."""
-    def __init__(self, db_parser, genomes_tab, xref_tab, ec_tab, go_manager, desc_manager):
+    def __init__(self, db_parser, genomes_tab, xref_tab, ec_tab, go_manager, desc_manager, approx_adder):
         self.xrefs = []
         self.ec = []
         self.xref_tab = xref_tab
         self.ec_tab = ec_tab
         self.go_manager = go_manager
         self.desc_manager = desc_manager
+        self.approx_adder = approx_adder
 
         self.verif_enum = tablefmt.XRefTable.columns.get('Verification').enum
         xrefEnum = tablefmt.XRefTable.columns.get('XRefSource').enum
@@ -1606,8 +1609,9 @@ class XRefImporter(object):
                                       lambda key, enr, typ=xrefEnum['UniProtKB/TrEMBL']:
                                       self.remove_uniprot_code_handler(key, enr, typ))
 
+        db_parser.add_post_entry_handler(self.add_approx_xrefs)
         # register the potential_flush as end_of_entry_notifier
-        db_parser.add_end_of_entry_notifier(self.potential_flush)
+        db_parser.add_post_entry_handler(self.potential_flush)
 
         self.db_parser = db_parser
         self.xrefEnum = xrefEnum
@@ -1643,7 +1647,7 @@ class XRefImporter(object):
             self.ec_tab.append(sorted(uniq(self.ec)))
             self.ec = []
 
-    def potential_flush(self):
+    def potential_flush(self, enr=None):
         if len(self.xrefs) > self.FLUSH_SIZE:
             self.flush_buffers()
 
@@ -1717,6 +1721,9 @@ class XRefImporter(object):
             else:
                 self._add_to_xrefs(eNr, enum_nr, key, 'exact')
 
+    def add_approx_xrefs(self, enr):
+        self.xrefs.extend(self.approx_adder.iter_approx_xrefs_for(enr))
+
     def build_suffix_index(self, force=False):
         parent, name = os.path.split(self.xref_tab._v_pathname)
         file_ = self.xref_tab._v_file
@@ -1749,6 +1756,43 @@ class XRefImporter(object):
             cur_pos += len(lc_ref)
 
 
+class ApproximateXRefImporter(object):
+    def __init__(self, *args):
+        self.verif_enum = tablefmt.XRefTable.columns.get('Verification').enum
+        xref_enum = tablefmt.XRefTable.columns.get('XRefSource').enum
+        self.mapping = {'UniProtKB/SwissProt': xref_enum['UniProtKB/SwissProt'],
+                        'UniProtKB/TrEMBL': xref_enum['UniProtKB/TrEMBL'],
+                        'EntrezGene': xref_enum['EntrezGene'],
+                        'Refseq_ID': xref_enum['RefSeq'],
+                        'OrderedLocusNames': xref_enum['Ordered Locus Name'],
+                        'ORFNames': xref_enum['ORF Name'],
+                        'ProtName': xref_enum['Protein Name'],
+                        'GeneName': xref_enum['Gene Name']}
+        self.xrefs = []
+        for fpath in args:
+            self.load_approx_xref_file(fpath)
+        self._pos = 0
+        self._last_enr = 0
+
+    def load_approx_xref_file(self, fpath):
+        with open(fpath, 'rt', newline="", encoding='utf-8', errors='ignore') as fh:
+            for row in csv.reader(fh, delimiter='\t'):
+                if row[1] in self.mapping:
+                    enr = int(row[0])
+                    self.xrefs.append((enr, self.mapping[row[1]], row[2], self.verif_enum[row[3]]))
+        self.xrefs.sort(key=lambda x: x[0])
+        self._pos, self._last_enr = 0, 0
+
+    def iter_approx_xrefs_for(self, entry_nr):
+        if entry_nr < self._last_enr:
+            raise InvarianceException('entry_nr should always increase between calls of this method: {} expected > {}'
+                                      .format(entry_nr, self._last_enr))
+        while self._pos < len(self.xrefs) and self.xrefs[self._pos][0] == entry_nr:
+            yield self.xrefs[self._pos]
+            self._pos += 1
+        self._last_enr = entry_nr
+
+
 class DarwinDbEntryParser:
     def __init__(self):
         """Initializes a Parser for SGML formatted darwin database file
@@ -1761,7 +1805,7 @@ class DarwinDbEntryParser:
         self.tag_handlers[tag].append(handler)
         common.package_logger.debug('# handlers for {}: {}'.format(tag, len(self.tag_handlers[tag])))
 
-    def add_end_of_entry_notifier(self, handler):
+    def add_post_entry_handler(self, handler):
         self.end_of_entry_notifier.append(handler)
 
     def parse_entrytags(self, fh):
@@ -1793,7 +1837,7 @@ class DarwinDbEntryParser:
                         # common.package_logger.debug('called handler {} with ({},{})'.format(
                         #    handler, value.encode('utf-8'), eNr))
             for notifier in self.end_of_entry_notifier:
-                notifier()
+                notifier(eNr)
 
 
 DomainDescription = collections.namedtuple('DomainDescription',
@@ -1821,6 +1865,10 @@ class CathDomainNameParser(object):
 class PfamDomainNameParser(CathDomainNameParser):
     re_pattern = re.compile(r'(?P<id>\w*)\t\w*\t\w*\t\w*\t(?P<desc>.*)')
     source = b'Pfam'
+
+
+class InvarianceException(Exception):
+    pass
 
 
 def augment_genomes_json_download_file(fpath, h5, backup='.bak'):

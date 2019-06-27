@@ -12,7 +12,7 @@ fi
 echo $LSB_JOBINDEX
 
 mkdir -p ${DARWIN_NETWORK_SCRATCH_PATH}/pyoma/{prots,cps,vps}/
-    darwin -E -q << EOF
+darwin -E -q << EOF
     NR_PROCESSES := $NProc;
     THIS_PROC_NR := $LSB_JOBINDEX;
     ReadProgram('$DARWIN_OMA_REPO_PATH/lib/Platforms');

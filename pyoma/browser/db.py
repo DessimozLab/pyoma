@@ -1680,6 +1680,8 @@ class XrefIdMapper(object):
         self.xref_tab = db.get_hdf5_handle().get_node('/XRef')
         self.xrefEnum = self.xref_tab.get_enum('XRefSource')
         self.idtype = frozenset(list(self.xrefEnum._values.keys()))
+        self.verif_enum = self.xref_tab.get_enum('Verification')
+        self._max_verif_for_mapping_entrynrs = self.verif_enum['unchecked']
         try:
             self.xref_index = SuffixSearcher.from_tablecolumn(self.xref_tab, 'XRefId')
         except SuffixIndexError:
@@ -1699,8 +1701,10 @@ class XrefIdMapper(object):
         :returns: list of dicts with 'source' and 'xref' keys."""
         res = [{'source': self.xrefEnum._values[row['XRefSource']],
                 'xref': row['XRefId'].decode()}
-                for row in self.xref_tab.where('EntryNr=={:d}'.format(entry_nr))
-                if row['XRefSource'] in self.idtype]
+               for row in self.xref_tab.where(
+                    '(EntryNr=={:d}) & (Verification <= {:d})'
+                    .format(entry_nr, self._max_verif_for_mapping_entrynrs))
+               if row['XRefSource'] in self.idtype]
         return res
 
     def canonical_source_order(self):
@@ -1719,7 +1723,8 @@ class XrefIdMapper(object):
         (both str) holding the information of the xref record.
 
         :param entry_nr: the numeric id of the query protein"""
-        for row in self.xref_tab.where('EntryNr=={:d}'.format(entry_nr)):
+        for row in self.xref_tab.where('(EntryNr=={:d}) & (Verification <= {:d})'
+                                       .format(entry_nr, self._max_verif_for_mapping_entrynrs)):
             if row['XRefSource'] in self.idtype:
                 yield {'source': self.xrefEnum._values[row['XRefSource']],
                        'xref': row['XRefId'].decode()}
@@ -1739,10 +1744,11 @@ class XrefIdMapper(object):
         junk_size = 32 - len(self.idtype)  # respect max number of condition variables.
         source_condition = self._combine_query_values('XRefSource', self.idtype)
         for start in range(0, len(entry_nrs), junk_size):
-            condition = "({}) & ({})".format(
+            condition = "({}) & ({}) & (Verification <= {:d})".format(
                 self._combine_query_values('EntryNr',
                                            entry_nrs[start:start + junk_size]),
-                source_condition)
+                source_condition,
+                self._max_verif_for_mapping_entrynrs)
             mapped_junks.append(self.xref_tab.read_where(condition))
         return numpy.lib.recfunctions.stack_arrays(
             mapped_junks,

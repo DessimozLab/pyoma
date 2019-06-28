@@ -219,6 +219,7 @@ class XRefDatabaseMock(Database):
         xref['EntryNr'] = numpy.arange(1, 6, 0.5).astype(numpy.int32)
         xref['XRefSource'] = numpy.tile([0, 20], 5)
         xref['XRefId'] = ['XA{:03}g1.4'.format(i) for i in range(10)]
+        xref['Verification'] = tuple(itertools.islice(itertools.cycle([1, 2, 4]), 10))
         f.create_table('/', 'XRef', tablefmt.XRefTable, obj=xref)
         f.create_group('/', 'XRef_Index')
         for n in ('suffix', 'buffer', 'offset'):
@@ -241,9 +242,9 @@ class XRefIdMapperTest(unittest.TestCase):
         self.assertEqual(len(xref_e1), 2)
 
     def test_map_many_entries(self):
-        all_mapped = self.xrefmapper.map_many_entry_nrs(numpy.arange(1,4))
-        self.assertEqual(all_mapped.shape, (6,))
-        self.assertEqual(all_mapped.dtype, self.xrefmapper.xref_tab.dtype)
+        all_mapped = self.xrefmapper.map_many_entry_nrs(numpy.arange(1, 4))
+        self.assertEqual((4,), all_mapped.shape)
+        self.assertEqual(self.xrefmapper.xref_tab.dtype, all_mapped.dtype, )
 
     def test_map_entry_iterator(self):
         it = self.xrefmapper.iter_xrefs_for_entry_nr(1)
@@ -251,6 +252,17 @@ class XRefIdMapperTest(unittest.TestCase):
         exp_xrefs = ['XA000g1.4', 'XA001g1.4']
         for dic in it:
             self.assertIn(dic['xref'], exp_xrefs)
+
+    def test_search_of_modified_xref(self):
+        xref = 'XA002g1.4'
+        res = self.xrefmapper.search_xref(xref)
+        self.assertEqual(2, res['EntryNr'])
+
+    def test_modified_xref_not_returned_in_map(self):
+        res = self.xrefmapper.map_entry_nr(2)
+        xrefs = [x['xref'] for x in res]
+        self.assertNotIn('XA002g1.4', xrefs)
+        self.assertIn('XA003g1.4', xrefs)
 
 
 class TaxonomyTest(unittest.TestCase):

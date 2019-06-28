@@ -128,7 +128,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export Pairwise Orthologs in TSV format suitable for GeneVestigator")
     parser.add_argument('--out', '-o', default='-', type=argparse.FileType('w'),
                         help='Path to output file. Defaults to stdout')
-    parser.add_argument('--augment', action='store_true',
+    parser.add_argument('--augment', action='store_true', default=False,
                         help="Augment the relations with the ProteinIDs and GeneIDs from the "
                              "SourceAC and SourceID xrefs. Needed for BASF, but not for GeneVestigator")
     parser.add_argument('db', help="Path to hdf5 database")
@@ -140,6 +140,6 @@ if __name__ == "__main__":
 
     db = pydb.Database(conf.db)
     genome_filter = GenomeFilter(db, conf.taxon)
-    extractor = PairsExtractor(db, genome_filter)
+    extractor = PairsExtractor(db, genome_filter, conf.augment)
     extractor.process(conf.out)
     conf.out.close()

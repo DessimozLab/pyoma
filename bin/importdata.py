@@ -28,9 +28,6 @@ def main(args):
                         help="absolute path or url to domain annotations in mdas.csv format. "
                              "Not specifying any domains is equivalent to the --no-domains "
                              "option.")
-    parser.add_argument('--no-domains', action='store_false',
-                        help="do not include CATH domain information. This flag is only "
-                             "considered for oma standalone imports. (see -s/--standalone flag")
     parser.add_argument('-v', default=0, action='count',
                         help="Increase verbosity level to INFO or DEBUG level")
 
@@ -40,7 +37,7 @@ def main(args):
         pyoma.browser.convert_omastandalone.import_oma_run(
             options.release,
             options.out,
-            add_domains=options.no_domains,
+            domains=options.domains,
             log_level=log_level)
     else:
         if options.release:

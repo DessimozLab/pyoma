@@ -1773,7 +1773,11 @@ class ApproximateXRefImporter(object):
                         'GeneName': xref_enum['Gene Name']}
         self.xrefs = []
         for fpath in args:
-            self.load_approx_xref_file(fpath)
+            if os.path.exists(fpath):
+                self.load_approx_xref_file(fpath)
+            else:
+                common.package_logger.warning(
+                    'Approximate XRef file "{}" does not exist. Skipping'.format(fpath))
         self._pos = 0
         self._last_enr = 0
 

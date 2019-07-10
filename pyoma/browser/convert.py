@@ -1786,7 +1786,7 @@ class ApproximateXRefImporter(object):
             for row in csv.reader(fh, delimiter='\t'):
                 if row[1] in self.mapping:
                     enr = int(row[0])
-                    self.xrefs.append((enr, self.mapping[row[1]], row[2], self.verif_enum[row[3]]))
+                    self.xrefs.append((enr, self.mapping[row[1]], row[2].encode('utf-8'), self.verif_enum[row[3]]))
         self.xrefs.sort(key=lambda x: x[0])
         self._pos, self._last_enr = 0, 0
 

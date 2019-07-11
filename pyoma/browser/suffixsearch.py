@@ -97,7 +97,8 @@ class SuffixIndexBuilderStringCol(object):
         from PySAIS import sais
         data = self.get_aux_array_handle('buffer')[:]
         suffix = sais(data)
-        self.h5.create_carray(self.index_group, self._arrayname('suffix'), obj=suffix)
+        arr = self.h5.create_carray(self.index_group, self._arrayname('suffix'), obj=suffix)
+        self.h5.set_node_attr(self.index_group, self._arrayname('suffix'), arr._v_pathname)
         self.h5.set_node_attr(self.index_group, self.col+"_ignore_case", self.ignore_case)
         self.h5.set_node_attr(self.tab, self.col+"_suffixindexnode", self.index_group._v_pathname)
 

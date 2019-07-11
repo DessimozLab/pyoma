@@ -61,11 +61,12 @@ class StandaloneExporter(DarwinExporter):
 
         entryTab = self.h5.get_node('/Protein/Entries')
 
-        tree_filename = os.path.join(
-            os.environ['DARWIN_BROWSERDATA_PATH'],
-            'EstimatedSpeciesTree.nwk')
-
         hog_converter = HogConverter(entryTab)
+        for tree_file in ('ManualSpeciesTree.nwk', 'EstimatedSpeciesTree.nwk', 'LineageSpeciesTree.nwk'):
+            tree_filename = os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'], tree_file)
+            if os.path.exists(tree_filename):
+                self.logger.info('Use '+tree_filename+' as HOG backbone tree file')
+                break
 
         if os.path.exists(tree_filename):
             hog_converter.attach_newick_taxonomy(tree_filename)

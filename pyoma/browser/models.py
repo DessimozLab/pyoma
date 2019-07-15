@@ -179,6 +179,10 @@ class ProteinEntry(object):
     def description(self):
         return self._db.get_description(self._entry).decode()
 
+    @LazyProperty
+    def ec_numbers(self):
+        return self._db.get_ec_annotations(self.entry_nr)
+
     @property
     def subgenome(self):
         return self._entry['SubGenome'].decode()
@@ -404,7 +408,7 @@ class ExonStructure(object):
         return cls(db, int(eNr))
 
     def _iter_exons(self):
-        if self._exons['Strand'][0] < 0:
+        if len(self._exons)>0 and self._exons['Strand'][0] < 0:
             self._exons[::-1].sort(order='Start')
         else:
             self._exons.sort(order='Start')
@@ -423,8 +427,10 @@ class ExonStructure(object):
         exs = list(str(e) for e in self._iter_exons())
         if len(exs) > 1:
             return "join({})".format(", ".join(exs))
-        else:
+        elif len(exs) == 1:
             return exs[0]
+        else:
+            return "n/a"
 
 
 class Exon(object):

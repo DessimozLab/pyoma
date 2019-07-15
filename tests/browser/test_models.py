@@ -1,4 +1,5 @@
-from builtins import bytes, range
+from __future__ import unicode_literals, division, absolute_import
+from builtins import bytes, range, str
 
 import numpy
 from pyoma.browser import models, db, tablefmt

@@ -61,11 +61,12 @@ class StandaloneExporter(DarwinExporter):
 
         entryTab = self.h5.get_node('/Protein/Entries')
 
-        tree_filename = os.path.join(
-            os.environ['DARWIN_BROWSERDATA_PATH'],
-            'EstimatedSpeciesTree.nwk')
-
         hog_converter = HogConverter(entryTab)
+        for tree_file in ('ManualSpeciesTree.nwk', 'EstimatedSpeciesTree.nwk', 'LineageSpeciesTree.nwk'):
+            tree_filename = os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'], tree_file)
+            if os.path.exists(tree_filename):
+                self.logger.info('Use '+tree_filename+' as HOG backbone tree file')
+                break
 
         if os.path.exists(tree_filename):
             hog_converter.attach_newick_taxonomy(tree_filename)
@@ -105,7 +106,7 @@ class StandaloneExporter(DarwinExporter):
         return self._get_genome_database_paths()
 
 
-def import_oma_run(path, outfile, add_domains=True, log_level='INFO'):
+def import_oma_run(path, outfile, domains=None, log_level='INFO'):
     log = getLogger(log_level)
     x = StandaloneExporter(path, outfile, logger=log, mode='write')
     x.add_version()
@@ -114,11 +115,14 @@ def import_oma_run(path, outfile, add_domains=True, log_level='INFO'):
     x.add_proteins()
     x.add_hogs()
     x.add_xrefs()
-    domain_url = ('ftp://orengoftp.biochem.ucl.ac.uk/gene3d/CURRENT_RELEASE/'+
-                  'representative_uniprot_genome_assignments.csv.gz')
-    if not add_domains:
-        domain_url = 'file:///dev/null'
-    x.add_domain_info(only_pfam_or_cath_domains(iter_domains(domain_url)))
+    if domains is None:
+        domains = ["file://dev/null"]
+    else:
+        domains = list(map(lambda url: 'file://'+url if url.startswith('/') else url, domains))
+    log.info('loading domain annotations from {}'.format(domains))
+    x.add_domain_info(filter_duplicated_domains(only_pfam_or_cath_domains(
+        itertools.chain.from_iterable(map(iter_domains, domains))
+        )))
     x.add_domainname_info(itertools.chain(
         CathDomainNameParser('http://download.cathdb.info/cath/releases/latest-release/'
                              'cath-classification-data/cath-names.txt').parse(),

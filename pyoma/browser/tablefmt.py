@@ -85,7 +85,7 @@ class XRefTable(tables.IsDescription):
         'n/a', base='uint8', pos=2)
     XRefId = tables.StringCol(50, pos=3)
     Verification = tables.EnumCol(
-        tables.Enum({'exact': 0, 'modified': 1, 'unchecked': 2}),
+        tables.Enum({'exact': 0, 'unchecked': 2, 'modified': 4}),
         'unchecked', base='uint8', pos=4)
 
 

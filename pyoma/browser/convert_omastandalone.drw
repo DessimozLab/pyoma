@@ -131,9 +131,12 @@ GetGenomeData := proc()
     tab := table():
     tab['GS'] := gs:
     _parents := []:
-    if lower(SpeciesTree)='lineage' then
+    if lowercase(SpeciesTree)='lineage' then
         linData := sort([seq([GS[g,Lineage], g], g=genomes)]):
         SpeciesTreeR(linData, 1, 0);
+        if sum(If(z[2]=0,1,0), z=_parents) > 1 then
+            _parents = append(_parents, [0,0, 'LUCA']);
+        fi:
     else
         stree := SpeciesTree;
         if lowercase(SpeciesTree)='estimate' then

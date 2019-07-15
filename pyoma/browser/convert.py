@@ -27,6 +27,7 @@ import itertools
 import operator
 import fileinput
 
+from pyoma.browser import suffixsearch
 from .. import common
 from . import locus_parser
 from . import tablefmt
@@ -172,7 +173,7 @@ def read_vps_from_tsv(gs, ref_genome):
         common.package_logger.info('adding job: {}'.format(tup))
         job_args.append(tup)
 
-    pool = mp.Pool(processes=min(os.cpu_count(), 10))
+    pool = mp.Pool(processes=min(os.cpu_count(), 20))
     all_pairs = pool.map(load_tsv_to_numpy, job_args)
     pool.close()
     return numpy.lib.recfunctions.stack_arrays(all_pairs, usemask=False)
@@ -244,6 +245,16 @@ def get_or_create_tables_node(h5, path, desc=None):
         base, name = os.path.split(path)
         grp = h5.create_group(base, name, title=desc, createparents=True)
     return grp
+
+
+def create_index_for_columns(tab, *cols):
+    if not isinstance(tab, tables.Table):
+        raise TypeError("tab argument must be table node")
+    for col in cols:
+        if not tab.colindexed[col]:
+            tab.colinstances[col].create_csindex()
+        else:
+            tab.colinstances[col].reindex_dirty()
 
 
 class DarwinExporter(object):
@@ -324,14 +335,12 @@ class DarwinExporter(object):
                                      expectedrows=len(data['GS']))
         gs_data = self._parse_date_columns(data['GS'], gstab)
         self._write_to_table(gstab, gs_data)
-        gstab.cols.NCBITaxonId.create_csindex(filters=self._compr)
-        gstab.cols.UniProtSpeciesCode.create_csindex(filters=self._compr)
-        gstab.cols.EntryOff.create_csindex(filters=self._compr)
+        create_index_for_columns(gstab, 'NCBITaxonId', 'UniProtSpeciesCode', 'EntryOff')
 
         taxtab = self.h5.create_table('/', 'Taxonomy', tablefmt.TaxonomyTable,
                                       expectedrows=len(data['Tax']))
         self._write_to_table(taxtab, _load_taxonomy_without_ref_to_itselfs(data['Tax']))
-        taxtab.cols.NCBITaxonId.create_csindex(filters=self._compr)
+        create_index_for_columns(taxtab, 'NCBITaxonId')
 
     def _parse_date_columns(self, data, tab):
         """convert str values in a date column to epoch timestamps"""
@@ -344,7 +353,7 @@ class DarwinExporter(object):
                 if col in time_cols and isinstance(val, str):
                     if val=="":
                         return dflts[col]
-                    for fmt in ('%b %d, %Y', '%B %d, %Y', '%d.%m.%Y', '%Y%m%d', '%Y-%m-%d', '%d-%m-%Y'):
+                    for fmt in ('%b %d, %Y', '%B %d, %Y', '%d.%m.%Y', '%Y%m%d', '%Y-%m-%d', '%d-%m-%Y', '%d-%b-%Y'):
                         try:
                             date = time.strptime(val, fmt)
                             return time.mktime(date)
@@ -416,7 +425,7 @@ class DarwinExporter(object):
                 if numpy.any(data['RelType'] >= tablefmt.PairwiseRelationTable.columns.get('RelType').enum['n/a']):
                     compute_ortholog_types(data, genome_offs)
                 self._write_to_table(vp_tab, data)
-                vp_tab.cols.EntryNr1.create_csindex()
+                create_index_for_columns(vp_tab, 'EntryNr1')
 
     def add_same_species_relations(self):
         for gs in self.h5.root.Genome.iterrows():
@@ -438,7 +447,7 @@ class DarwinExporter(object):
                 if isinstance(data, list):
                     data = self._convert_to_numpyarray(data, ss_tab)
                 self._write_to_table(ss_tab, data)
-                ss_tab.cols.EntryNr1.create_csindex()
+                create_index_for_columns(ss_tab, 'EntryNr1')
 
     def add_synteny_scores(self):
         """add synteny scores of pairwise relations to database.
@@ -584,8 +593,7 @@ class DarwinExporter(object):
                 if n.size_in_memory != 0:
                     self.logger.info('worte %s: compression ratio %3f%%' %
                                      (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory))
-        protTab.cols.EntryNr.create_csindex(filters=self._compr)
-        protTab.cols.MD5ProteinHash.create_csindex(filters=self._compr)
+        create_index_for_columns(protTab, 'EntryNr', 'MD5ProteinHash')
 
     def _write_to_table(self, tab, data):
         if len(data)>0:
@@ -662,14 +670,15 @@ class DarwinExporter(object):
         ec_tab = self.h5.create_table('/Annotations', 'EC', tablefmt.ECTable, 'Enzyme Commission annotations',
                                       expectedrows=1e7, createparents=True)
         gs = self.h5.get_node('/Genome').read()
+        approx_adder = ApproximateXRefImporter(
+            os.path.join(os.getenv('DARWIN_NETWORK_SCRATCH_PATH'), 'approximate_xrefs.tsv'))
         with DescriptionManager(self.h5, '/Protein/Entries', '/Protein/DescriptionBuffer') as de_man, \
              GeneOntologyManager(self.h5, '/Annotations/GeneOntology', '/Ontologies/GO') as go_man:
-            xref_importer = XRefImporter(db_parser, gs, xref_tab, ec_tab, go_man, de_man)
+            xref_importer = XRefImporter(db_parser, gs, xref_tab, ec_tab, go_man, de_man, approx_adder)
             files = self.xref_databases()
             dbs_iter = fileinput.input(files=files)
             db_parser.parse_entrytags(dbs_iter)
             xref_importer.flush_buffers()
-            xref_importer.build_suffix_index()
 
     def add_group_metadata(self):
         m = OmaGroupMetadataLoader(self.h5)
@@ -683,42 +692,47 @@ class DarwinExporter(object):
     def create_indexes(self):
         self.logger.info('creating indexes for HogLevel table')
         hogTab = self.h5.get_node('/HogLevel')
-        for col in ('Fam', 'ID', 'Level'):
-            if not hogTab.colindexed[col]:
-                hogTab.colinstances[col].create_csindex()
+        create_index_for_columns(hogTab, 'Fam', 'ID', 'Level')
         orthoxmlTab = self.h5.get_node('/OrthoXML/Index')
-        orthoxmlTab.cols.Fam.create_csindex()
+        create_index_for_columns(orthoxmlTab, 'Fam')
 
         self.logger.info('creating missing indexes for Entries table')
         entryTab = self.h5.get_node('/Protein/Entries')
-        for col in ('EntryNr', 'OmaHOG', 'OmaGroup', 'MD5ProteinHash'):
-            if not entryTab.colindexed[col]:
-                entryTab.colinstances[col].create_csindex()
+        create_index_for_columns(entryTab, 'EntryNr', 'OmaHOG', 'OmaGroup', 'MD5ProteinHash')
+
+        self.logger.info('creating suffix index for Descriptions')
+        desc_buffer = self.h5.get_node('/Protein/DescriptionBuffer')
+        suffixsearch.create_suffix_index(entryTab, 'DescriptionOffset', desc_buffer)
 
         self.logger.info('creating index for xrefs (EntryNr and XRefId)')
         xrefTab = self.h5.get_node('/XRef')
-        xrefTab.cols.EntryNr.create_csindex()
-        xrefTab.cols.XRefId.create_csindex()
+        create_index_for_columns(xrefTab, 'EntryNr', 'XRefId')
+        self.logger.info('creating suffix index for XRefId')
+        suffixsearch.create_suffix_index(xrefTab, 'XRefId')
 
         self.logger.info('creating index for go (EntryNr and TermNr)')
         goTab = self.h5.get_node('/Annotations/GeneOntology')
-        goTab.cols.EntryNr.create_csindex()
-        goTab.cols.TermNr.create_index()
+        create_index_for_columns(goTab, 'EntryNr', 'TermNr')
 
         self.logger.info('creating index for EC (EntryNr)')
         ec_tab = self.h5.get_node('/Annotations/EC')
-        ec_tab.cols.EntryNr.create_csindex()
+        create_index_for_columns(ec_tab, 'EntryNr', 'ECacc')
 
         self.logger.info('creating index for domains (EntryNr)')
         domtab = self.h5.get_node('/Annotations/Domains')
-        domtab.cols.EntryNr.create_csindex()
+        create_index_for_columns(domtab, 'EntryNr', 'DomainId')
 
         self.logger.info('creating indexes for HOG to prevalent domains '
                          '(Fam and DomainId)')
         dom2hog_tab = self.h5.get_node('/HOGAnnotations/Domains')
-        dom2hog_tab.cols.DomainId.create_csindex()
+        create_index_for_columns(dom2hog_tab, 'DomainId')
         domprev_tab = self.h5.get_node('/HOGAnnotations/DomainArchPrevalence')
-        domprev_tab.cols.Fam.create_csindex()
+        create_index_for_columns(domprev_tab, 'Fam')
+
+        self.logger.info('createing indexes for Domain Descriptions')
+        domdesc = self.h5.get_node('/Annotations/DomainDescription')
+        create_index_for_columns(domdesc, 'DomainId')
+        suffixsearch.create_suffix_index(domdesc, 'Description')
 
     def _iter_canonical_xref(self):
         """extract one canonical xref id for each protein.
@@ -732,6 +746,7 @@ class DarwinExporter(object):
         xrefs = self.h5.get_node('/XRef')
         source_enum = xrefs.get_enum('XRefSource')
         canonical_sources = [source_enum[z] for z in xrefsource_order]
+        max_acceptable_verif_value = xrefs.get_enum('Verification')['unchecked']
         current_protein = None
         past_proteins = set([])
         for xref in xrefs:
@@ -744,6 +759,8 @@ class DarwinExporter(object):
                 if current_protein in past_proteins:
                     raise DataImportError('Data in /XRef is not grouped w.r.t. EntryNr')
             try:
+                if xref['Verification'] > max_acceptable_verif_value:
+                    continue
                 rank = canonical_sources.index(xref['XRefSource'])
                 if rank < current_xref[0]:
                     current_xref = (rank, xref['XRefId'])
@@ -1311,8 +1328,7 @@ class OmaGroupMetadataLoader(object):
         key_buf.flush()
 
     def _create_indexes(self, grp_tab):
-        grp_tab.cols.Fingerprint.create_csindex()
-        grp_tab.cols.GroupNr.create_csindex()
+        create_index_for_columns(grp_tab, 'Fingerprint', 'GroupNr')
 
     def _parse_darwin_string_list_file(self, fh):
         data = fh.read()
@@ -1550,13 +1566,14 @@ class XRefImporter(object):
     The XRefImporter registers at a db_parser object various handlers
     to import the various types of xrefs, namely ids, go-terms,
     EC annotations and descriptions."""
-    def __init__(self, db_parser, genomes_tab, xref_tab, ec_tab, go_manager, desc_manager):
+    def __init__(self, db_parser, genomes_tab, xref_tab, ec_tab, go_manager, desc_manager, approx_adder):
         self.xrefs = []
         self.ec = []
         self.xref_tab = xref_tab
         self.ec_tab = ec_tab
         self.go_manager = go_manager
         self.desc_manager = desc_manager
+        self.approx_adder = approx_adder
 
         self.verif_enum = tablefmt.XRefTable.columns.get('Verification').enum
         xrefEnum = tablefmt.XRefTable.columns.get('XRefSource').enum
@@ -1595,8 +1612,9 @@ class XRefImporter(object):
                                       lambda key, enr, typ=xrefEnum['UniProtKB/TrEMBL']:
                                       self.remove_uniprot_code_handler(key, enr, typ))
 
+        db_parser.add_post_entry_handler(self.add_approx_xrefs)
         # register the potential_flush as end_of_entry_notifier
-        db_parser.add_end_of_entry_notifier(self.potential_flush)
+        db_parser.add_post_entry_handler(self.potential_flush)
 
         self.db_parser = db_parser
         self.xrefEnum = xrefEnum
@@ -1632,7 +1650,7 @@ class XRefImporter(object):
             self.ec_tab.append(sorted(uniq(self.ec)))
             self.ec = []
 
-    def potential_flush(self):
+    def potential_flush(self, enr=None):
         if len(self.xrefs) > self.FLUSH_SIZE:
             self.flush_buffers()
 
@@ -1706,6 +1724,9 @@ class XRefImporter(object):
             else:
                 self._add_to_xrefs(eNr, enum_nr, key, 'exact')
 
+    def add_approx_xrefs(self, enr):
+        self.xrefs.extend(self.approx_adder.iter_approx_xrefs_for(enr))
+
     def build_suffix_index(self, force=False):
         parent, name = os.path.split(self.xref_tab._v_pathname)
         file_ = self.xref_tab._v_file
@@ -1738,6 +1759,47 @@ class XRefImporter(object):
             cur_pos += len(lc_ref)
 
 
+class ApproximateXRefImporter(object):
+    def __init__(self, *args):
+        self.verif_enum = tablefmt.XRefTable.columns.get('Verification').enum
+        xref_enum = tablefmt.XRefTable.columns.get('XRefSource').enum
+        self.mapping = {'UniProtKB/SwissProt': xref_enum['UniProtKB/SwissProt'],
+                        'UniProtKB/TrEMBL': xref_enum['UniProtKB/TrEMBL'],
+                        'EntrezGene': xref_enum['EntrezGene'],
+                        'Refseq_ID': xref_enum['RefSeq'],
+                        'OrderedLocusNames': xref_enum['Ordered Locus Name'],
+                        'ORFNames': xref_enum['ORF Name'],
+                        'ProtName': xref_enum['Protein Name'],
+                        'GeneName': xref_enum['Gene Name']}
+        self.xrefs = []
+        for fpath in args:
+            if os.path.exists(fpath):
+                self.load_approx_xref_file(fpath)
+            else:
+                common.package_logger.warning(
+                    'Approximate XRef file "{}" does not exist. Skipping'.format(fpath))
+        self._pos = 0
+        self._last_enr = 0
+
+    def load_approx_xref_file(self, fpath):
+        with open(fpath, 'rt', newline="", encoding='utf-8', errors='ignore') as fh:
+            for row in csv.reader(fh, delimiter='\t'):
+                if row[1] in self.mapping:
+                    enr = int(row[0])
+                    self.xrefs.append((enr, self.mapping[row[1]], row[2].encode('utf-8'), self.verif_enum[row[3]]))
+        self.xrefs.sort(key=lambda x: x[0])
+        self._pos, self._last_enr = 0, 0
+
+    def iter_approx_xrefs_for(self, entry_nr):
+        if entry_nr < self._last_enr:
+            raise InvarianceException('entry_nr should always increase between calls of this method: {} expected > {}'
+                                      .format(entry_nr, self._last_enr))
+        while self._pos < len(self.xrefs) and self.xrefs[self._pos][0] == entry_nr:
+            yield self.xrefs[self._pos]
+            self._pos += 1
+        self._last_enr = entry_nr
+
+
 class DarwinDbEntryParser:
     def __init__(self):
         """Initializes a Parser for SGML formatted darwin database file
@@ -1750,7 +1812,7 @@ class DarwinDbEntryParser:
         self.tag_handlers[tag].append(handler)
         common.package_logger.debug('# handlers for {}: {}'.format(tag, len(self.tag_handlers[tag])))
 
-    def add_end_of_entry_notifier(self, handler):
+    def add_post_entry_handler(self, handler):
         self.end_of_entry_notifier.append(handler)
 
     def parse_entrytags(self, fh):
@@ -1782,7 +1844,7 @@ class DarwinDbEntryParser:
                         # common.package_logger.debug('called handler {} with ({},{})'.format(
                         #    handler, value.encode('utf-8'), eNr))
             for notifier in self.end_of_entry_notifier:
-                notifier()
+                notifier(eNr)
 
 
 DomainDescription = collections.namedtuple('DomainDescription',
@@ -1810,6 +1872,10 @@ class CathDomainNameParser(object):
 class PfamDomainNameParser(CathDomainNameParser):
     re_pattern = re.compile(r'(?P<id>\w*)\t\w*\t\w*\t\w*\t(?P<desc>.*)')
     source = b'Pfam'
+
+
+class InvarianceException(Exception):
+    pass
 
 
 def augment_genomes_json_download_file(fpath, h5, backup='.bak'):

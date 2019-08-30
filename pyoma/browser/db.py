@@ -11,6 +11,7 @@ import pyopa
 import re
 import threading
 import time
+import functools
 from bisect import bisect_left
 from xml.etree import ElementTree as et
 import fuzzyset
@@ -19,6 +20,7 @@ import numpy
 import numpy.lib.recfunctions
 import pandas as pd
 import tables
+import tables.file as _tables_file
 from Bio.UniProt import GOA
 
 from .suffixsearch import SuffixSearcher, SuffixIndexError
@@ -52,6 +54,56 @@ def to_snail_case(name):
     """function to convert from CamelCase to snail_case"""
     s1 = _first_cap_re.sub(r'\1_\2', name)
     return _all_cap_re.sub(r'\1_\2', s1).lower()
+
+
+###
+# here we monkeypatch pytables to be more thread friendly
+# see http://www.pytables.org/cookbook/threading.html
+class ThreadsafeFileRegistry(_tables_file._FileRegistry):
+    lock = threading.RLock()
+
+    @property
+    def handlers(self):
+        return self._handlers.copy()
+
+    def add(self, handler):
+        with self.lock:
+            return super().add(handler)
+
+    def remove(self, handler):
+        with self.lock:
+            return super().remove(handler)
+
+    def close_all(self):
+        with self.lock:
+            return super().close_all()
+
+
+class ThreadsafeFile(_tables_file.File):
+    def __init__(self, *args, **kargs):
+        with ThreadsafeFileRegistry.lock:
+            super().__init__(*args, **kargs)
+
+    def close(self):
+        with ThreadsafeFileRegistry.lock:
+            super().close()
+
+
+@functools.wraps(tables.open_file)
+def synchronized_open_file(*args, **kwargs):
+    with ThreadsafeFileRegistry.lock:
+        return _tables_file._original_open_file(*args, **kwargs)
+
+# monkey patch the tables package
+_tables_file._original_open_file = _tables_file.open_file
+_tables_file.open_file = synchronized_open_file
+tables.open_file = synchronized_open_file
+_tables_file._original_File = _tables_file.File
+_tables_file.File = ThreadsafeFile
+tables.File = ThreadsafeFile
+_tables_file._open_files = ThreadsafeFileRegistry()
+# end monkey patch pytables
+####
 
 
 class Database(object):

@@ -116,8 +116,10 @@ class Database(object):
         if isinstance(db, str):
             logger.info('opening {} for read-only'.format(db))
             self.db = tables.open_file(db, 'r')
+            self._close_fh = True
         elif isinstance(db, tables.File):
             self.db = db
+            self._close_fh = False
         else:
             raise ValueError(str(db) + ' is not a valid database type')
 
@@ -152,6 +154,10 @@ class Database(object):
         self._re_fam = None
         self.format_hogid = None
         self._set_hogid_schema()
+
+    def close(self):
+        if self._close_fh:
+            self.get_hdf5_handle().close()
 
     @LazyProperty
     def gene_ontology(self):

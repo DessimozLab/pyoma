@@ -27,10 +27,10 @@ import itertools
 import operator
 import fileinput
 
-from pyoma.browser import suffixsearch
-from .. import common
+from .. import common, version
 from . import locus_parser
 from . import tablefmt
+from . import suffixsearch
 from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
 from .geneontology import GeneOntology, OntologyParser
@@ -270,10 +270,11 @@ class DarwinExporter(object):
             mode = 'append' if os.path.exists(fn) else 'write'
         self._compr = tables.Filters(complevel=6, complib='zlib', fletcher32=True)
         self.h5 = tables.open_file(fn, mode=mode[0], filters=self._compr)
-        self.logger.info("opened {} in {} mode, options {}".format(
-            fn, mode, str(self._compr)))
+        self.logger.info("opened {} in {} mode, options {} ; pyoma {}".format(
+            fn, mode, str(self._compr), version()))
         if mode == 'write':
             self.h5.root._f_setattr('convertion_start', time.strftime("%c"))
+            self.h5.root._f_setattr('pyoma_version', version())
 
     def call_darwin_export(self, func):
         return callDarwinExport(func, self.DRW_CONVERT_FILE)

@@ -5,7 +5,7 @@ import shutil
 
 name = 'pyoma'
 
-req_packages = ['numpy>=1.13,<1.16', 'tables>=3.4', 'future', 'fuzzyset>=0.0.17',
+req_packages = ['numpy>=1.16', 'tables>=3.5.1', 'future', 'fuzzyset>=0.0.17',
                 'tqdm', 'pyopa>=0.8', 'pandas>=0.21', 'biopython']
 if sys.version_info < (3, 3):
     req_packages.extend(['mock', 'functools32'])
@@ -13,9 +13,14 @@ if sys.version_info < (3, 3):
 # Create oma2hdf to install
 shutil.copyfile('bin/importdata.py', 'bin/oma2hdf')
 
+__version__ = "Undefined"
+for line in open('{}/__init__.py'.format(name)):
+    if line.startswith('__version__'):
+        exec(line.strip())
+
 setup(
     name=name,
-    version='0.7.0',
+    version=__version__,
     author='Adrian Altenhoff',
     author_email='adrian.altenhoff@inf.ethz.ch',
     description='todoc',
@@ -28,9 +33,10 @@ setup(
         'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
     ],
     scripts=['bin/importdata.py', 'bin/oma2hdf'],
     package_data={'pyoma': ['browser/*.drw']},

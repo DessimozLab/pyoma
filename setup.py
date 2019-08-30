@@ -13,9 +13,14 @@ if sys.version_info < (3, 3):
 # Create oma2hdf to install
 shutil.copyfile('bin/importdata.py', 'bin/oma2hdf')
 
+__version__ = "Undefined"
+for line in open('{}/__init__.py'.format(name)):
+    if line.startswith('__version__'):
+        exec(line.strip())
+
 setup(
     name=name,
-    version='0.7.0',
+    version=__version__,
     author='Adrian Altenhoff',
     author_email='adrian.altenhoff@inf.ethz.ch',
     description='todoc',

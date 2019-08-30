@@ -23,6 +23,7 @@ import tables
 import tables.file as _tables_file
 from Bio.UniProt import GOA
 
+from .. import version
 from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .KmerEncoder import KmerEncoder
 from .geneontology import GeneOntology, OntologyParser, GOAspect
@@ -122,6 +123,13 @@ class Database(object):
             self._close_fh = False
         else:
             raise ValueError(str(db) + ' is not a valid database type')
+
+        try:
+            lib_version = self.db.get_node_attr('/', 'pyoma_version')
+        except AttributeError:
+            lib_version = "<=0.7.0"
+        logger.info('pyoma library version: {}; db written with {}'
+                    .format(version(), lib_version))
 
         try:
             db_version = self.db.get_node_attr('/', 'db_schema_version')

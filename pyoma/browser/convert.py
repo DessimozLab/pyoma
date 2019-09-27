@@ -512,6 +512,8 @@ class DarwinExporter(object):
         seqLen = len(sequence) + 1
         row[typ + 'BufferOffset'] = off
         row[typ + 'BufferLength'] = seqLen
+        if typ == 'CDNA':
+            sequence = sequence.replace('X', 'N')
         seqNumpyObj = numpy.ndarray((seqLen,),
                                     buffer=(sequence + " ").encode('utf-8'),
                                     dtype=tables.StringAtom(1))

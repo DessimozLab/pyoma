@@ -69,25 +69,25 @@ class ThreadsafeFileRegistry(_tables_file._FileRegistry):
 
     def add(self, handler):
         with self.lock:
-            return super().add(handler)
+            return super(ThreadsafeFileRegistry, self).add(handler)
 
     def remove(self, handler):
         with self.lock:
-            return super().remove(handler)
+            return super(ThreadsafeFileRegistry, self).remove(handler)
 
     def close_all(self):
         with self.lock:
-            return super().close_all()
+            return super(ThreadsafeFileRegistry, self).close_all()
 
 
 class ThreadsafeFile(_tables_file.File):
     def __init__(self, *args, **kargs):
         with ThreadsafeFileRegistry.lock:
-            super().__init__(*args, **kargs)
+            super(ThreadsafeFile, self).__init__(*args, **kargs)
 
     def close(self):
         with ThreadsafeFileRegistry.lock:
-            super().close()
+            super(ThreadsafeFile, self).close()
 
 
 @functools.wraps(tables.open_file)

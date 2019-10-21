@@ -445,18 +445,37 @@ class Database(object):
             raise Singleton(entry)
         return int(m.group('fam'))
 
-    def hog_levels_of_fam(self, fam_nr):
+    @functools.lru_cache(maxsize=128)
+    def hog_levels_of_fam(self, fam_nr, deduplicate_and_decode=False):
         """get all taxonomic levels covered by a family.
 
-        The family coresponds to the toplevel numeric id of a HOG,
+        The family corresponds to the toplevel numeric id of a HOG,
         i.e. for HOG:002421 the fam_nr should be 2421. If a HOG
         covers a certain level more than once, it will be returned
-        several times.
+        several times, unless `deduplicate_and_decode` is set to True.
 
-        :param fam_nr: the numeric id of the family (== Toplevel HOG)
+        :param int fam_nr: the numeric id of the family (== Toplevel HOG)
+
+        :param bool deduplicate_and_decode: decode the encoded levels and
+            return only the unique levels as a frozenset(string).
+            Added in version 0.8.0
         """
-        return self.db.root.HogLevel.read_where(
-            '(Fam=={})'.format(fam_nr))['Level']
+        t0 = time.time()
+        hoglevel_tab = self.db.get_node('/HogLevel')
+        try:
+            fam_idx = self.db.get_node('/HogLevel_fam_lookup')
+            levels = hoglevel_tab.read(*fam_idx[fam_nr], field='Level')
+        except IndexError:
+            # dummy read that returns empty list of same dtype
+            levels = hoglevel_tab.read(0, 0, field='Level')
+        except tables.NoSuchNodeError:
+            # fall back to index based search
+            levels = self.db.root.HogLevel.read_where(
+                '(Fam=={})'.format(fam_nr))['Level']
+        logger.debug('retrieving levels for family {:d} took {:.7f} sec'.format(fam_nr, time.time()-t0))
+        if deduplicate_and_decode:
+            levels = frozenset(x.decode() for x in frozenset(levels))
+        return levels
 
     def get_subhogids_at_level(self, fam_nr, level):
         """get all the hog ids within a given family at a given taxonomic

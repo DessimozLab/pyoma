@@ -393,6 +393,39 @@ class Database(object):
                                  typ_filter=homolog_typ_nr,
                                  extra_cols=['SyntenyConservationLocal', 'Confidence'])
 
+    def get_hog_induced_pairwise_orthologs(self, entry):
+        """This method retrieves the hog induced pairwise orthologs
+
+        The induced pairwise orthologs are in general not equal to
+        the vpairs. The method returns a numpy array with the entries
+        that are orthologous to the query entry
+
+        :param entry: entry or entry_nr of the query protein"""
+        entry = self.ensure_entry(entry)
+
+        def is_orthologous(a, b):
+            """genes are orthologs if their HOG id have a common prefix that is
+            either the base id of the family or the prefix does not end with
+            a subfamily number, ie. not a digit as common prefix. See LOFT paper
+            for details on encoding."""
+            if a['EntryNr'] == b['EntryNr']:
+                return False
+            prefix = os.path.commonprefix((a['OmaHOG'], b['OmaHOG'])).decode()
+            if '.' in prefix and prefix[-1].isdigit():
+                return False
+            return True
+
+        try:
+            fam = self.hog_family(entry)
+            hog_member = self.member_of_fam(fam)
+        except Singleton:
+            # an empty fetch
+            hog_member = self.db.root.Protein.Entries[0:0]
+        idx = numpy.array(list(i for i in range(len(hog_member)) if is_orthologous(entry, hog_member[i])),
+                          dtype=numpy.int)
+        induced_orthologs = hog_member[idx]
+        return induced_orthologs
+
     def neighbour_genes(self, entry_nr, window=1):
         """Returns neighbor genes around a query gene.
 

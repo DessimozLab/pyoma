@@ -32,7 +32,7 @@ from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome
 logger = logging.getLogger(__name__)
 
 # Raise stack limit for PyOPA ~400MB
-threading.stack_size(4096*100000)
+threading.stack_size(4096 * 100000)
 
 # Global initialisations
 GAF_VERSION = '2.1'
@@ -51,6 +51,8 @@ def count_elements(iterable):
 
 _first_cap_re = re.compile('(.)([A-Z][a-z]+)')
 _all_cap_re = re.compile('([a-z0-9])([A-Z])')
+
+
 def to_snail_case(name):
     """function to convert from CamelCase to snail_case"""
     s1 = _first_cap_re.sub(r'\1_\2', name)
@@ -95,6 +97,7 @@ def synchronized_open_file(*args, **kwargs):
     with ThreadsafeFileRegistry.lock:
         return _tables_file._original_open_file(*args, **kwargs)
 
+
 # monkey patch the tables package
 _tables_file._original_open_file = _tables_file.open_file
 _tables_file.open_file = synchronized_open_file
@@ -103,6 +106,8 @@ _tables_file._original_File = _tables_file.File
 _tables_file.File = ThreadsafeFile
 tables.File = ThreadsafeFile
 _tables_file._open_files = ThreadsafeFileRegistry()
+
+
 # end monkey patch pytables
 ####
 
@@ -304,7 +309,7 @@ class Database(object):
         prot_tab = self.get_hdf5_handle().get_node('/Protein/Entries')
         return prot_tab.read_where(
             '(EntryNr >= {}) & (EntryNr <= {}) & ((AltSpliceVariant == EntryNr) | (AltSpliceVariant == 0))'
-            .format(rng[0], rng[1]))
+                .format(rng[0], rng[1]))
 
     def get_splicing_variants(self, entry):
         e = self.ensure_entry(entry)
@@ -313,7 +318,7 @@ class Database(object):
         # TODO: create index on AltSpliceVariant column?!
         return self.get_hdf5_handle().get_node('/Protein/Entries').read_where(
             '(EntryNr >= {:d}) & (EntryNr < {:d}) & (AltSpliceVariant == {:d})'
-                .format(e['EntryNr']-100, e['EntryNr']+100, e['AltSpliceVariant']))
+                .format(e['EntryNr'] - 100, e['EntryNr'] + 100, e['AltSpliceVariant']))
 
     def _get_vptab(self, entry_nr):
         return self._get_pw_tab(entry_nr, 'VPairs')
@@ -505,7 +510,7 @@ class Database(object):
             # fall back to index based search
             levels = self.db.root.HogLevel.read_where(
                 '(Fam=={})'.format(fam_nr))['Level']
-        logger.debug('retrieving levels for family {:d} took {:.7f} sec'.format(fam_nr, time.time()-t0))
+        logger.debug('retrieving levels for family {:d} took {:.7f} sec'.format(fam_nr, time.time() - t0))
         if deduplicate_and_decode:
             levels = frozenset(x.decode() for x in frozenset(levels))
         return levels
@@ -728,7 +733,7 @@ class Database(object):
             kw_buf = self.db.get_node('/OmaGroups/KeywordBuffer')
             res = {'fingerprint': e['Fingerprint'].decode(),
                    'group_nr': int(e['GroupNr']),
-                   'keywords': kw_buf[e['KeywordOffset']:e['KeywordOffset']+e['KeywordLength']].tostring().decode(),
+                   'keywords': kw_buf[e['KeywordOffset']:e['KeywordOffset'] + e['KeywordLength']].tostring().decode(),
                    'size': int(e['NrMembers'])}
             return res
         except StopIteration:
@@ -914,6 +919,7 @@ class Database(object):
 
         :param int entry_nr: numeric protein entry
         """
+
         # function to check if an annotation term is obsolete
         def filter_obsolete_terms(term):
             try:
@@ -921,6 +927,7 @@ class Database(object):
                 return True
             except (KeyError, ValueError):
                 return False
+
         try:
             if stop is None:
                 query = 'EntryNr == {:d}'.format(entry_nr)
@@ -1017,7 +1024,7 @@ class SequenceSearch(object):
             if isinstance(self.kmer_lookup, tables.link.ExternalLink):
                 self.kmer_lookup = self.kmer_lookup()
         except (AttributeError, OSError) as e:
-            raise DBConsistencyError("Suffix index for protein sequences is not available: "+str(e))
+            raise DBConsistencyError("Suffix index for protein sequences is not available: " + str(e))
         self.seq_buff = self.db.root.Protein.SequenceBuffer
         self.n_entries = len(self.db.root.Protein.Entries)
 
@@ -1127,7 +1134,7 @@ class SequenceSearch(object):
         c = collections.Counter()
         for z in map(lambda kmer: numpy.unique(self.kmer_lookup[int(kmer)],
                                                return_counts=True),
-                         self.encoder.decompose(seq)):
+                     self.encoder.decompose(seq)):
             c.update(dict(zip(*z)))
 
         # 2. Filter to top n if necessary
@@ -1545,6 +1552,7 @@ class Taxonomy(object):
 
     def get_taxid_of_extent_genomes(self):
         """returns a list of ncbi taxon ids of the extent genomes within the taxonomy"""
+
         def _traverse(node):
             children = self._direct_children_taxa(node['NCBITaxonId'])
             for child in children:
@@ -1632,6 +1640,7 @@ class Taxonomy(object):
 
         Note: as many newick parsers do not support quoted labels,
         the method instead replaces spaces with underscores."""
+
         def newick_enc(s):
             return s.translate({ord(' '): u'_', ord('('): u'[', ord(')'): u']'})
 
@@ -1820,7 +1829,7 @@ class XrefIdMapper(object):
         res = [{'source': self.xrefEnum._values[row['XRefSource']],
                 'xref': row['XRefId'].decode()}
                for row in self.xref_tab.where(
-                    '(EntryNr=={:d}) & (Verification <= {:d})'
+                '(EntryNr=={:d}) & (Verification <= {:d})'
                     .format(entry_nr, self._max_verif_for_mapping_entrynrs))
                if row['XRefSource'] in self.idtype]
         return res
@@ -1842,7 +1851,7 @@ class XrefIdMapper(object):
 
         :param entry_nr: the numeric id of the query protein"""
         for row in self.xref_tab.where('(EntryNr=={:d}) & (Verification <= {:d})'
-                                       .format(entry_nr, self._max_verif_for_mapping_entrynrs)):
+                                               .format(entry_nr, self._max_verif_for_mapping_entrynrs)):
             if row['XRefSource'] in self.idtype:
                 yield {'source': self.xrefEnum._values[row['XRefSource']],
                        'xref': row['XRefId'].decode()}
@@ -1893,7 +1902,7 @@ class XrefIdMapper(object):
             res = self.xref_tab[self.xref_index.find(query)]
         else:
             if is_prefix:
-                up = xref[:-1] + chr(ord(xref[-1])+1)
+                up = xref[:-1] + chr(ord(xref[-1]) + 1)
                 cond = '(XRefId >= {!r}) & (XRefId < {!r})'.format(
                     xref.encode('utf-8'), up.encode('utf-8'))
             else:
@@ -2031,7 +2040,7 @@ class FastMapper(object):
                     go_df = self.db.get_gene_ontology_annotations(match_enum, as_dataframe=True)
                     if go_df is not None:
                         go_df['With'] = 'Approx:{}:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(match_enum),
-                                                        match_score)
+                                                              match_score)
                 if go_df is not None:
                     go_df['DB'] = 'OMA_FastMap'
                     go_df['Assigned_By'] = go_df['DB']
@@ -2071,6 +2080,7 @@ HogMapperTuple = collections.namedtuple("HogMapperTuple", "query, closest_entry_
 
 class SimpleSeqToHOGMapper(object):
     """Fast mapper of sequeces to closest sequence and taken their HOG annotation"""
+
     def __init__(self, db, threaded=False):
         self.db = Database(db.get_hdf5_handle().filename) if threaded else db
 
@@ -2096,8 +2106,8 @@ class SimpleSeqToHOGMapper(object):
                     # Take best matches, up to score>80 & score_i > .5*score_max
                     score_max = candidate_matches[0][1]['score']
                     for enr, match_res in candidate_matches:
-                        if match_res['score'] < 80 or match_res['score'] < 0.5*score_max:
+                        if match_res['score'] < 80 or match_res['score'] < 0.5 * score_max:
                             break
                         p = self._get_main_protein_from_entrynr(enr)
-                        #score, distance, distvar = pyopa.MutipleAlEnv
+                        # score, distance, distvar = pyopa.MutipleAlEnv
                         yield HogMapperTuple(rec.id, enr, p, match_res['distance'], match_res['score'])

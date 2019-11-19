@@ -257,6 +257,31 @@ def create_index_for_columns(tab, *cols):
             tab.colinstances[col].reindex_dirty()
 
 
+def create_fast_famhoglevel_lookup(hoglevtab):
+    max_fam_nr = hoglevtab[hoglevtab.colindexes['Fam'][-1]]['Fam']
+    lookup = numpy.zeros(max_fam_nr + 1, dtype=[('start', 'i4'), ('stop', 'i4')])
+    lst_fam = 0
+    lst_start = 0
+    for row in hoglevtab.iterrows():
+        if row['Fam'] != lst_fam:
+            lookup[lst_fam] = (lst_start, row.nrow)
+            lst_fam = row['Fam']
+            lst_start = row.nrow
+    lookup[lst_fam] = (lst_start, row.nrow + 1)
+    return lookup
+
+
+def create_and_store_fast_famhoglevel_lookup(h5, hoglevtab, array_path):
+    try:
+        n = h5.get_node(array_path)
+        n.remove()
+    except tables.NoSuchNodeError:
+        pass
+    lookup = create_fast_famhoglevel_lookup(hoglevtab)
+    node, name = os.path.split(array_path)
+    h5.create_table(node, name, expectedrows=len(lookup), obj=lookup)
+
+
 class DarwinExporter(object):
     DB_SCHEMA_VERSION = '3.2'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
@@ -512,6 +537,8 @@ class DarwinExporter(object):
         seqLen = len(sequence) + 1
         row[typ + 'BufferOffset'] = off
         row[typ + 'BufferLength'] = seqLen
+        if typ == 'CDNA':
+            sequence = sequence.replace('X', 'N')
         seqNumpyObj = numpy.ndarray((seqLen,),
                                     buffer=(sequence + " ").encode('utf-8'),
                                     dtype=tables.StringAtom(1))
@@ -694,6 +721,8 @@ class DarwinExporter(object):
         self.logger.info('creating indexes for HogLevel table')
         hogTab = self.h5.get_node('/HogLevel')
         create_index_for_columns(hogTab, 'Fam', 'ID', 'Level')
+        create_and_store_fast_famhoglevel_lookup(self.h5, hogTab, '/HogLevel_fam_lookup')
+
         orthoxmlTab = self.h5.get_node('/OrthoXML/Index')
         create_index_for_columns(orthoxmlTab, 'Fam')
 

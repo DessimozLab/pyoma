@@ -2023,6 +2023,7 @@ class FastMapper(object):
             r = self.db.seq_search.search(str(rec.seq))
             if r is not None:
                 logger.debug(str(r))
+                go_df = None
                 if r[0] == 'exact':
                     tdfs1 = []
                     for enum in r[1]:
@@ -2030,7 +2031,8 @@ class FastMapper(object):
                         if df is not None:
                             df['With'] = 'Exact:{}'.format(self.db.id_mapper['Oma'].map_entry_nr(enum))
                             tdfs1.append(df)
-                    go_df = pd.concat(tdfs1, ignore_index=True)
+                    if len(tdfs1) > 0:
+                        go_df = pd.concat(tdfs1, ignore_index=True)
 
                 else:
                     # Take best match. TODO: remove those below some level of match.

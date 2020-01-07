@@ -734,7 +734,7 @@ class Database(object):
             res = {'fingerprint': e['Fingerprint'].decode(),
                    'group_nr': int(e['GroupNr']),
                    'keywords': kw_buf[e['KeywordOffset']:e['KeywordOffset'] + e['KeywordLength']].tostring().decode(),
-                   'size': int(e['NrMembers'])}
+                   'size': int(e['NrMembers']) if 'NrMembers' in e else -1}
             return res
         except StopIteration:
             raise InvalidId('invalid group nr')

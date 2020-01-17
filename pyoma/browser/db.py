@@ -515,6 +515,21 @@ class Database(object):
             levels = frozenset(x.decode() for x in frozenset(levels))
         return levels
 
+    def get_subhogs(self, hog_id):
+        """Get all the (sub)hogs for a given hog_id
+
+        This method returns all the levels for which a certain exact hog_id
+        applies, i.e. a set of taxonomic ranges for which no duplication
+        occurred in between.
+
+        The method returns a numpy array of dtype :class:`HogLevel`.
+
+        :param hog_id: the hog_id of interest
+        """
+        hog_id_ascii = hog_id if isinstance(hog_id, bytes) else hog_id.encode('ascii')
+        arr = self.db.root.HogLevel.read_where('ID == {!r}'.format(hog_id_ascii))
+        return arr
+
     def get_subhogids_at_level(self, fam_nr, level):
         """get all the hog ids within a given family at a given taxonomic
         level of interest.

@@ -629,17 +629,20 @@ class DarwinExporter(object):
         self.logger.info('wrote %s : compression ratio %.3f%%' %
                          (tab._v_pathname, 100 * tab.size_on_disk / tab.size_in_memory))
 
-    def add_hogs(self):
-        hog_path = os.path.normpath(os.path.join(
-            os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
-            'pyoma', 'split_hogs'))
+    def add_hogs(self, hog_path=None, hog_file=None, tree_filename=None):
+        if hog_path is None:
+            hog_path = os.path.normpath(os.path.join(
+                os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
+                'pyoma', 'split_hogs'))
         entryTab = self.h5.get_node('/Protein/Entries')
-        tree_filename = os.path.join(
-            os.environ['DARWIN_BROWSERDATA_PATH'],
-            'speciestree.nwk')
+        if tree_filename is None:
+            tree_filename = os.path.join(
+                os.environ['DARWIN_BROWSERDATA_PATH'],
+                'speciestree.nwk')
         if not os.path.exists(hog_path):
-            hog_file = os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'],
-                                    '..', 'downloads', 'oma-hogs.orthoXML.gz')
+            if hog_file is None:
+                hog_file = os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'],
+                                        '..', 'downloads', 'oma-hogs.orthoXML.gz')
             splitter = OrthoXMLSplitter(hog_file, cache_dir=hog_path)
             splitter()
         hog_converter = HogConverter(entryTab)
@@ -720,7 +723,7 @@ class DarwinExporter(object):
     def create_indexes(self):
         self.logger.info('creating indexes for HogLevel table')
         hogTab = self.h5.get_node('/HogLevel')
-        create_index_for_columns(hogTab, 'Fam', 'ID', 'Level')
+        create_index_for_columns(hogTab, 'Fam', 'ID', 'Level', 'NrMemberGenes', 'CompletenessScore', 'IsRoot')
         create_and_store_fast_famhoglevel_lookup(self.h5, hogTab, '/HogLevel_fam_lookup')
 
         orthoxmlTab = self.h5.get_node('/OrthoXML/Index')

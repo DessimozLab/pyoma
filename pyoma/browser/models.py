@@ -323,6 +323,20 @@ class Genome(object):
         return self.nr_entries
 
 
+class OmaGroup(object):
+    def __init__(self, db, og):
+        self._group = og
+        self._db = db
+
+    @property
+    def group_nbr(self):
+        return int(self._group['group_nr'])
+
+    @property
+    def fingerprint(self):
+        return self._group['fingerprint']
+
+
 class PairwiseRelation(object):
     def __init__(self, db, relation):
         self._relation = relation

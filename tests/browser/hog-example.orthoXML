@@ -39,7 +39,6 @@
       <score id="ImpliedLosses" value="1" />
       <property name="TaxRange" value="Mammalia" />
       <orthologGroup>
-        <score id="ImpliedLosses" value="0" />
         <score id="CompletenessScore" value="1.0" />
         <property name="TaxRange" value="Primates" />
         <geneRef id="1" />

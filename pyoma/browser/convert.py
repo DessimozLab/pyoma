@@ -1522,7 +1522,19 @@ class GeneOntologyManager(object):
 
 class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
     def _annotateGroupR(self, node, og, idx=0):
-        if familyanalyzer.OrthoXMLQuery.is_geneRef_node(node):
+        is_geneRef = familyanalyzer.OrthoXMLQuery.is_geneRef_node(node)
+        is_og = self.parser.is_ortholog_group(node)
+        if is_og or is_geneRef:
+            if (self.parser.is_paralog_group(node.getparent()) or
+                    node.getparent().tag == "{{{ns0}}}groups".format(**self.parser.ns)):
+                # direct children of a paralogGroup. set IsRoot to true in most general TaxRange property tag
+                prop_tag = "{{{ns0}}}property".format(**self.parser.ns)
+                for child in node[::-1]:
+                    if child.tag == prop_tag and child.attrib['name'] == "TaxRange":
+                        child.attrib['IsRoot'] = str(True)
+                        break
+
+        if is_geneRef:
             node.set('og', og)
         else:
             super()._annotateGroupR(node, og, idx)
@@ -1555,9 +1567,10 @@ class HogConverter(object):
         for fam in p.getToplevelGroups():
             m = self.fam_re.match(fam.get('og'))
             fam_nr = int(m.group('fam_nr'))
-            levs.extend([(fam_nr, n.getparent().get('og'), n.get('value'),) + self.get_hog_scores(n.getparent())
-                         for n in p._findSubNodes('property', root=fam)
-                         if n.get('name') == "TaxRange"])
+            for taxnode in familyanalyzer.OrthoXMLQuery.getTaxRangeNodes(fam, recursively=True):
+                ognode = taxnode.getparent()
+                levs.append((fam_nr, ognode.get('og'), taxnode.get('value')) + self.get_hog_scores(ognode, taxnode) +
+                            (self.get_nr_member_genes(ognode), bool(taxnode.get('IsRoot', False))) )
 
         geneNodes = p.root.findall('.//{{{ns0}}}geneRef'.
                                    format(**familyanalyzer.OrthoXMLParser.ns))
@@ -1574,20 +1587,32 @@ class HogConverter(object):
         self.entry_tab.modify_column(0, len(self.entry_tab), 1, self.hogs[1:], 'OmaHOG')
         self.entry_tab.flush()
 
-    def get_hog_scores(self, og_node):
+    def get_hog_scores(self, og_node, tax_node):
         """extract the scores associated with an orthologGroup node
 
         only scores that are defined in HOGsTable are extract. The method
         returns a tuple with the scores in the order of the score fields."""
+        all_score_ids = ('CompletenessScore', 'ImpliedLosses')
+        parse_fun = {'CompletenessScore': float, "ImpliedLosses": int}
         scores = collections.OrderedDict([(score, tablefmt.HOGsTable.columns[score].dflt)
-                                          for score in ('CompletenessScore', 'ImpliedLosses')])
+                                          for score in all_score_ids])
         for score in og_node.iterfind('{*}score'):
             score_id = score.get("id")
-            if score_id == "CompletenessScore":
-                scores['CompletenessScore'] = float(score.get('value'))
-            elif score_id == "ImpliedLosses":
-                scores['ImpliedLosses'] = int(score.get('value'))
+            scores[score_id] = parse_fun[score_id](score.get('value'))
+        # might be overwritten in tax_node (more specific if available)
+        for score_id in all_score_ids:
+            val = tax_node.get(score_id)
+            if val is not None:
+                scores[score_id] = parse_fun[score_id](val)
         return tuple(scores.values())
+
+    def get_nr_member_genes(self, og_node):
+        for child in og_node:
+            if (child.tag == "{{{ns0}}}property".format(**familyanalyzer.OrthoXMLParser.ns) and
+                    child.get('name') == "NrMemberGenes"):
+                return int(child.get('value'))
+        common.package_logger.warning("couldn't find NrMemberGenes property. scanning xml file for geneRefs")
+        return len(familyanalyzer.OrthoXMLQuery.getGeneRefNodes(og_node))
 
 
 class XRefImporter(object):

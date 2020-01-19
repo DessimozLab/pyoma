@@ -12,10 +12,10 @@ except ImportError:
 import numpy
 import tables
 import string
-import collections
+import itertools
 from pyoma.browser import suffixsearch
 
-CHARS = numpy.fromiter(collections.ChainMap(string.ascii_letters, string.digits, '-_.'), dtype='S1')
+CHARS = numpy.fromiter(itertools.chain(string.ascii_letters, string.digits, '-_.'), dtype='S1')
 
 
 class StringGenerator(object):

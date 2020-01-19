@@ -171,6 +171,13 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn(enr, {z[0] for z in approx_search_results},
                           'approx search for entry {}[{}:{}] failed.'.format(enr-1, start_idx, end_idx))
 
+    def test_specific_approx_search_that_failed_on_jenkins(self):
+        enr = 15884
+        start_idx, end_idx = 39, 376
+        s = self.db.get_sequence(enr)[start_idx:end_idx]
+        approx_search_results = self.db.seq_search.approx_search(s, is_sanitised=True)
+        self.assertIn(enr, {z[0] for z in approx_search_results})
+
     def test_map_to_hog(self):
         hog_mapper = SimpleSeqToHOGMapper(self.db)
         seqs = []

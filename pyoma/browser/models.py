@@ -337,6 +337,32 @@ class OmaGroup(object):
         return self._group['fingerprint']
 
 
+class HOG(object):
+    def __init__(self, db, hog):
+        self._hog = hog
+        self._db = db
+
+    @property
+    def fam(self):
+        return int(self._hog['fam'])
+
+    @property
+    def hog_id(self):
+        return str(self._hog['hog_id'])
+
+    @property
+    def level(self):
+        return str(self._hog['level'])
+
+    @property
+    def NrMemberGenes(self):
+        return int(self._hog['NrMemberGenes'])
+
+    @property
+    def IsRoot(self):
+        return self._hog['IsRoot']
+
+
 class PairwiseRelation(object):
     def __init__(self, db, relation):
         self._relation = relation

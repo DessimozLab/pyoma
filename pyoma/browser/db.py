@@ -27,7 +27,7 @@ from .. import version
 from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .KmerEncoder import KmerEncoder
 from .geneontology import GeneOntology, OntologyParser, GOAspect
-from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome
+from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
 
 logger = logging.getLogger(__name__)
 
@@ -515,6 +515,8 @@ class Database(object):
             levels = frozenset(x.decode() for x in frozenset(levels))
         return levels
 
+
+
     def get_subhogs(self, hog_id):
         """Get all the (sub)hogs for a given hog_id
 
@@ -528,7 +530,20 @@ class Database(object):
         """
         hog_id_ascii = hog_id if isinstance(hog_id, bytes) else hog_id.encode('ascii')
         arr = self.db.root.HogLevel.read_where('ID == {!r}'.format(hog_id_ascii))
-        return arr
+
+        hogs = []
+
+        for h in arr:
+
+            res = {'fam': h[0],
+                   'hog_id': h[1].decode(),
+                   'level': h[2].decode(),
+                   'NrMemberGenes': h[5],
+                   'IsRoot': h[6]}
+
+            hogs.append(HOG(self, res))
+
+        return hogs
 
     def get_subhogids_at_level(self, fam_nr, level):
         """get all the hog ids within a given family at a given taxonomic

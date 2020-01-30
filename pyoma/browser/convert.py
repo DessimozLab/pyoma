@@ -157,16 +157,18 @@ def load_tsv_to_numpy(args):
     return full_table
 
 
-def read_vps_from_tsv(gs, ref_genome):
+def read_vps_from_tsv(gs, ref_genome, basedir=None):
     ref_genome_idx = gs.get_where_list('(UniProtSpeciesCode=={!r})'.
                                        format(ref_genome))[0]
     job_args = []
+    if basedir is None:
+        basedir = os.path.join(os.environ['DARWIN_OMADATA_PATH'], 'Phase4')
     for g in range(len(gs)):
         if g == ref_genome_idx:
             continue
         g1, g2 = sorted((g, ref_genome_idx,))
         off1, off2 = gs.read_coordinates(numpy.array((g1, g2)), 'EntryOff')
-        fn = os.path.join(os.environ['DARWIN_OMADATA_PATH'], 'Phase4',
+        fn = os.path.join(basedir,
                           gs.cols.UniProtSpeciesCode[g1].decode(),
                           gs.cols.UniProtSpeciesCode[g2].decode() + ".orth.txt.gz")
         tup = (fn, off1, off2, g1 != ref_genome_idx)
@@ -434,15 +436,16 @@ class DarwinExporter(object):
                 if os.path.exists(cache_file):
                     with open(cache_file, 'r') as fd:
                         data = json.load(fd)
-                elif ((not os.getenv('DARWIN_OMADATA_PATH') is None) and
-                      os.path.exists(os.path.join(
-                           os.environ['DARWIN_OMADATA_PATH'], 'Phase4'))):
-                    # try to read from Phase4 in parallel.
-                    data = read_vps_from_tsv(self.h5.root.Genome,
-                                             genome.encode('utf-8'))
                 else:
-                    # fallback to read from VPsDB
-                    data = self.call_darwin_export('GetVPsForGenome({})'.format(genome))
+                    base_var1 = os.path.join(os.getenv('DARWIN_OMADATA_PATH', '/'), 'Phase4')
+                    base_var2 = os.path.join(os.getenv('DARWIN_OMA_SCRATCH_PATH', '/'), 'Phase4')
+                    if os.path.isdir(os.path.join(base_var1, genome)):
+                        data = read_vps_from_tsv(self.h5.root.Genome, genome.encode('utf-8'), basedir=base_var1)
+                    elif os.path.isdir(os.path.join(base_var2, genome)):
+                        data = read_vps_from_tsv(self.h5.root.Genome, genome.encode('utf-8'), basedir=base_var2)
+                    else:
+                        # fallback to read from VPsDB
+                        data = self.call_darwin_export('GetVPsForGenome({})'.format(genome))
 
                 vp_tab = self.h5.create_table(rel_node_for_genome, 'VPairs', tablefmt.PairwiseRelationTable,
                                               expectedrows=len(data))

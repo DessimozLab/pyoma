@@ -1212,6 +1212,18 @@ class DarwinExporter(object):
         self._write_to_table(tab, hog2dom)
         tab.flush()  # Required?
 
+    def add_per_species_aux_groupdata(self):
+        self.logger.info("adding per species auxillary group/hog stats")
+        omagroup_aux_adder = PerGenomeOMAGroupAuxDataAdder(self.h5)
+        omagroup_aux_adder.load_data()
+        omagroup_aux_adder.write()
+        self.logger.info('  info for OMA Groups written')
+
+        hog_aux_adder = PerGenomeHOGAuxAdder(self.h5)
+        hog_aux_adder.load_data()
+        hog_aux_adder.write()
+        self.logger.info('  info for HOGs written')
+
 
 def download_url_if_not_present(url, force_copy=False):
     if url.startswith('file://') and not force_copy:
@@ -1933,6 +1945,63 @@ class CathDomainNameParser(object):
 class PfamDomainNameParser(CathDomainNameParser):
     re_pattern = re.compile(r'(?P<id>\w*)\t\w*\t\w*\t\w*\t(?P<desc>.*)')
     source = b'Pfam'
+
+
+class PerGenomeOMAGroupAuxDataAdder(object):
+    node_postfix = "omagroup"
+
+    def __init__(self, h5:tables.File):
+        self.h5 = h5
+        self.shared_ogs = None
+        self.in_groups = None
+
+    def load_data(self):
+        gs = self.h5.get_node('/Genome').read()
+        Goff = gs['EntryOff']
+        etab = self.h5.get_node('/Protein/Entries')
+        shared_ogs = numpy.zeros((len(gs), len(gs)), dtype='i4')
+        in_groups = numpy.zeros(len(gs), dtype='i4')
+
+        def enr_to_gnr(entry_nr):
+            return Goff.searchsorted(entry_nr, side='left') - 1
+
+        grp_members = self.get_group_members(etab)
+        for grp, memb in grp_members.items():
+            gnrs = list(map(enr_to_gnr, memb))
+            in_groups[gnrs] += 1
+            for g1, g2 in itertools.combinations(gnrs, 2):
+                shared_ogs[g1, g2] += 1
+                shared_ogs[g2, g1] += 1
+        self.shared_ogs = shared_ogs
+        self.in_groups = in_groups
+
+    def write(self, node=None):
+        root = '/Summary' if node is None else node
+        for label, data in (("shared_", self.shared_ogs), ("prots_in_", self.in_groups)):
+            node_full_name = label + self.node_postfix
+            try:
+                self.h5.remove_node(root, node_full_name)
+            except tables.NoSuchNodeError:
+                pass
+            self.h5.create_array(root, node_full_name, obj=data)
+
+    def get_group_members(self, etab):
+        grp_members = collections.defaultdict(list)
+        for row in etab.where('OmaGroup > 0'):
+            grp_members[row['OmaGroup']].append(row['EntryNr'])
+        return grp_members
+
+
+class PerGenomeHOGAuxAdder(PerGenomeOMAGroupAuxDataAdder):
+    node_postfix = "hog"
+
+    def get_group_members(self, etab):
+        grp_members = collections.defaultdict(list)
+        fam_re = re.compile(rb'HOG:(?P<fam_nr>\d+)')
+        for row in etab.where('OmaHOG != b""'):
+            fam = int(fam_re.match(row['OmaHOG']).group('fam_nr'))
+            grp_members[fam].append(row['EntryNr'])
+        return grp_members
 
 
 class InvarianceException(Exception):

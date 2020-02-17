@@ -2111,7 +2111,7 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level='INFO'
     x.create_indexes()
     x.add_sequence_suffix_array(k=k, fn=idx_name)
     x.update_summary_stats()
-
+    x.add_per_species_aux_groupdata()
     genomes_json_fname = os.path.normpath(os.path.join(
         os.path.dirname(x.h5.filename), '..', 'downloads', 'genomes.json'))
     augment_genomes_json_download_file(genomes_json_fname, x.h5)

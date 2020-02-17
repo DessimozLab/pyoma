@@ -853,6 +853,12 @@ class Database(object):
         tab = self.db.get_node('/Summary/{}_size_hist'.format(tabname))
         return tab.read()
 
+    def per_species_metadata_retriever(self, genome):
+        """return a PerGenomeMetaData instance for a certain query genome to extract
+        information on close species based on nr of shared OMA Groups or HOGs"""
+        org = self.id_mapper['OMA'].identify_genome(genome)
+        return PerGenomeMetaData(self.get_hdf5_handle(), org['UniProtSpeciesCode'])
+
     def get_sequence(self, entry):
         """get the protein sequence of a given entry as a string
 
@@ -1075,6 +1081,33 @@ class Database(object):
                 ('!gaf-version: {}\n'.format(GAF_VERSION) +
                  '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) +
                  '\n'))
+
+
+class PerGenomeMetaData(object):
+    def __init__(self, h5, genome):
+        self.h5 = h5
+        self.genomes = h5.get_node('/Genome').read(field='UniProtSpeciesCode')
+        genome = genome if isinstance(genome, bytes) else genome.encode('ascii')
+        try:
+            self.genome_idx = numpy.where(self.genomes == genome)[0][0]
+        except IndexError:
+            raise UnknownSpecies("UniProtSpeciesCode '{}' not known".format(genome))
+
+    def get_most_similar_species(self, limit=None, group_type='OMAGroup', reverse=True):
+        overlap_groups = self.h5.get_node('/Summary/shared_{}'.format(group_type.lower()))[self.genome_idx, :]
+        key = numpy.argsort(overlap_groups)
+        if reverse:
+            limit = limit if limit is None else -limit - 1
+            s = slice(None, limit, -1)
+        else:
+            s = slice(0, limit, None)
+        return [(self.genomes[k].decode(), int(overlap_groups[k])) for k in key[s] if k != self.genome_idx]
+
+    def get_least_similar_species(self, **kwargs):
+        return self.get_most_similar_species(reverse=False, **kwargs)
+
+    def get_nr_genes_in_group(self, group_type="OMAGroup"):
+        return int(self.h5.get_node('/Summary/prots_in_{}'.format(group_type.lower()))[self.genome_idx])
 
 
 class SequenceSearch(object):

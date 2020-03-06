@@ -725,6 +725,27 @@ class Database(object):
             members = members[keep]
         return members
 
+    def count_hog_members(self, hog_id, level=None):
+        """Count the number of members in a (sub)hog.
+
+        If the level is not specified, the deepest level having the given
+        hog-id is used.
+
+        :param bytes hog_id: the query hog id
+        :param str level: the taxonomic level of interest"""
+        if isinstance(hog_id, str):
+            hog_id = hog_id.encode('ascii')
+        query_fam = self.parse_hog_id(hog_id)
+        if level is None:
+            query = "(Fam == {}) & (ID == {!r}) & (IsRoot == True)".format(query_fam, hog_id)
+        else:
+            query = '(Fam == {:d}) & (Level == {!r})'.format(query_fam, level.encode('ascii'))
+        try:
+            row = next(self.db.root.HogLevel.where(query))
+            return row['NrMemberGenes']
+        except StopIteration:
+            raise ValueError('HOG-ID/Level combination "{}/{:s}" unknown'.format(hog_id.decode(), level))
+
     def get_orthoxml(self, fam):
         """returns the orthoxml of a given toplevel HOG family
 

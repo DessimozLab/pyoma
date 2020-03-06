@@ -656,12 +656,16 @@ class Database(object):
             members = members[keep]
         return members
 
-    def iter_members_of_hog_id(self, hog_id):
+    def iter_members_of_hog_id(self, hog_id, start=0, stop=None, step=1):
         """iterates over all proteins that belong to a specific hog_id.
 
         A hog_id might be an ID of the following form: HOG:0000212.1a
         This method will yield all proteins in the form of
         :class:`ProteinEntry` instances that are part of this hog_id.
+
+        The paramters start, stop and step are passed to the
+        :py:func:`itertools.islice` function and can be used to access
+        only a subset of the members, e.g. for pageination.
 
         :param str hog_id: the requested HOG ID.
         :return: :py:class:`ProteinEntry` objects
@@ -669,7 +673,7 @@ class Database(object):
         hog_range = self._hog_lex_range(hog_id)
         it = self.db.root.Protein.Entries.where(
             '({!r} <= OmaHOG) & (OmaHOG < {!r})'.format(*hog_range))
-        for row in it:
+        for row in itertools.islice(it, start, stop, step):
             yield ProteinEntry(self, row.fetch_all_fields())
 
     def member_of_fam(self, fam):

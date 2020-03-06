@@ -172,12 +172,13 @@ def read_vps_from_tsv(gs, ref_genome, basedir=None):
                           gs.cols.UniProtSpeciesCode[g1].decode(),
                           gs.cols.UniProtSpeciesCode[g2].decode() + ".orth.txt.gz")
         tup = (fn, off1, off2, g1 != ref_genome_idx)
-        common.package_logger.info('adding job: {}'.format(tup))
+        common.package_logger.debug('adding job: {}'.format(tup))
         job_args.append(tup)
 
-    pool = mp.Pool(processes=min(os.cpu_count(), 20))
+    pool = mp.Pool(processes=min(os.cpu_count(), 12))
     all_pairs = pool.map(load_tsv_to_numpy, job_args)
     pool.close()
+    common.package_logger.info("loaded vps for {}".format(ref_genome.decode()))
     return numpy.lib.recfunctions.stack_arrays(all_pairs, usemask=False)
 
 
@@ -426,6 +427,13 @@ class DarwinExporter(object):
 
     def add_orthologs(self):
         genome_offs = self.h5.root.Genome.col('EntryOff')
+        anygenome = self.h5.root.Genome[0]['UniProtSpeciesCode'].decode()
+        basedir = None
+        for base in ('DARWIN_OMADATA_PATH', 'DARWIN_OMA_SCRATCH_PATH'):
+            if os.path.isdir(os.path.join(os.getenv(base,'/'), 'Phase4', anygenome)):
+                basedir = os.path.join(os.getenv(base), 'Phase4')
+                break
+
         for gs in self.h5.root.Genome.iterrows():
             genome = gs['UniProtSpeciesCode'].decode()
             rel_node_for_genome = self._get_or_create_node('/PairwiseRelation/{}'.format(genome))
@@ -436,16 +444,12 @@ class DarwinExporter(object):
                 if os.path.exists(cache_file):
                     with open(cache_file, 'r') as fd:
                         data = json.load(fd)
+                elif base is not None:
+                    # we have the *.orth.txt.gz files in basedir
+                    data = read_vps_from_tsv(self.h5.root.Genome, genome.encode('utf-8'), basedir=basedir)
                 else:
-                    base_var1 = os.path.join(os.getenv('DARWIN_OMADATA_PATH', '/'), 'Phase4')
-                    base_var2 = os.path.join(os.getenv('DARWIN_OMA_SCRATCH_PATH', '/'), 'Phase4')
-                    if os.path.isdir(os.path.join(base_var1, genome)):
-                        data = read_vps_from_tsv(self.h5.root.Genome, genome.encode('utf-8'), basedir=base_var1)
-                    elif os.path.isdir(os.path.join(base_var2, genome)):
-                        data = read_vps_from_tsv(self.h5.root.Genome, genome.encode('utf-8'), basedir=base_var2)
-                    else:
-                        # fallback to read from VPsDB
-                        data = self.call_darwin_export('GetVPsForGenome({})'.format(genome))
+                    # fallback to read from VPsDB
+                    data = self.call_darwin_export('GetVPsForGenome({})'.format(genome))
 
                 vp_tab = self.h5.create_table(rel_node_for_genome, 'VPairs', tablefmt.PairwiseRelationTable,
                                               expectedrows=len(data))

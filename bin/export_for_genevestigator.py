@@ -10,6 +10,7 @@ import pyoma.browser.models as models
 import numpy
 import gzip
 import os
+import sys
 import logging
 
 logger = logging.getLogger('genevestigator-export')
@@ -29,9 +30,13 @@ class GenomeFilter(object):
     def __init__(self, db, keep):
         genomes = set([])
         for node in keep:
-            t = db.tax.get_subtaxonomy_rooted_at(node)
-            extent_ncbi = t.get_taxid_of_extent_genomes()
-            extent_genomes = [models.Genome(db, db.id_mapper['OMA'].genome_from_taxid(z)) for z in extent_ncbi]
+            try:
+                t = db.tax.get_subtaxonomy_rooted_at(node)
+                extent_ncbi = t.get_taxid_of_extent_genomes()
+                extent_genomes = [models.Genome(db, db.id_mapper['OMA'].genome_from_taxid(z)) for z in extent_ncbi]
+            except ValueError:
+                extent_genomes = [models.Genome(db, db.id_mapper['OMA'].genome_from_UniProtCode(node))]
+                extent_ncbi = [g.ncbi_taxon_id for g in extent_genomes]
             logger.info("{} maps to {}".format(node, [g.uniprot_species_code for g in extent_genomes]))
             genomes = genomes.union(set(extent_ncbi))
         self.genomes = sorted([models.Genome(db, db.id_mapper['OMA'].genome_from_taxid(z)) for z in genomes],
@@ -61,21 +66,37 @@ class PairsExtractor(object):
         self._xrefs_cache = {}
         self._augment_ids = augment_ids
 
-    def process(self, outfh):
+    def _get_columns_and_labels(self):
         if self._augment_ids:
-            cols = ['Protein1', 'ProteinAC1', 'GeneID1', 'Protein2', 'ProteinAC2', 'GeneID2',
+            cols = ['Protein1', 'ProteinAC1', 'Protein2', 'ProteinAC2', 
                     'OrthologyType', 'Score', 'Distance']
-            labs = (*cols[:7], 'AlignmentScore', 'PamDistance')
+            labs = (*cols[:5], 'AlignmentScore', 'PamDistance')
         else:
             cols = ['Protein1', 'Protein2', 'OrthologyType', 'Score', 'Distance']
             labs = (*cols[:3], 'AlignmentScore', 'PamDistance')
+        return cols, labs
 
+    def process(self, outfh):
+        cols, labs = self._get_columns_and_labels()
         csv_writer = ColumnRenameDictWriter(outfh, cols, labs,
                                     extrasaction='ignore', delimiter='\t')
         csv_writer.writeheader()
         for g1, g2 in itertools.combinations(self.filter.genomes, 2):
             for rel in self.extract_pairwise_relations(g1, g2):
                 csv_writer.writerow(rel)
+
+    def process_per_pair(self, folder):
+        cols, labs = self._get_columns_and_labels()
+        for g1, g2 in itertools.combinations(self.filter.genomes, 2):
+            fn = os.path.join(folder, "{}-{}.tsv".format(
+                 g1.uniprot_species_code, g2.uniprot_species_code))
+            with open(fn, 'w') as fout:
+                csv_writer = ColumnRenameDictWriter(fout, cols, labs,
+                                                    extrasaction='ignore', 
+                                                    delimiter='\t')
+                csv_writer.writeheader()
+                for rel in self.extract_pairwise_relations(g1, g2):
+                    csv_writer.writerow(rel)
 
     def _load_xrefs(self, genome, source):
         xref_tab = self.db.db.get_node('/XRef')
@@ -119,15 +140,17 @@ class PairsExtractor(object):
             lambda enr: "{}{:05d}".format(g2.uniprot_species_code, enr - g2.entry_nr_offset))
         if self._augment_ids:
             df = self.augment_with_ids(df, g1, g2, 'SourceAC', 'ProteinAC')
-            df = self.augment_with_ids(df, g1, g2, 'SourceID', 'GeneID')
+            #df = self.augment_with_ids(df, g1, g2, 'SourceID', 'GeneID')
         yield from df.to_dict('records')
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Export Pairwise Orthologs in TSV format suitable for GeneVestigator")
-    parser.add_argument('--out', '-o', default='-', type=argparse.FileType('w'),
+    parser.add_argument('--out', '-o', default='-',
                         help='Path to output file. Defaults to stdout')
+    parser.add_argument('--per-pair', action='store_true', default=False,
+                        help="Write one file per genome pair")
     parser.add_argument('--augment', action='store_true', default=False,
                         help="Augment the relations with the ProteinIDs and GeneIDs from the "
                              "SourceAC and SourceID xrefs. Needed for BASF, but not for GeneVestigator")
@@ -141,5 +164,11 @@ if __name__ == "__main__":
     db = pydb.Database(conf.db)
     genome_filter = GenomeFilter(db, conf.taxon)
     extractor = PairsExtractor(db, genome_filter, conf.augment)
-    extractor.process(conf.out)
-    conf.out.close()
+    if conf.per_pair:
+        if not os.path.isdir(conf.out):
+            raise ValueError('--out parameter must point to an existing directory for per-pair output')
+        extractor.process_per_pair(conf.out)
+    else:
+        fh = sys.stdout if conf.out == '-' else open(conf.out, 'w')
+        extractor.process(fh)
+        fh.close()

@@ -27,7 +27,7 @@ from .. import version
 from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .KmerEncoder import KmerEncoder
 from .geneontology import GeneOntology, OntologyParser, GOAspect
-from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome
+from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ class Database(object):
     """This is the main interface to the oma database. Queries
     will typically be issued by methods of this object. Typically
     the result of queries will be :py:class:`numpy.recarray` objects."""
-    EXPECTED_DB_SCHEMA = "3.2"
+    EXPECTED_DB_SCHEMA = "3.3"
 
     def __init__(self, db):
         if isinstance(db, str):
@@ -431,6 +431,56 @@ class Database(object):
         induced_orthologs = hog_member[idx]
         return induced_orthologs
 
+    def get_hog_induced_pairwise_paralogs(self, entry):
+        """This method retrieves the hog induced pairwise paralogs
+
+        The method returns a numpy array with the entries
+        that are paralogous to the query entry. In addition to the normal
+        ProteinEntry, the array contains an additional column with the
+        taxonomic level when the duplication occurred.
+
+        :param entry: entry or entry_nr of the query protein"""
+        entry = self.ensure_entry(entry)
+        genome = self.id_mapper['OMA'].genome_of_entry_nr(entry['EntryNr'])
+        lineage = self.tax.get_parent_taxa(genome['NCBITaxonId'])['Name']
+        lineage_sorter = numpy.argsort(lineage)
+        try:
+            fam = self.hog_family(entry)
+            hog_member = self.member_of_fam(fam)
+            levels = self.filter_fam_from_hoglevel(fam)
+            # only keep the levels that are on the lineage to the query genome
+            levels = levels[numpy.isin(levels['Level'], lineage)]
+
+        except Singleton:
+            # an empty fetch
+            hog_member = self.db.root.Protein.Entries[0:0]
+
+        def is_paralogous(a, b):
+            """genes are orthologs if their HOG id have a common prefix that is
+            either the base id of the family or the prefix does not end with
+            a subfamily number, ie. not a digit as common prefix. See LOFT paper
+            for details on encoding."""
+            if a['EntryNr'] == b['EntryNr']:
+                return False
+            prefix = os.path.commonprefix((a['OmaHOG'], b['OmaHOG'])).decode()
+            if '.' in prefix and prefix[-1].isdigit():
+                # gene is paralog. find MRCA in taxonomy of common HOGid prefix
+                k = prefix.rfind('.')
+                hog_id = prefix[:k].encode('ascii')
+                cand_levels = levels[numpy.where(levels['ID'] == hog_id)]
+                sortidx = lineage.searchsorted(cand_levels['Level'], sorter=lineage_sorter)
+                lin_idx = numpy.take(lineage_sorter, sortidx, mode='clip')
+                mask = lineage[lin_idx] == cand_levels['Level']
+                return lineage[lin_idx[mask].min()]
+            return None
+
+        idx = list(is_paralogous(entry, hog_member[i]) for i in range(len(hog_member)))
+        mask = numpy.asarray(idx, numpy.bool)
+        paralogs = numpy.lib.recfunctions.append_fields(
+            hog_member[mask], names="DivergenceLevel", data=[z for z in idx if z],
+            usemask=False)
+        return paralogs
+
     def neighbour_genes(self, entry_nr, window=1):
         """Returns neighbor genes around a query gene.
 
@@ -483,7 +533,6 @@ class Database(object):
             raise Singleton(entry)
         return int(m.group('fam'))
 
-    @functools.lru_cache(maxsize=128)
     def hog_levels_of_fam(self, fam_nr, deduplicate_and_decode=False):
         """get all taxonomic levels covered by a family.
 
@@ -498,22 +547,55 @@ class Database(object):
             return only the unique levels as a frozenset(string).
             Added in version 0.8.0
         """
+        levels = self.filter_fam_from_hoglevel(fam_nr, field='Level')
+        if deduplicate_and_decode:
+            levels = frozenset(x.decode() for x in frozenset(levels))
+        return levels
+
+    @functools.lru_cache(maxsize=128)
+    def filter_fam_from_hoglevel(self, fam_nr, field=None):
         t0 = time.time()
         hoglevel_tab = self.db.get_node('/HogLevel')
         try:
             fam_idx = self.db.get_node('/HogLevel_fam_lookup')
-            levels = hoglevel_tab.read(*fam_idx[fam_nr], field='Level')
+            levels = hoglevel_tab.read(*fam_idx[fam_nr], field=field)
         except IndexError:
             # dummy read that returns empty list of same dtype
-            levels = hoglevel_tab.read(0, 0, field='Level')
+            levels = hoglevel_tab.read(0, 0, field=field)
         except tables.NoSuchNodeError:
             # fall back to index based search
             levels = self.db.root.HogLevel.read_where(
-                '(Fam=={})'.format(fam_nr))['Level']
+                '(Fam=={})'.format(fam_nr), field=field)
         logger.debug('retrieving levels for family {:d} took {:.7f} sec'.format(fam_nr, time.time() - t0))
-        if deduplicate_and_decode:
-            levels = frozenset(x.decode() for x in frozenset(levels))
         return levels
+
+    def get_subhogs(self, hog_id):
+        """Get all the (sub)hogs for a given hog_id
+
+        This method returns all the levels for which a certain exact hog_id
+        applies, i.e. a set of taxonomic ranges for which no duplication
+        occurred in between.
+
+        The method returns a numpy array of dtype :class:`HogLevel`.
+
+        :param hog_id: the hog_id of interest
+        """
+        hog_id_ascii = hog_id if isinstance(hog_id, bytes) else hog_id.encode('ascii')
+        arr = self.db.root.HogLevel.read_where('ID == {!r}'.format(hog_id_ascii))
+
+        hogs = []
+
+        for h in arr:
+
+            res = {'fam': h[0],
+                   'hog_id': h[1].decode(),
+                   'level': h[2].decode(),
+                   'NrMemberGenes': h[5],
+                   'IsRoot': h[6]}
+
+            hogs.append(HOG(self, res))
+
+        return hogs
 
     def get_subhogids_at_level(self, fam_nr, level):
         """get all the hog ids within a given family at a given taxonomic
@@ -574,12 +656,16 @@ class Database(object):
             members = members[keep]
         return members
 
-    def iter_members_of_hog_id(self, hog_id):
+    def iter_members_of_hog_id(self, hog_id, start=0, stop=None, step=1):
         """iterates over all proteins that belong to a specific hog_id.
 
         A hog_id might be an ID of the following form: HOG:0000212.1a
         This method will yield all proteins in the form of
         :class:`ProteinEntry` instances that are part of this hog_id.
+
+        The paramters start, stop and step are passed to the
+        :py:func:`itertools.islice` function and can be used to access
+        only a subset of the members, e.g. for pageination.
 
         :param str hog_id: the requested HOG ID.
         :return: :py:class:`ProteinEntry` objects
@@ -587,7 +673,7 @@ class Database(object):
         hog_range = self._hog_lex_range(hog_id)
         it = self.db.root.Protein.Entries.where(
             '({!r} <= OmaHOG) & (OmaHOG < {!r})'.format(*hog_range))
-        for row in it:
+        for row in itertools.islice(it, start, stop, step):
             yield ProteinEntry(self, row.fetch_all_fields())
 
     def member_of_fam(self, fam):
@@ -642,6 +728,27 @@ class Database(object):
                 dtype=numpy.bool)
             members = members[keep]
         return members
+
+    def count_hog_members(self, hog_id, level=None):
+        """Count the number of members in a (sub)hog.
+
+        If the level is not specified, the deepest level having the given
+        hog-id is used.
+
+        :param bytes hog_id: the query hog id
+        :param str level: the taxonomic level of interest"""
+        if isinstance(hog_id, str):
+            hog_id = hog_id.encode('ascii')
+        query_fam = self.parse_hog_id(hog_id)
+        if level is None:
+            query = "(Fam == {}) & (ID == {!r}) & (IsRoot == True)".format(query_fam, hog_id)
+        else:
+            query = '(Fam == {:d}) & (Level == {!r})'.format(query_fam, level.encode('ascii'))
+        try:
+            row = next(self.db.root.HogLevel.where(query))
+            return row['NrMemberGenes']
+        except StopIteration:
+            raise ValueError('HOG-ID/Level combination "{}/{:s}" unknown'.format(hog_id.decode(), level))
 
     def get_orthoxml(self, fam):
         """returns the orthoxml of a given toplevel HOG family
@@ -734,7 +841,7 @@ class Database(object):
             res = {'fingerprint': e['Fingerprint'].decode(),
                    'group_nr': int(e['GroupNr']),
                    'keywords': kw_buf[e['KeywordOffset']:e['KeywordOffset'] + e['KeywordLength']].tostring().decode(),
-                   'size': int(e['NrMembers'])}
+                   'size': int(e['NrMembers']) if 'NrMembers' in e else -1}
             return res
         except StopIteration:
             raise InvalidId('invalid group nr')
@@ -770,6 +877,12 @@ class Database(object):
             raise ValueError('{} is not a valid group typ'.format(typ))
         tab = self.db.get_node('/Summary/{}_size_hist'.format(tabname))
         return tab.read()
+
+    def per_species_metadata_retriever(self, genome):
+        """return a PerGenomeMetaData instance for a certain query genome to extract
+        information on close species based on nr of shared OMA Groups or HOGs"""
+        org = self.id_mapper['OMA'].identify_genome(genome)
+        return PerGenomeMetaData(self.get_hdf5_handle(), org['UniProtSpeciesCode'])
 
     def get_sequence(self, entry):
         """get the protein sequence of a given entry as a string
@@ -993,6 +1106,33 @@ class Database(object):
                 ('!gaf-version: {}\n'.format(GAF_VERSION) +
                  '\n'.join(df.apply(lambda e: '\t'.join(map(str, e)), axis=1)) +
                  '\n'))
+
+
+class PerGenomeMetaData(object):
+    def __init__(self, h5, genome):
+        self.h5 = h5
+        self.genomes = h5.get_node('/Genome').read(field='UniProtSpeciesCode')
+        genome = genome if isinstance(genome, bytes) else genome.encode('ascii')
+        try:
+            self.genome_idx = numpy.where(self.genomes == genome)[0][0]
+        except IndexError:
+            raise UnknownSpecies("UniProtSpeciesCode '{}' not known".format(genome))
+
+    def get_most_similar_species(self, limit=None, group_type='OMAGroup', reverse=True):
+        overlap_groups = self.h5.get_node('/Summary/shared_{}'.format(group_type.lower()))[self.genome_idx, :]
+        key = numpy.argsort(overlap_groups)
+        if reverse:
+            limit = limit if limit is None else -limit - 1
+            s = slice(None, limit, -1)
+        else:
+            s = slice(0, limit, None)
+        return [(self.genomes[k].decode(), int(overlap_groups[k])) for k in key[s] if k != self.genome_idx]
+
+    def get_least_similar_species(self, **kwargs):
+        return self.get_most_similar_species(reverse=False, **kwargs)
+
+    def get_nr_genes_in_group(self, group_type="OMAGroup"):
+        return int(self.h5.get_node('/Summary/prots_in_{}'.format(group_type.lower()))[self.genome_idx])
 
 
 class SequenceSearch(object):

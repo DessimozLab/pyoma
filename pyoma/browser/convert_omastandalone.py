@@ -55,7 +55,7 @@ class StandaloneExporter(DarwinExporter):
                 self._write_to_table(vp_tab, data)
                 vp_tab.cols.EntryNr1.create_csindex()
 
-    def add_hogs(self):
+    def add_hogs(self, **kwargs):
         hog_path = os.path.join(
             os.environ['DARWIN_BROWSERDATA_PATH'], 'Output')
 

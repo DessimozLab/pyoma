@@ -42,7 +42,7 @@ setup(
     package_data={'pyoma': ['browser/*.drw']},
     install_requires=req_packages,
     extras_require={
-        'create_db': ['PySAIS', 'familyanalyzer', 'matplotlib', 'scikit-learn',
+        'create_db': ['PySAIS', 'familyanalyzer>=0.6.0', 'matplotlib', 'scikit-learn',
                       'scikit-fuzzy', 'lark-parser'],
     },
     dependency_links=[

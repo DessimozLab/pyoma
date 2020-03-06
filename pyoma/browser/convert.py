@@ -157,25 +157,28 @@ def load_tsv_to_numpy(args):
     return full_table
 
 
-def read_vps_from_tsv(gs, ref_genome):
+def read_vps_from_tsv(gs, ref_genome, basedir=None):
     ref_genome_idx = gs.get_where_list('(UniProtSpeciesCode=={!r})'.
                                        format(ref_genome))[0]
     job_args = []
+    if basedir is None:
+        basedir = os.path.join(os.environ['DARWIN_OMADATA_PATH'], 'Phase4')
     for g in range(len(gs)):
         if g == ref_genome_idx:
             continue
         g1, g2 = sorted((g, ref_genome_idx,))
         off1, off2 = gs.read_coordinates(numpy.array((g1, g2)), 'EntryOff')
-        fn = os.path.join(os.environ['DARWIN_OMADATA_PATH'], 'Phase4',
+        fn = os.path.join(basedir,
                           gs.cols.UniProtSpeciesCode[g1].decode(),
                           gs.cols.UniProtSpeciesCode[g2].decode() + ".orth.txt.gz")
         tup = (fn, off1, off2, g1 != ref_genome_idx)
-        common.package_logger.info('adding job: {}'.format(tup))
+        common.package_logger.debug('adding job: {}'.format(tup))
         job_args.append(tup)
 
-    pool = mp.Pool(processes=min(os.cpu_count(), 20))
+    pool = mp.Pool(processes=min(os.cpu_count(), 12))
     all_pairs = pool.map(load_tsv_to_numpy, job_args)
     pool.close()
+    common.package_logger.info("loaded vps for {}".format(ref_genome.decode()))
     return numpy.lib.recfunctions.stack_arrays(all_pairs, usemask=False)
 
 
@@ -283,7 +286,7 @@ def create_and_store_fast_famhoglevel_lookup(h5, hoglevtab, array_path):
 
 
 class DarwinExporter(object):
-    DB_SCHEMA_VERSION = '3.2'
+    DB_SCHEMA_VERSION = '3.3'
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + '.drw')
 
     def __init__(self, path, logger=None, mode=None):
@@ -424,6 +427,13 @@ class DarwinExporter(object):
 
     def add_orthologs(self):
         genome_offs = self.h5.root.Genome.col('EntryOff')
+        anygenome = self.h5.root.Genome[0]['UniProtSpeciesCode'].decode()
+        basedir = None
+        for base in ('DARWIN_OMADATA_PATH', 'DARWIN_OMA_SCRATCH_PATH'):
+            if os.path.isdir(os.path.join(os.getenv(base,'/'), 'Phase4', anygenome)):
+                basedir = os.path.join(os.getenv(base), 'Phase4')
+                break
+
         for gs in self.h5.root.Genome.iterrows():
             genome = gs['UniProtSpeciesCode'].decode()
             rel_node_for_genome = self._get_or_create_node('/PairwiseRelation/{}'.format(genome))
@@ -434,12 +444,9 @@ class DarwinExporter(object):
                 if os.path.exists(cache_file):
                     with open(cache_file, 'r') as fd:
                         data = json.load(fd)
-                elif ((not os.getenv('DARWIN_OMADATA_PATH') is None) and
-                      os.path.exists(os.path.join(
-                           os.environ['DARWIN_OMADATA_PATH'], 'Phase4'))):
-                    # try to read from Phase4 in parallel.
-                    data = read_vps_from_tsv(self.h5.root.Genome,
-                                             genome.encode('utf-8'))
+                elif base is not None:
+                    # we have the *.orth.txt.gz files in basedir
+                    data = read_vps_from_tsv(self.h5.root.Genome, genome.encode('utf-8'), basedir=basedir)
                 else:
                     # fallback to read from VPsDB
                     data = self.call_darwin_export('GetVPsForGenome({})'.format(genome))
@@ -629,17 +636,20 @@ class DarwinExporter(object):
         self.logger.info('wrote %s : compression ratio %.3f%%' %
                          (tab._v_pathname, 100 * tab.size_on_disk / tab.size_in_memory))
 
-    def add_hogs(self):
-        hog_path = os.path.normpath(os.path.join(
-            os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
-            'pyoma', 'split_hogs'))
+    def add_hogs(self, hog_path=None, hog_file=None, tree_filename=None):
+        if hog_path is None:
+            hog_path = os.path.normpath(os.path.join(
+                os.environ['DARWIN_NETWORK_SCRATCH_PATH'],
+                'pyoma', 'split_hogs'))
         entryTab = self.h5.get_node('/Protein/Entries')
-        tree_filename = os.path.join(
-            os.environ['DARWIN_BROWSERDATA_PATH'],
-            'speciestree.nwk')
+        if tree_filename is None:
+            tree_filename = os.path.join(
+                os.environ['DARWIN_BROWSERDATA_PATH'],
+                'speciestree.nwk')
         if not os.path.exists(hog_path):
-            hog_file = os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'],
-                                    '..', 'downloads', 'oma-hogs.orthoXML.gz')
+            if hog_file is None:
+                hog_file = os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'],
+                                        '..', 'downloads', 'oma-hogs.orthoXML.gz')
             splitter = OrthoXMLSplitter(hog_file, cache_dir=hog_path)
             splitter()
         hog_converter = HogConverter(entryTab)
@@ -720,7 +730,7 @@ class DarwinExporter(object):
     def create_indexes(self):
         self.logger.info('creating indexes for HogLevel table')
         hogTab = self.h5.get_node('/HogLevel')
-        create_index_for_columns(hogTab, 'Fam', 'ID', 'Level')
+        create_index_for_columns(hogTab, 'Fam', 'ID', 'Level', 'NrMemberGenes', 'CompletenessScore', 'IsRoot')
         create_and_store_fast_famhoglevel_lookup(self.h5, hogTab, '/HogLevel_fam_lookup')
 
         orthoxmlTab = self.h5.get_node('/OrthoXML/Index')
@@ -1206,6 +1216,18 @@ class DarwinExporter(object):
         self._write_to_table(tab, hog2dom)
         tab.flush()  # Required?
 
+    def add_per_species_aux_groupdata(self):
+        self.logger.info("adding per species auxillary group/hog stats")
+        omagroup_aux_adder = PerGenomeOMAGroupAuxDataAdder(self.h5)
+        omagroup_aux_adder.load_data()
+        omagroup_aux_adder.write()
+        self.logger.info('  info for OMA Groups written')
+
+        hog_aux_adder = PerGenomeHOGAuxAdder(self.h5)
+        hog_aux_adder.load_data()
+        hog_aux_adder.write()
+        self.logger.info('  info for HOGs written')
+
 
 def download_url_if_not_present(url, force_copy=False):
     if url.startswith('file://') and not force_copy:
@@ -1522,7 +1544,19 @@ class GeneOntologyManager(object):
 
 class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
     def _annotateGroupR(self, node, og, idx=0):
-        if familyanalyzer.OrthoXMLQuery.is_geneRef_node(node):
+        is_geneRef = familyanalyzer.OrthoXMLQuery.is_geneRef_node(node)
+        is_og = self.parser.is_ortholog_group(node)
+        if is_og or is_geneRef:
+            if (self.parser.is_paralog_group(node.getparent()) or
+                    node.getparent().tag == "{{{ns0}}}groups".format(**self.parser.ns)):
+                # direct children of a paralogGroup. set IsRoot to true in most general TaxRange property tag
+                prop_tag = "{{{ns0}}}property".format(**self.parser.ns)
+                for child in node[::-1]:
+                    if child.tag == prop_tag and child.attrib['name'] == "TaxRange":
+                        child.attrib['IsRoot'] = str(True)
+                        break
+
+        if is_geneRef:
             node.set('og', og)
         else:
             super()._annotateGroupR(node, og, idx)
@@ -1555,9 +1589,10 @@ class HogConverter(object):
         for fam in p.getToplevelGroups():
             m = self.fam_re.match(fam.get('og'))
             fam_nr = int(m.group('fam_nr'))
-            levs.extend([(fam_nr, n.getparent().get('og'), n.get('value'),) + self.get_hog_scores(n.getparent())
-                         for n in p._findSubNodes('property', root=fam)
-                         if n.get('name') == "TaxRange"])
+            for taxnode in familyanalyzer.OrthoXMLQuery.getTaxRangeNodes(fam, recursively=True):
+                ognode = taxnode.getparent()
+                levs.append((fam_nr, ognode.get('og'), taxnode.get('value')) + self.get_hog_scores(ognode, taxnode) +
+                            (self.get_nr_member_genes(ognode), bool(taxnode.get('IsRoot', False))) )
 
         geneNodes = p.root.findall('.//{{{ns0}}}geneRef'.
                                    format(**familyanalyzer.OrthoXMLParser.ns))
@@ -1574,20 +1609,32 @@ class HogConverter(object):
         self.entry_tab.modify_column(0, len(self.entry_tab), 1, self.hogs[1:], 'OmaHOG')
         self.entry_tab.flush()
 
-    def get_hog_scores(self, og_node):
+    def get_hog_scores(self, og_node, tax_node):
         """extract the scores associated with an orthologGroup node
 
         only scores that are defined in HOGsTable are extract. The method
         returns a tuple with the scores in the order of the score fields."""
+        all_score_ids = ('CompletenessScore', 'ImpliedLosses')
+        parse_fun = {'CompletenessScore': float, "ImpliedLosses": int}
         scores = collections.OrderedDict([(score, tablefmt.HOGsTable.columns[score].dflt)
-                                          for score in ('CompletenessScore', 'ImpliedLosses')])
+                                          for score in all_score_ids])
         for score in og_node.iterfind('{*}score'):
             score_id = score.get("id")
-            if score_id == "CompletenessScore":
-                scores['CompletenessScore'] = float(score.get('value'))
-            elif score_id == "ImpliedLosses":
-                scores['ImpliedLosses'] = int(score.get('value'))
+            scores[score_id] = parse_fun[score_id](score.get('value'))
+        # might be overwritten in tax_node (more specific if available)
+        for score_id in all_score_ids:
+            val = tax_node.get(score_id)
+            if val is not None:
+                scores[score_id] = parse_fun[score_id](val)
         return tuple(scores.values())
+
+    def get_nr_member_genes(self, og_node):
+        for child in og_node:
+            if (child.tag == "{{{ns0}}}property".format(**familyanalyzer.OrthoXMLParser.ns) and
+                    child.get('name') == "NrMemberGenes"):
+                return int(child.get('value'))
+        common.package_logger.warning("couldn't find NrMemberGenes property. scanning xml file for geneRefs")
+        return len(familyanalyzer.OrthoXMLQuery.getGeneRefNodes(og_node))
 
 
 class XRefImporter(object):
@@ -1904,6 +1951,63 @@ class PfamDomainNameParser(CathDomainNameParser):
     source = b'Pfam'
 
 
+class PerGenomeOMAGroupAuxDataAdder(object):
+    node_postfix = "omagroup"
+
+    def __init__(self, h5:tables.File):
+        self.h5 = h5
+        self.shared_ogs = None
+        self.in_groups = None
+
+    def load_data(self):
+        gs = self.h5.get_node('/Genome').read()
+        Goff = gs['EntryOff']
+        etab = self.h5.get_node('/Protein/Entries')
+        shared_ogs = numpy.zeros((len(gs), len(gs)), dtype='i4')
+        in_groups = numpy.zeros(len(gs), dtype='i4')
+
+        def enr_to_gnr(entry_nr):
+            return Goff.searchsorted(entry_nr, side='left') - 1
+
+        grp_members = self.get_group_members(etab)
+        for grp, memb in grp_members.items():
+            gnrs = list(map(enr_to_gnr, memb))
+            in_groups[gnrs] += 1
+            for g1, g2 in itertools.combinations(gnrs, 2):
+                shared_ogs[g1, g2] += 1
+                shared_ogs[g2, g1] += 1
+        self.shared_ogs = shared_ogs
+        self.in_groups = in_groups
+
+    def write(self, node=None):
+        root = '/Summary' if node is None else node
+        for label, data in (("shared_", self.shared_ogs), ("prots_in_", self.in_groups)):
+            node_full_name = label + self.node_postfix
+            try:
+                self.h5.remove_node(root, node_full_name)
+            except tables.NoSuchNodeError:
+                pass
+            self.h5.create_array(root, node_full_name, obj=data)
+
+    def get_group_members(self, etab):
+        grp_members = collections.defaultdict(list)
+        for row in etab.where('OmaGroup > 0'):
+            grp_members[row['OmaGroup']].append(row['EntryNr'])
+        return grp_members
+
+
+class PerGenomeHOGAuxAdder(PerGenomeOMAGroupAuxDataAdder):
+    node_postfix = "hog"
+
+    def get_group_members(self, etab):
+        grp_members = collections.defaultdict(list)
+        fam_re = re.compile(rb'HOG:(?P<fam_nr>\d+)')
+        for row in etab.where('OmaHOG != b""'):
+            fam = int(fam_re.match(row['OmaHOG']).group('fam_nr'))
+            grp_members[fam].append(row['EntryNr'])
+        return grp_members
+
+
 class InvarianceException(Exception):
     pass
 
@@ -2011,7 +2115,7 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level='INFO'
     x.create_indexes()
     x.add_sequence_suffix_array(k=k, fn=idx_name)
     x.update_summary_stats()
-
+    x.add_per_species_aux_groupdata()
     genomes_json_fname = os.path.normpath(os.path.join(
         os.path.dirname(x.h5.filename), '..', 'downloads', 'genomes.json'))
     augment_genomes_json_download_file(genomes_json_fname, x.h5)

@@ -8,6 +8,8 @@
 *.pyo
 *.egg-info
 /build
+/.tox/
+/.python-version
 /dist
 /.idea/*
 .DS_Store

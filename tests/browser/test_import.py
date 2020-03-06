@@ -2,6 +2,7 @@ from __future__ import absolute_import, print_function, division
 
 import csv
 import gzip
+import io
 import json
 import os
 import shutil
@@ -254,9 +255,12 @@ class HogConverterTest(unittest.TestCase):
     def test_extract_levels(self):
         conv = HogConverter(self.h5.root.Entries)
         levels = conv.convert_file(self.orthoxml_file)
-        self.assertEqual(3, len(levels))
+        self.assertEqual(9, len(levels))
         self.assertEqual(len(tables.dtype_from_descr(tablefmt.HOGsTable)),
                          len(levels[0]))
         mammalia = next((x for x in levels if x[2] == 'Mammalia'), None)
-        self.assertLess(mammalia[3], 0)
-        self.assertEqual(mammalia[4], 1)
+        self.assertAlmostEqual(1, mammalia[3], msg="CompletenessScore not what is expected")
+        self.assertEqual(1, mammalia[4], "ImpliedLosses was not read from input xml")
+        rodents = [x for x in levels if x[2] == "Rodents"]
+        self.assertEqual(2, len(rodents), "expect 2 subhogs at level of Rodents")
+        self.assertEqual([1, 0.5], [z[3] for z in rodents], "CompletenessScore does not match")

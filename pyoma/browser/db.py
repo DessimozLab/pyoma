@@ -471,7 +471,9 @@ class Database(object):
                 sortidx = lineage.searchsorted(cand_levels['Level'], sorter=lineage_sorter)
                 lin_idx = numpy.take(lineage_sorter, sortidx, mode='clip')
                 mask = lineage[lin_idx] == cand_levels['Level']
-                return lineage[lin_idx[mask].min()]
+                # we take the first diverged lineage, meaning the duplication happened
+                # on the branch to that level.
+                return lineage[lin_idx[mask].min()-1]
             return None
 
         idx = list(is_paralogous(entry, hog_member[i]) for i in range(len(hog_member)))

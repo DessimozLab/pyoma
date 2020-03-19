@@ -217,6 +217,19 @@ class DatabaseTests(unittest.TestCase):
         for enr in nrs:
             self.assertIn(4575, self.db.get_gene_ontology_annotations(enr)['TermNr'])
 
+    def test_induced_pairwise_orthologs(self):
+        query = "YEAST12"
+        query_entry = self.db.ensure_entry(self.db.id_resolver.resolve(query))
+        orthologs = self.db.get_hog_induced_pairwise_orthologs(query_entry)
+        self.assertEqual(3, len(orthologs))
+
+    def test_induced_pairwise_paralogs(self):
+        query = "YEAST12"
+        query_entry = self.db.ensure_entry(self.db.id_resolver.resolve(query))
+        orthologs = self.db.get_hog_induced_pairwise_paralogs(query_entry)
+        self.assertEqual(1, len(orthologs))
+        self.assertEqual(b"Saccharomyces cerevisiae (strain ATCC 204508 / S288c)", orthologs['DivergenceLevel'])
+
 
 class XRefDatabaseMock(Database):
     def __init__(self):
@@ -399,7 +412,7 @@ class DBMock(object):
         return self.h5
 
 
-class GenomeIdResolverTest(unittest.TestCase):
+class MockDBTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         path = find_path_to_test_db('TestDb.h5')
@@ -409,6 +422,8 @@ class GenomeIdResolverTest(unittest.TestCase):
     def tearDownClass(cls):
         cls.db.get_hdf5_handle().close()
 
+
+class GenomeIdResolverTest(MockDBTestCase):
     def setUp(self):
         self.OmaIdMapper = OmaIdMapper(self.db)
 
@@ -437,3 +452,11 @@ class GenomeIdResolverTest(unittest.TestCase):
         expect = 'YEAST'
         cands = self.OmaIdMapper.approx_search_genomes(query)
         self.assertIn(expect, [g.uniprot_species_code for g in cands])
+
+
+class TestPerGenomeMetaData(MockDBTestCase):
+    def setUp(self) -> None:
+        self.pg = PerGenomeMetaData(self.db, 'YEAST')
+
+    def test_in_oma_groups_matches(self):
+        pass

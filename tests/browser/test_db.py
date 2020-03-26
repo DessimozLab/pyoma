@@ -218,10 +218,11 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn(4575, self.db.get_gene_ontology_annotations(enr)['TermNr'])
 
     def test_induced_pairwise_orthologs(self):
-        query = "YEAST12"
+        query = "YEAST3523"
         query_entry = self.db.ensure_entry(self.db.id_resolver.resolve(query))
         orthologs = self.db.get_hog_induced_pairwise_orthologs(query_entry)
         self.assertEqual(3, len(orthologs))
+        self.assertCountEqual([b"1:1", b"1:1", b"m:1"], orthologs['RelType'])
 
     def test_induced_pairwise_paralogs(self):
         query = "YEAST12"

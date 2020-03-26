@@ -407,6 +407,7 @@ class Database(object):
 
         :param entry: entry or entry_nr of the query protein"""
         entry = self.ensure_entry(entry)
+        genome_entry_range = self.id_mapper['OMA'].genome_range(entry['EntryNr'])
 
         def is_orthologous(a, b):
             """genes are orthologs if their HOG id have a common prefix that is
@@ -418,7 +419,9 @@ class Database(object):
             prefix = os.path.commonprefix((a['OmaHOG'], b['OmaHOG'])).decode()
             if '.' in prefix and prefix[-1].isdigit():
                 return False
-            return True
+            # count number of genes in query genome that are co-orthologs (== having the prefix)
+            cnts = numpy.char.startswith(hogids_of_genes_in_query_genome, prefix.encode('utf-8')).sum()
+            return cnts
 
         try:
             fam = self.hog_family(entry)
@@ -426,9 +429,20 @@ class Database(object):
         except Singleton:
             # an empty fetch
             hog_member = self.db.root.Protein.Entries[0:0]
-        idx = numpy.array(list(i for i in range(len(hog_member)) if is_orthologous(entry, hog_member[i])),
-                          dtype=numpy.int)
-        induced_orthologs = hog_member[idx]
+        hogids_of_genes_in_query_genome = hog_member[
+            numpy.where((hog_member['EntryNr'] >= genome_entry_range[0]) &
+                        (hog_member['EntryNr'] < genome_entry_range[1]))]['OmaHOG']
+        query_genome_genes_cnt = numpy.array([is_orthologous(entry, hog_member[i]) for i in range(len(hog_member))],
+                                             dtype='i4')
+        mask = numpy.asarray(query_genome_genes_cnt, numpy.bool)
+        target_genomes = [self.id_mapper['OMA'].genome_of_entry_nr(o['EntryNr'])['NCBITaxonId'] for o in hog_member[mask]]
+        targ_genome_genes_cnt = collections.Counter(target_genomes)
+        induced_orthologs = numpy.lib.recfunctions.append_fields(
+            hog_member[mask],
+            names="RelType",
+            data=["{}:{}".format('m' if cnt_a > 1 else 1,
+                                 'n' if targ_genome_genes_cnt[b] > 1 else 1).encode('utf-8')
+                  for cnt_a, b in zip(query_genome_genes_cnt[mask], target_genomes)])
         return induced_orthologs
 
     def get_hog_induced_pairwise_paralogs(self, entry):

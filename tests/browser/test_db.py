@@ -457,7 +457,7 @@ class GenomeIdResolverTest(MockDBTestCase):
 
 class TestPerGenomeMetaData(MockDBTestCase):
     def setUp(self) -> None:
-        self.pg = PerGenomeMetaData(self.db, 'YEAST')
+        self.pg = PerGenomeMetaData(self.db.get_hdf5_handle(), 'YEAST')
 
     def test_in_oma_groups_matches(self):
         pass

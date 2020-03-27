@@ -198,8 +198,8 @@ class ProteinEntry(object):
 
     @property
     def is_main_isoform(self):
-        return (self._entry['AltSpliceVariant'] == 0 or
-                self._entry['AltSpliceVariant'] == self._entry['EntryNr'])
+        return bool(self._entry['AltSpliceVariant'] == 0 or
+                    self._entry['AltSpliceVariant'] == self._entry['EntryNr'])
 
     @LazyProperty
     def alternative_isoforms(self):

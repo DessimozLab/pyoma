@@ -472,10 +472,26 @@ class ExonStructure(object):
         else:
             return "n/a"
 
+    def as_list_of_dict(self):
+        return [{'start': e.start, 'end': e.end, 'strand': e.strand}
+                for e in self._iter_exons()]
+
 
 class Exon(object):
     def __init__(self, exon):
         self.exon = exon
+
+    @property
+    def start(self):
+        return int(self.exon['Start'])
+
+    @property
+    def end(self):
+        return int(self.exon['End'])
+
+    @property
+    def strand(self):
+        return '+' if self.exon['Strand'] > 0 else '-'
 
     def __str__(self):
         if self.exon['Strand'] < 0:

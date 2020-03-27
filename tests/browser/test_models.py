@@ -72,6 +72,12 @@ class ExonStructureTest(unittest.TestCase):
         ex = models.ExonStructure(None, self.get_exons())
         self.assertEqual("join(500..510, 600..610)", str(ex))
 
+    def test_json_repr(self):
+        ex = models.ExonStructure(None, self.get_exons())
+        self.assertEqual([{'start': 500, 'end': 510, 'strand': '+'},
+                          {'start': 600, 'end': 610, 'strand': '+'}],
+                         ex.as_list_of_dict())
+
     def test_str_repr_if_reverse_complement(self):
         ex_dat = self.get_exons()
         ex_dat['Strand'] = -1

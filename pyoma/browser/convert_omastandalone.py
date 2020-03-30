@@ -7,17 +7,19 @@ class StandaloneExporter(DarwinExporter):
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
 
     def __init__(self, root, name, **kwargs):
-        os.environ['DARWIN_BROWSERDATA_PATH'] = os.path.abspath(root)
+        os.environ["DARWIN_BROWSERDATA_PATH"] = os.path.abspath(root)
         super(StandaloneExporter, self).__init__(name, **kwargs)
         self.transformed = False
-        self.cache_dir = os.path.join(os.getenv('DARWIN_BROWSERDATA_PATH'), 'pyoma')
+        self.cache_dir = os.path.join(os.getenv("DARWIN_BROWSERDATA_PATH"), "pyoma")
 
     def add_homologs(self):
         self.assert_cached_results()
         for gs in self.h5.root.Genome.iterrows():
-            genome = gs['UniProtSpeciesCode'].decode()
-            rel_node_for_genome = self._get_or_create_node('/PairwiseRelation/{}'.format(genome))
-            if 'homologs' not in rel_node_for_genome:
+            genome = gs["UniProtSpeciesCode"].decode()
+            rel_node_for_genome = self._get_or_create_node(
+                "/PairwiseRelation/{}".format(genome)
+            )
+            if "homologs" not in rel_node_for_genome:
                 pass
 
     def get_version(self):
@@ -26,65 +28,100 @@ class StandaloneExporter(DarwinExporter):
 
     def assert_cached_results(self):
         if not self.transformed:
-            res = self.call_darwin_export("TransformDataToCache('{}');".format(
-                    self.cache_dir))
-            if res != 'success':
-                raise DarwinException('could not transform data from darwin')
+            res = self.call_darwin_export(
+                "TransformDataToCache('{}');".format(self.cache_dir)
+            )
+            if res != "success":
+                raise DarwinException("could not transform data from darwin")
             self.transformed = True
-            os.environ['DARWIN_NETWORK_SCRATCH_PATH'] = os.getenv('DARWIN_BROWSERDATA_PATH')
+            os.environ["DARWIN_NETWORK_SCRATCH_PATH"] = os.getenv(
+                "DARWIN_BROWSERDATA_PATH"
+            )
 
     def add_orthologs(self):
         self.assert_cached_results()
         for gs in self.h5.root.Genome.iterrows():
-            genome = gs['UniProtSpeciesCode'].decode()
-            rel_node_for_genome = self._get_or_create_node('/PairwiseRelation/{}'.format(genome))
-            if 'VPairs' not in rel_node_for_genome:
+            genome = gs["UniProtSpeciesCode"].decode()
+            rel_node_for_genome = self._get_or_create_node(
+                "/PairwiseRelation/{}".format(genome)
+            )
+            if "VPairs" not in rel_node_for_genome:
                 cache_file = os.path.join(
-                    os.getenv('DARWIN_NETWORK_SCRATCH_PATH', ''),
-                    'pyoma', 'vps', '{}.txt.gz'.format(genome))
+                    os.getenv("DARWIN_NETWORK_SCRATCH_PATH", ""),
+                    "pyoma",
+                    "vps",
+                    "{}.txt.gz".format(genome),
+                )
                 if os.path.exists(cache_file):
                     data = load_tsv_to_numpy((cache_file, 0, 0, False,))
                 else:
                     # fallback to read from VPsDB
-                    data = self.call_darwin_export('GetVPsForGenome({})'.format(genome))
+                    data = self.call_darwin_export("GetVPsForGenome({})".format(genome))
 
-                vp_tab = self.h5.create_table(rel_node_for_genome, 'VPairs', tablefmt.PairwiseRelationTable,
-                                              expectedrows=len(data))
+                vp_tab = self.h5.create_table(
+                    rel_node_for_genome,
+                    "VPairs",
+                    tablefmt.PairwiseRelationTable,
+                    expectedrows=len(data),
+                )
                 if isinstance(data, list):
                     data = self._convert_to_numpyarray(data, vp_tab)
                 self._write_to_table(vp_tab, data)
                 vp_tab.cols.EntryNr1.create_csindex()
 
     def add_hogs(self, **kwargs):
-        hog_path = os.path.join(
-            os.environ['DARWIN_BROWSERDATA_PATH'], 'Output')
+        hog_path = os.path.join(os.environ["DARWIN_BROWSERDATA_PATH"], "Output")
 
-        entryTab = self.h5.get_node('/Protein/Entries')
+        entryTab = self.h5.get_node("/Protein/Entries")
 
         hog_converter = HogConverter(entryTab)
-        for tree_file in ('ManualSpeciesTree.nwk', 'EstimatedSpeciesTree.nwk', 'LineageSpeciesTree.nwk'):
-            tree_filename = os.path.join(os.environ['DARWIN_BROWSERDATA_PATH'], tree_file)
+        for tree_file in (
+            "ManualSpeciesTree.nwk",
+            "EstimatedSpeciesTree.nwk",
+            "LineageSpeciesTree.nwk",
+        ):
+            tree_filename = os.path.join(
+                os.environ["DARWIN_BROWSERDATA_PATH"], tree_file
+            )
             if os.path.exists(tree_filename):
-                self.logger.info('Use '+tree_filename+' as HOG backbone tree file')
+                self.logger.info("Use " + tree_filename + " as HOG backbone tree file")
                 break
 
         if os.path.exists(tree_filename):
             hog_converter.attach_newick_taxonomy(tree_filename)
 
-        fn = 'HierarchicalGroups.orthoxml'
+        fn = "HierarchicalGroups.orthoxml"
 
         # Split the OrthoXML up (puts in cache_dir/split_hog).
-        hog_cache_dir = os.path.join(self.cache_dir, 'split_hogs')
-        ortho_splitter = OrthoXMLSplitter.OrthoXMLSplitter(os.path.join(hog_path, fn), cache_dir=hog_cache_dir)
+        hog_cache_dir = os.path.join(self.cache_dir, "split_hogs")
+        ortho_splitter = OrthoXMLSplitter.OrthoXMLSplitter(
+            os.path.join(hog_path, fn), cache_dir=hog_cache_dir
+        )
         ortho_splitter()
 
-        hogTab = self.h5.create_table('/', 'HogLevel', tablefmt.HOGsTable,
-                                      'nesting structure for each HOG', expectedrows=1e8)
-        self.orthoxml_buffer = self.h5.create_earray('/OrthoXML', 'Buffer',
-                                                     tables.StringAtom(1), (0,), 'concatenated orthoxml files',
-                                                     expectedrows=1e9, createparents=True)
-        self.orthoxml_index = self.h5.create_table('/OrthoXML', 'Index', tablefmt.OrthoXmlHogTable,
-                                                   'Range index per HOG into OrthoXML Buffer', expectedrows=5e6)
+        hogTab = self.h5.create_table(
+            "/",
+            "HogLevel",
+            tablefmt.HOGsTable,
+            "nesting structure for each HOG",
+            expectedrows=1e8,
+        )
+        self.orthoxml_buffer = self.h5.create_earray(
+            "/OrthoXML",
+            "Buffer",
+            tables.StringAtom(1),
+            (0,),
+            "concatenated orthoxml files",
+            expectedrows=1e9,
+            createparents=True,
+        )
+        self.orthoxml_index = self.h5.create_table(
+            "/OrthoXML",
+            "Index",
+            tablefmt.OrthoXmlHogTable,
+            "Range index per HOG into OrthoXML Buffer",
+            expectedrows=5e6,
+        )
 
         try:
             levels = hog_converter.convert_file(os.path.join(hog_path, fn))
@@ -94,21 +131,21 @@ class StandaloneExporter(DarwinExporter):
                 hog_fn = "HOG{:06d}.orthoxml".format(fam_nr)
                 self.add_orthoxml(os.path.join(hog_cache_dir, hog_fn), [fam_nr])
         except Exception as e:
-            self.logger.error('an error occured while processing ' + fn + ':')
+            self.logger.error("an error occured while processing " + fn + ":")
             self.logger.exception(e)
 
         hog_converter.write_hogs()
 
     def _get_genome_database_paths(self):
-        return self.call_darwin_export('GetGenomeFileNames();')
+        return self.call_darwin_export("GetGenomeFileNames();")
 
     def xref_databases(self):
         return self._get_genome_database_paths()
 
 
-def import_oma_run(path, outfile, domains=None, log_level='INFO'):
+def import_oma_run(path, outfile, domains=None, log_level="INFO"):
     log = getLogger(log_level)
-    x = StandaloneExporter(path, outfile, logger=log, mode='write')
+    x = StandaloneExporter(path, outfile, logger=log, mode="write")
     x.add_version()
     x.add_species_data()
     x.add_orthologs()
@@ -118,15 +155,28 @@ def import_oma_run(path, outfile, domains=None, log_level='INFO'):
     if domains is None:
         domains = ["file://dev/null"]
     else:
-        domains = list(map(lambda url: 'file://'+url if url.startswith('/') else url, domains))
-    log.info('loading domain annotations from {}'.format(domains))
-    x.add_domain_info(filter_duplicated_domains(only_pfam_or_cath_domains(
-        itertools.chain.from_iterable(map(iter_domains, domains))
-        )))
-    x.add_domainname_info(itertools.chain(
-        CathDomainNameParser('http://download.cathdb.info/cath/releases/latest-release/'
-                             'cath-classification-data/cath-names.txt').parse(),
-        PfamDomainNameParser('ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz').parse()))
+        domains = list(
+            map(lambda url: "file://" + url if url.startswith("/") else url, domains)
+        )
+    log.info("loading domain annotations from {}".format(domains))
+    x.add_domain_info(
+        filter_duplicated_domains(
+            only_pfam_or_cath_domains(
+                itertools.chain.from_iterable(map(iter_domains, domains))
+            )
+        )
+    )
+    x.add_domainname_info(
+        itertools.chain(
+            CathDomainNameParser(
+                "http://download.cathdb.info/cath/releases/latest-release/"
+                "cath-classification-data/cath-names.txt"
+            ).parse(),
+            PfamDomainNameParser(
+                "ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz"
+            ).parse(),
+        )
+    )
     x.add_canonical_id()
     x.add_group_metadata()
     x.add_hog_domain_prevalence()
@@ -140,4 +190,4 @@ def import_oma_run(path, outfile, domains=None, log_level='INFO'):
 
 
 if __name__ == "__main__":
-    import_oma_run('~/Repositories/OmaStandalone', 'oma.h5')
+    import_oma_run("~/Repositories/OmaStandalone", "oma.h5")

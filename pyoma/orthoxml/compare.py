@@ -2,6 +2,7 @@ from xml.etree.ElementTree import XMLParser
 from datasketch import MinHash, MinHashLSH
 import gzip
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -11,7 +12,7 @@ class Comparer(object):
 
 
 class GeneMapper(object):
-    attr = 'protId'
+    attr = "protId"
 
     def map(self, attributes):
         return attributes[self.attr]
@@ -26,7 +27,7 @@ class FilteredSpeciesGeneMapper(GeneMapper):
         self.prefix_len = len(skip_prefixes[0])
 
     def map(self, attributes):
-        if attributes[self.attr][:self.prefix_len] in self.skip_prefixes:
+        if attributes[self.attr][: self.prefix_len] in self.skip_prefixes:
             return None
         else:
             return attributes[self.attrib]
@@ -44,19 +45,22 @@ class ToplevelOrthoXMLParser(object):
 
     def start(self, tag, attrib):
         if tag == "{http://orthoXML.org/2011/}gene":
-            self.genes[int(attrib['id'])] = self.gene_mapper.map(attrib)
+            self.genes[int(attrib["id"])] = self.gene_mapper.map(attrib)
         elif tag == "{http://orthoXML.org/2011/}geneRef":
-            gene_id = int(attrib['id'])
+            gene_id = int(attrib["id"])
             gene = self.genes[gene_id]
             if gene is not None:
                 self.cur_hog_memb.append(gene)
         elif tag == "{http://orthoXML.org/2011/}orthologGroup":
             if self.cur_hog_depth == 0:
-                self.cur_hog_id = int(attrib['id'])
+                self.cur_hog_id = int(attrib["id"])
             self.cur_hog_depth += 1
-        elif tag == "{http://orthoXML.org/2011/}property" and attrib['name'] == 'TaxRange':
+        elif (
+            tag == "{http://orthoXML.org/2011/}property"
+            and attrib["name"] == "TaxRange"
+        ):
             if self.cur_hog_depth == 1:
-                self.levels[self.cur_hog_id] = attrib['value']
+                self.levels[self.cur_hog_id] = attrib["value"]
 
     def end(self, tag):
         if tag == "{http://orthoXML.org/2011/}orthologGroup":
@@ -79,7 +83,7 @@ class Analysis(object):
 
 
 def load_toplevel_hogs(fpath, species_to_skip=None):
-    open_ = gzip.open if fpath.endswith('.gz') else open
+    open_ = gzip.open if fpath.endswith(".gz") else open
     with open_(fpath) as fh:
         if species_to_skip is None:
             gene_mapper = GeneMapper()

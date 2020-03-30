@@ -1,4 +1,5 @@
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -8,22 +9,26 @@ class HogLevelFilter(object):
     This class allows to identify  at a given level or - if a hog
     does not go deep enough to cover the desired level, the whole hog will be returned.
     """
+
     def __init__(self, db, level):
         self.db = db
         self.level = level
         tax_below_level = self.db.tax.get_subtaxonomy_rooted_at(level)
-        self.sub_level_distances = self._build_distance_to_query_level_lookup(tax_below_level)
+        self.sub_level_distances = self._build_distance_to_query_level_lookup(
+            tax_below_level
+        )
 
     def _build_distance_to_query_level_lookup(self, tax):
         nodes = {}
 
         def traverse(node, dist=0):
-            nodes[node['name'].encode('utf-8')] = dist
+            nodes[node["name"].encode("utf-8")] = dist
             try:
-                for c in node['children']:
+                for c in node["children"]:
                     traverse(c, dist + 1)
             except KeyError:
                 pass
+
         traverse(tax.as_dict())
         return nodes
 
@@ -38,7 +43,7 @@ class HogLevelFilter(object):
                     min_dist = self.sub_level_distances[lev]
             except KeyError:
                 pass
-        logger.debug('closest level {} at {}'.format(closest, min_dist))
+        logger.debug("closest level {} at {}".format(closest, min_dist))
         return closest
 
     def analyse_families(self, it):

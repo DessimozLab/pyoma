@@ -15,7 +15,7 @@ class ProteinEntryTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        fn = find_path_to_test_db('TestDb.h5')
+        fn = find_path_to_test_db("TestDb.h5")
         cls.db = db.Database(fn)
 
     @classmethod
@@ -28,20 +28,22 @@ class ProteinEntryTests(unittest.TestCase):
         try:
             protein_entry.canonicalid
         except AttributeError:
-            self.assertTrue(False, 'entry not properly loaded')
+            self.assertTrue(False, "entry not properly loaded")
 
     def test_lazy_eval_of_properties(self):
         protein_entry = models.ProteinEntry.from_entry_nr(self.db, 12)
-        self.assertNotIn('sequence', protein_entry.__dict__)
+        self.assertNotIn("sequence", protein_entry.__dict__)
         seq = protein_entry.sequence
-        self.assertIn('sequence', protein_entry.__dict__)
+        self.assertIn("sequence", protein_entry.__dict__)
 
     def test_repr_of_ProteinEntry(self):
         protein_entry = models.ProteinEntry.from_entry_nr(self.db, 12)
         if sys.version_info[0] >= 3 and sys.version_info[1] > 2:
             self.assertRegex("{!r}".format(protein_entry), r"<ProteinEntry\(12,.*\)")
         else:
-            self.assertRegexpMatches("{!r}".format(protein_entry), r"<ProteinEntry\(12,.*\)")
+            self.assertRegexpMatches(
+                "{!r}".format(protein_entry), r"<ProteinEntry\(12,.*\)"
+            )
 
     def test_len_of_entry(self):
         protein_entry = models.ProteinEntry.from_entry_nr(self.db, 12)
@@ -61,8 +63,7 @@ class ProteinEntryTests(unittest.TestCase):
 class ExonStructureTest(unittest.TestCase):
     def get_exons(self):
         loc_dtype = tablefmt.tables.dtype_from_descr(tablefmt.LocusTable)
-        return numpy.array([(1, 500, 510, 1), (1, 600, 610, 1)],
-                           dtype=loc_dtype)
+        return numpy.array([(1, 500, 510, 1), (1, 600, 610, 1)], dtype=loc_dtype)
 
     def test_exon_struct_len(self):
         ex = models.ExonStructure(None, self.get_exons())
@@ -74,13 +75,17 @@ class ExonStructureTest(unittest.TestCase):
 
     def test_json_repr(self):
         ex = models.ExonStructure(None, self.get_exons())
-        self.assertEqual([{'start': 500, 'end': 510, 'strand': '+'},
-                          {'start': 600, 'end': 610, 'strand': '+'}],
-                         ex.as_list_of_dict())
+        self.assertEqual(
+            [
+                {"start": 500, "end": 510, "strand": "+"},
+                {"start": 600, "end": 610, "strand": "+"},
+            ],
+            ex.as_list_of_dict(),
+        )
 
     def test_str_repr_if_reverse_complement(self):
         ex_dat = self.get_exons()
-        ex_dat['Strand'] = -1
+        ex_dat["Strand"] = -1
         ex = models.ExonStructure(None, ex_dat)
         self.assertEqual("join(complement(600..610), complement(500..510))", str(ex))
 
@@ -90,7 +95,7 @@ class GeneOntologyAnnotationTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        fn = find_path_to_test_db('TestDb.h5')
+        fn = find_path_to_test_db("TestDb.h5")
         cls.db = db.Database(fn)
 
     @classmethod
@@ -101,11 +106,13 @@ class GeneOntologyAnnotationTests(unittest.TestCase):
         annos = self.db.get_gene_ontology_annotations(12)
         goa = models.GeneOntologyAnnotation(self.db, annos[0])
         self.assertEqual(12, goa.entry_nr)
-        self.assertIn(goa.aspect, ['molecular_function', 'biological_process','cellular_component'])
+        self.assertIn(
+            goa.aspect,
+            ["molecular_function", "biological_process", "cellular_component"],
+        )
 
 
 class SingletonTests(unittest.TestCase):
-
     def test_singleton(self):
         class Foo(with_metaclass(models.Singleton, object)):
             def __init__(self):

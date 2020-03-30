@@ -3,6 +3,7 @@ from builtins import chr, bytes, str
 import random
 import types
 import unittest
+
 try:
     import unittest.mock as mock
 except ImportError:
@@ -19,8 +20,8 @@ from Bio.Alphabet import IUPAC
 class TestHelperFunctions(unittest.TestCase):
     def test_counter(self):
         self.assertEqual(0, count_elements([]))
-        self.assertEqual(3, count_elements('abc'))
-        recarray = numpy.zeros(2, dtype=[('A', 'i4'),('B', 'f8')])
+        self.assertEqual(3, count_elements("abc"))
+        recarray = numpy.zeros(2, dtype=[("A", "i4"), ("B", "f8")])
         self.assertEqual(2, count_elements(recarray))
 
 
@@ -38,7 +39,7 @@ def find_path_to_test_db(dbfn="TestDb.h5"):
     if os.path.isfile(path2):
         return path2
     else:
-        raise IOError('cannot access {}. (Tried {} and {})'.format(dbfn, path1, path2))
+        raise IOError("cannot access {}. (Tried {} and {})".format(dbfn, path1, path2))
 
 
 class DatabaseTests(unittest.TestCase):
@@ -46,7 +47,7 @@ class DatabaseTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        path = find_path_to_test_db('TestDb.h5')
+        path = find_path_to_test_db("TestDb.h5")
         logger.info("Loading {} for DatabaseTests".format(path))
         cls.db = Database(path)
 
@@ -55,39 +56,42 @@ class DatabaseTests(unittest.TestCase):
         cls.db.get_hdf5_handle().close()
 
     def test_get_vpairs_of_entry_with_orthologs(self):
-        for entry_nr, exp_vps_cnt in [(12, 3), (1, 0), (4,1)]:
+        for entry_nr, exp_vps_cnt in [(12, 3), (1, 0), (4, 1)]:
             vps = self.db.get_vpairs(entry_nr)
             self.assertTrue(isinstance(vps, numpy.ndarray))
             self.assertEqual(exp_vps_cnt, len(vps))
-            self.assertEqual(sorted(['EntryNr1', 'EntryNr2', 'RelType', 'Distance', 'Score']),
-                             sorted(vps.dtype.fields.keys()))
+            self.assertEqual(
+                sorted(["EntryNr1", "EntryNr2", "RelType", "Distance", "Score"]),
+                sorted(vps.dtype.fields.keys()),
+            )
 
     def test_neighborhood_close_to_boundary(self):
         query, window = 3, 7
         neighbors, idx = self.db.neighbour_genes(query, window)
         self.assertEqual(query - 1, idx)
-        self.assertEqual(neighbors['EntryNr'][idx], query)
-        expected_entry_nrs = numpy.arange(1, query + window + 1, dtype='i4')
-        self.assertTrue(numpy.array_equal(expected_entry_nrs,
-                                          neighbors['EntryNr']))
+        self.assertEqual(neighbors["EntryNr"][idx], query)
+        expected_entry_nrs = numpy.arange(1, query + window + 1, dtype="i4")
+        self.assertTrue(numpy.array_equal(expected_entry_nrs, neighbors["EntryNr"]))
 
     def test_hog_family(self):
         entry = numpy.zeros(1, dtype=tables.dtype_from_descr(tablefmt.ProteinTable))
-        entry['OmaHOG'] = b""
+        entry["OmaHOG"] = b""
         with self.assertRaises(Singleton):
             self.db.hog_family(entry[0])
-        entry['OmaHOG'] = b"HOG:0000523"
+        entry["OmaHOG"] = b"HOG:0000523"
         self.assertEqual(523, self.db.hog_family(entry[0]))
 
     def test_orthoxml(self):
         xml = self.db.get_orthoxml(33).decode()
         # we simply check that orthoxml starts with <?xml and ends with an orthoxml tag
-        self.assertTrue(xml.startswith('<?xml '))
-        self.assertTrue(xml.endswith('</orthoXML>\n'))
+        self.assertTrue(xml.startswith("<?xml "))
+        self.assertTrue(xml.endswith("</orthoXML>\n"))
 
     def test_hog_lex_range(self):
-        cases = [(b'HOG:001', (b'HOG:001', b'HOG:002')),
-                 (b'HOG:001.1a.2b', (b'HOG:001.1a.2b', b'HOG:001.1a.2c'))]
+        cases = [
+            (b"HOG:001", (b"HOG:001", b"HOG:002")),
+            (b"HOG:001.1a.2b", (b"HOG:001.1a.2b", b"HOG:001.1a.2c")),
+        ]
         for hog, rng in cases:
             self.assertEqual(rng, self.db._hog_lex_range(hog))
 
@@ -96,7 +100,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(2, len(memb))
 
     def test_hog_members(self):
-        cases = [('Eukaryota', 5), ('Fungi', 3), ('Taphrinomycotina',0)]
+        cases = [("Eukaryota", 5), ("Fungi", 3), ("Taphrinomycotina", 0)]
         for level, exp_member_cnt in cases:
             if exp_member_cnt == 0:
                 with self.assertRaises(ValueError):
@@ -105,56 +109,80 @@ class DatabaseTests(unittest.TestCase):
                 self.assertEqual(len(self.db.hog_members(12, level)), exp_member_cnt)
 
     def test_hogids_at_level(self):
-        cases = [[(2, 'Ascomycota'), numpy.array([b'HOG:0000002'])],
-                 [(2, 'Saccharomyces cerevisiae (strain ATCC 204508 / S288c)'),
-                  numpy.array([b'HOG:0000002.2a', b'HOG:0000002.2b'])]]
+        cases = [
+            [(2, "Ascomycota"), numpy.array([b"HOG:0000002"])],
+            [
+                (2, "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"),
+                numpy.array([b"HOG:0000002.2a", b"HOG:0000002.2b"]),
+            ],
+        ]
 
         for case in cases:
             args, expected = case
             levels = self.db.get_subhogids_at_level(*args)
-            self.assertTrue(numpy.array_equal(expected, levels),
-                            'test of tes_hogids_at_level failed for {}: {}'.format(args, levels))
+            self.assertTrue(
+                numpy.array_equal(expected, levels),
+                "test of tes_hogids_at_level failed for {}: {}".format(args, levels),
+            )
 
     def test_member_of_hog_id(self):
-        cases = [[('HOG:0000082.1b', None), 2],
-                 [('HOG:0000082.1b', 'Saccharomycetaceae'), 2],
-                 [('HOG:0000082.1b', 'Saccharomyces cerevisiae (strain ATCC 204508 / S288c)'), 1],
-                 [('HOG:0000082.1a', 'Mammalia'), 0]]
+        cases = [
+            [("HOG:0000082.1b", None), 2],
+            [("HOG:0000082.1b", "Saccharomycetaceae"), 2],
+            [
+                (
+                    "HOG:0000082.1b",
+                    "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)",
+                ),
+                1,
+            ],
+            [("HOG:0000082.1a", "Mammalia"), 0],
+        ]
         for args, expected_len in cases:
             members = self.db.member_of_hog_id(*args)
             self.assertEqual(len(members), expected_len)
 
     def test_sorted_genomes(self):
-        for root in ('YEAST', 'ASHGO'):
-            order = self.db.id_mapper['OMA'].species_ordering(root)
-            self.assertEqual(order[root], 0, '{} should be first genome, but comes at {}'.format(root, order[root]))
+        for root in ("YEAST", "ASHGO"):
+            order = self.db.id_mapper["OMA"].species_ordering(root)
+            self.assertEqual(
+                order[root],
+                0,
+                "{} should be first genome, but comes at {}".format(root, order[root]),
+            )
 
     def test_main_isoform_from_species_id(self):
-        query = 'PLAF7'
-        rng = self.db.id_mapper['OMA'].genome_range(query)
+        query = "PLAF7"
+        rng = self.db.id_mapper["OMA"].genome_range(query)
         mains = self.db.main_isoforms(query)
-        self.assertGreaterEqual(rng[1]-rng[0]+1, len(mains))
+        self.assertGreaterEqual(rng[1] - rng[0] + 1, len(mains))
 
     def test_valid_protein_seq_check(self):
-        for c in (b'ADRIAN', 'adrian', b'XaMGAt'):
-            self.assertTrue(self.db.seq_search.contains_only_valid_chars(c),
-                            "'{}' should be a valid protein seq".format(c))
-        for c in (b'XBra', 'T5HSE', 'xxnnebqpynn', ' '):
-            self.assertFalse(self.db.seq_search.contains_only_valid_chars(c),
-                             "'{}' should be an invalid protein seq".format(c))
-    
+        for c in (b"ADRIAN", "adrian", b"XaMGAt"):
+            self.assertTrue(
+                self.db.seq_search.contains_only_valid_chars(c),
+                "'{}' should be a valid protein seq".format(c),
+            )
+        for c in (b"XBra", "T5HSE", "xxnnebqpynn", " "):
+            self.assertFalse(
+                self.db.seq_search.contains_only_valid_chars(c),
+                "'{}' should be an invalid protein seq".format(c),
+            )
+
     def test_exact_search(self):
-        # Test for 10 random 
+        # Test for 10 random
         for _ in range(10):
             i = random.randint(0, len(self.db.db.root.Protein.Entries))
-            enr = i+1
+            enr = i + 1
             s = self.db.get_sequence(enr)
-            self.assertTrue((enr in set(self.db.seq_search.search(s, is_sanitised=True)[1])),
-                            'exact search for entry {} failed.'.format(i))
+            self.assertTrue(
+                (enr in set(self.db.seq_search.search(s, is_sanitised=True)[1])),
+                "exact search for entry {} failed.".format(i),
+            )
 
     def get_random_subsequence(self, minlen=10):
         i = random.randint(0, len(self.db.db.root.Protein.Entries))
-        elen = self.db.db.root.Protein.Entries[i]['SeqBufferLength'] - 1
+        elen = self.db.db.root.Protein.Entries[i]["SeqBufferLength"] - 1
         enr = i + 1
 
         ii = random.randint(0, elen - minlen)
@@ -167,16 +195,25 @@ class DatabaseTests(unittest.TestCase):
         # Test for random subsequence of 10 random sequences.
         for _ in range(10):
             s, enr, start_idx, end_idx = self.get_random_subsequence()
-            approx_search_results = self.db.seq_search.approx_search(s, is_sanitised=True)
-            self.assertIn(enr, {z[0] for z in approx_search_results},
-                          'approx search for entry {}[{}:{}] failed.'.format(enr-1, start_idx, end_idx))
+            approx_search_results = self.db.seq_search.approx_search(
+                s, is_sanitised=True
+            )
+            self.assertIn(
+                enr,
+                {z[0] for z in approx_search_results},
+                "approx search for entry {}[{}:{}] failed.".format(
+                    enr - 1, start_idx, end_idx
+                ),
+            )
 
     def test_specific_approx_search_that_failed_on_jenkins(self):
         enrs = [15885, 16452]
         ranges = [(39, 376), (55, 140)]
         for enr, (start_idx, end_idx) in zip(enrs, ranges):
             s = self.db.get_sequence(enr)[start_idx:end_idx]
-            approx_search_results = self.db.seq_search.approx_search(s, is_sanitised=True)
+            approx_search_results = self.db.seq_search.approx_search(
+                s, is_sanitised=True
+            )
             enrs_with_approx_match = {z[0] for z in approx_search_results}
             self.assertIn(enr, enrs_with_approx_match)
 
@@ -188,70 +225,80 @@ class DatabaseTests(unittest.TestCase):
             s, enr, start_idx, end_idx = self.get_random_subsequence()
             entry_nrs.append(enr)
             seqs.append(SeqRecord(Seq(s.decode(), IUPAC.protein), id=str(enr)))
-        res = list(filter(lambda x: x.query == str(x.closest_entry_nr), hog_mapper.imap_sequences(seqs)))
+        res = list(
+            filter(
+                lambda x: x.query == str(x.closest_entry_nr),
+                hog_mapper.imap_sequences(seqs),
+            )
+        )
         self.assertEqual(10, len(res))
         for case in res:
             self.assertTrue(0 < case.distance < 1)
 
     def test_oma_group_from_numeric_id(self):
         group_id = 5
-        grp =  self.db.oma_group_members(group_id)
+        grp = self.db.oma_group_members(group_id)
         self.assertEqual(4, len(grp))
         for e in grp:
-            self.assertEqual(group_id, e['OmaGroup'])
+            self.assertEqual(group_id, e["OmaGroup"])
 
     def test_fingerprint(self):
-        fingerprint, grp_nr = 'ESRTELL', 2617
+        fingerprint, grp_nr = "ESRTELL", 2617
         grp = self.db.oma_group_members(fingerprint)
         self.assertLessEqual(2, len(grp))
         for e in grp:
-            self.assertEqual(grp_nr, e['OmaGroup'])
+            self.assertEqual(grp_nr, e["OmaGroup"])
 
     def test_exon_structure(self):
-        query = 14677   # Q8I237
+        query = 14677  # Q8I237
         exons = self.db.get_exons(query)
         self.assertEqual(3, len(exons))
 
     def test_go_term_search(self):
         query = "GO:0004575"
-        nrs = self.db.entrynrs_with_go_annotation(query, evidence='IDA')
-        self.assertGreaterEqual(len(nrs), 1, "query GO term is known to occure at least in MAL32_YEAST")
+        nrs = self.db.entrynrs_with_go_annotation(query, evidence="IDA")
+        self.assertGreaterEqual(
+            len(nrs), 1, "query GO term is known to occure at least in MAL32_YEAST"
+        )
         for enr in nrs:
-            self.assertIn(4575, self.db.get_gene_ontology_annotations(enr)['TermNr'])
+            self.assertIn(4575, self.db.get_gene_ontology_annotations(enr)["TermNr"])
 
     def test_induced_pairwise_orthologs(self):
         query = "YEAST3523"
         query_entry = self.db.ensure_entry(self.db.id_resolver.resolve(query))
         orthologs = self.db.get_hog_induced_pairwise_orthologs(query_entry)
         self.assertEqual(3, len(orthologs))
-        self.assertCountEqual([b"1:1", b"1:1", b"m:1"], orthologs['RelType'])
+        self.assertCountEqual([b"1:1", b"1:1", b"m:1"], orthologs["RelType"])
 
     def test_induced_pairwise_paralogs(self):
         query = "YEAST12"
         query_entry = self.db.ensure_entry(self.db.id_resolver.resolve(query))
         orthologs = self.db.get_hog_induced_pairwise_paralogs(query_entry)
         self.assertEqual(1, len(orthologs))
-        self.assertEqual(b"Saccharomyces cerevisiae (strain ATCC 204508 / S288c)", orthologs['DivergenceLevel'])
+        self.assertEqual(
+            b"Saccharomyces cerevisiae (strain ATCC 204508 / S288c)",
+            orthologs["DivergenceLevel"],
+        )
 
 
 class XRefDatabaseMock(Database):
     def __init__(self):
-        f = tables.open_file("xref.h5", "w", driver="H5FD_CORE",
-                             driver_core_backing_store=0)
+        f = tables.open_file(
+            "xref.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0
+        )
         xref = numpy.zeros(10, tables.dtype_from_descr(tablefmt.XRefTable))
-        xref['EntryNr'] = numpy.arange(1, 6, 0.5).astype(numpy.int32)
-        xref['XRefSource'] = numpy.tile([0, 20], 5)
-        xref['XRefId'] = ['XA{:03}g1.4'.format(i) for i in range(10)]
-        xref['Verification'] = tuple(itertools.islice(itertools.cycle([1, 2, 4]), 10))
-        f.create_table('/', 'XRef', tablefmt.XRefTable, obj=xref)
-        f.create_group('/', 'XRef_Index')
-        for n in ('suffix', 'buffer', 'offset'):
-            f.create_carray('/XRef_Index', n, obj=numpy.ones((5,), 'i4'))
+        xref["EntryNr"] = numpy.arange(1, 6, 0.5).astype(numpy.int32)
+        xref["XRefSource"] = numpy.tile([0, 20], 5)
+        xref["XRefId"] = ["XA{:03}g1.4".format(i) for i in range(10)]
+        xref["Verification"] = tuple(itertools.islice(itertools.cycle([1, 2, 4]), 10))
+        f.create_table("/", "XRef", tablefmt.XRefTable, obj=xref)
+        f.create_group("/", "XRef_Index")
+        for n in ("suffix", "buffer", "offset"):
+            f.create_carray("/XRef_Index", n, obj=numpy.ones((5,), "i4"))
         self.db = f
 
 
 class XRefIdMapperTest(unittest.TestCase):
-
     @classmethod
     def setUp(self):
         patch_db = XRefDatabaseMock()
@@ -267,25 +314,27 @@ class XRefIdMapperTest(unittest.TestCase):
     def test_map_many_entries(self):
         all_mapped = self.xrefmapper.map_many_entry_nrs(numpy.arange(1, 4))
         self.assertEqual((4,), all_mapped.shape)
-        self.assertEqual(self.xrefmapper.xref_tab.dtype, all_mapped.dtype, )
+        self.assertEqual(
+            self.xrefmapper.xref_tab.dtype, all_mapped.dtype,
+        )
 
     def test_map_entry_iterator(self):
         it = self.xrefmapper.iter_xrefs_for_entry_nr(1)
-        self.assertTrue(isinstance(it, types.GeneratorType), 'not a generator')
-        exp_xrefs = ['XA000g1.4', 'XA001g1.4']
+        self.assertTrue(isinstance(it, types.GeneratorType), "not a generator")
+        exp_xrefs = ["XA000g1.4", "XA001g1.4"]
         for dic in it:
-            self.assertIn(dic['xref'], exp_xrefs)
+            self.assertIn(dic["xref"], exp_xrefs)
 
     def test_search_of_modified_xref(self):
-        xref = 'XA002g1.4'
+        xref = "XA002g1.4"
         res = self.xrefmapper.search_xref(xref)
-        self.assertEqual(2, res['EntryNr'])
+        self.assertEqual(2, res["EntryNr"])
 
     def test_modified_xref_not_returned_in_map(self):
         res = self.xrefmapper.map_entry_nr(2)
-        xrefs = [x['xref'] for x in res]
-        self.assertNotIn('XA002g1.4', xrefs)
-        self.assertIn('XA003g1.4', xrefs)
+        xrefs = [x["xref"] for x in res]
+        self.assertNotIn("XA002g1.4", xrefs)
+        self.assertIn("XA003g1.4", xrefs)
 
 
 class TaxonomyTest(unittest.TestCase):
@@ -294,7 +343,7 @@ class TaxonomyTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        path = find_path_to_test_db('TestDb.h5')
+        path = find_path_to_test_db("TestDb.h5")
         h5 = tables.open_file(path)
         cls.tax_input = h5.root.Taxonomy.read()
         h5.close()
@@ -303,54 +352,121 @@ class TaxonomyTest(unittest.TestCase):
         self.tax = Taxonomy(self.tax_input)
 
     def test_parents(self):
-        lin = [x['Name'].decode() for x in self.tax.get_parent_taxa(284811)]
-        self.assertEqual(lin, ['Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)',
-                               'Eremothecium', 'Saccharomycetaceae', 'Saccharomycetales',
-                               'Saccharomycetes', 'Saccharomycotina', 'saccharomyceta',
-                               'Ascomycota', 'Dikarya', 'Fungi', 'Opisthokonta', 'Eukaryota'])
+        lin = [x["Name"].decode() for x in self.tax.get_parent_taxa(284811)]
+        self.assertEqual(
+            lin,
+            [
+                "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)",
+                "Eremothecium",
+                "Saccharomycetaceae",
+                "Saccharomycetales",
+                "Saccharomycetes",
+                "Saccharomycotina",
+                "saccharomyceta",
+                "Ascomycota",
+                "Dikarya",
+                "Fungi",
+                "Opisthokonta",
+                "Eukaryota",
+            ],
+        )
 
     def test_newick(self):
-        member = frozenset([self.tax._taxon_from_numeric(x)['Name']
-                            for x in self.tax.tax_table['NCBITaxonId']])
+        member = frozenset(
+            [
+                self.tax._taxon_from_numeric(x)["Name"]
+                for x in self.tax.tax_table["NCBITaxonId"]
+            ]
+        )
         phylo = self.tax.get_induced_taxonomy(member, collapse=True)
-        expected = '(((Ashbya gossypii [strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056],Saccharomyces cerevisiae [strain ATCC 204508 / S288c])Saccharomycetaceae,Schizosaccharomyces pombe [strain 972 / ATCC 24843])Ascomycota,Plasmodium falciparum [isolate 3D7])Eukaryota;'
-        expected = expected.replace(' ', '_')
+        expected = "(((Ashbya gossypii [strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056],Saccharomyces cerevisiae [strain ATCC 204508 / S288c])Saccharomycetaceae,Schizosaccharomyces pombe [strain 972 / ATCC 24843])Ascomycota,Plasmodium falciparum [isolate 3D7])Eukaryota;"
+        expected = expected.replace(" ", "_")
         self.assertEqual(expected, phylo.newick())
 
     def test_phylogeny(self):
-        member = frozenset([self.tax._taxon_from_numeric(x)['Name']
-                            for x in self.tax.tax_table['NCBITaxonId']])
+        member = frozenset(
+            [
+                self.tax._taxon_from_numeric(x)["Name"]
+                for x in self.tax.tax_table["NCBITaxonId"]
+            ]
+        )
         phylo = self.tax.get_induced_taxonomy(member, collapse=True)
-        expected = {"id":2759, "name":"Eukaryota","children":[
-                      {"id":4890, "name":"Ascomycota", "children":[
-                        {"id":4893, "name": "Saccharomycetaceae", "children":[
-                          {"id":284811, "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)"},
-                          {"id":559292, "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"}]},
-                        {"id":284812, "name": "Schizosaccharomyces pombe (strain 972 / ATCC 24843)"}]},
-                      {"id":36329, "name": "Plasmodium falciparum (isolate 3D7)"}]}
+        expected = {
+            "id": 2759,
+            "name": "Eukaryota",
+            "children": [
+                {
+                    "id": 4890,
+                    "name": "Ascomycota",
+                    "children": [
+                        {
+                            "id": 4893,
+                            "name": "Saccharomycetaceae",
+                            "children": [
+                                {
+                                    "id": 284811,
+                                    "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)",
+                                },
+                                {
+                                    "id": 559292,
+                                    "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)",
+                                },
+                            ],
+                        },
+                        {
+                            "id": 284812,
+                            "name": "Schizosaccharomyces pombe (strain 972 / ATCC 24843)",
+                        },
+                    ],
+                },
+                {"id": 36329, "name": "Plasmodium falciparum (isolate 3D7)"},
+            ],
+        }
         self.assertEqual(expected, phylo.as_dict())
 
     def test_induced_tax_simple_subtree(self):
         members = [559292, 284811]
         phylo = self.tax.get_induced_taxonomy(members)
-        expected = {"id": 0, "name": "LUCA", "children": [
-                        {"id": 284811, "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)"},
-                        {"id": 559292, "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"}]}
+        expected = {
+            "id": 0,
+            "name": "LUCA",
+            "children": [
+                {
+                    "id": 284811,
+                    "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)",
+                },
+                {
+                    "id": 559292,
+                    "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)",
+                },
+            ],
+        }
         self.assertEqual(expected, phylo.as_dict())
 
     def test_induced_tax_with_parents_subtree(self):
         members = [559292, 284811]
         phylo = self.tax.get_induced_taxonomy(members, augment_parents=True)
-        expected = {"id": 4893, "name": "Saccharomycetaceae", "children": [
-                        {"id": 284811, "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)"},
-                        {"id": 559292, "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"}]}
+        expected = {
+            "id": 4893,
+            "name": "Saccharomycetaceae",
+            "children": [
+                {
+                    "id": 284811,
+                    "name": "Ashbya gossypii (strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056)",
+                },
+                {
+                    "id": 559292,
+                    "name": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)",
+                },
+            ],
+        }
         self.assertEqual(expected, phylo.as_dict())
 
     def test_subtree_tax(self):
         clade = "Fungi"
         subtax = self.tax.get_subtaxonomy_rooted_at(clade)
-        self.assertIn(4893, subtax.tax_table['NCBITaxonId'])
-        self.assertNotIn(36329, subtax.tax_table['NCBITaxonId'])
+        self.assertIn(4893, subtax.tax_table["NCBITaxonId"])
+        self.assertNotIn(36329, subtax.tax_table["NCBITaxonId"])
 
     def test_taxid_of_extent_genomes(self):
         taxids = set(self.tax.get_taxid_of_extent_genomes())
@@ -365,11 +481,13 @@ class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
     of the taxonomy is still reported as an external species via a
     <sciname> (disambiguate <code>) leaf."""
 
-    taxtab = numpy.array([(10, 0, b"Root"), (20, 10, b"Outgroup"), (30, 10, b"A"), (40, 30, b"B")],
-                         dtype=tables.dtype_from_descr(tablefmt.TaxonomyTable))
+    taxtab = numpy.array(
+        [(10, 0, b"Root"), (20, 10, b"Outgroup"), (30, 10, b"A"), (40, 30, b"B")],
+        dtype=tables.dtype_from_descr(tablefmt.TaxonomyTable),
+    )
 
     def setUp(self):
-        patcher = mock.patch('pyoma.browser.models.Genome')
+        patcher = mock.patch("pyoma.browser.models.Genome")
         self.addCleanup(patcher.stop)
         genome = patcher.start()
         type(genome).uniprot_species_code = mock.PropertyMock(return_value="HELLO")
@@ -380,11 +498,16 @@ class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
         self.assertEqual(exp, self.tax.newick())
 
     def test_phyloxml(self):
-        ins = (b'<scientific_name>A (disambiguate HELLO)</scientific_name>',
-               b'<scientific_name>A</scientific_name>',
-               b'<scientific_name>B</scientific_name>',
-               b'<scientific_name>Outgroup</scientific_name>')
-        outs = (b'<scientific_name>B (disambiguate', b'<scientific_name>Outgroup (disambiguate')
+        ins = (
+            b"<scientific_name>A (disambiguate HELLO)</scientific_name>",
+            b"<scientific_name>A</scientific_name>",
+            b"<scientific_name>B</scientific_name>",
+            b"<scientific_name>Outgroup</scientific_name>",
+        )
+        outs = (
+            b"<scientific_name>B (disambiguate",
+            b"<scientific_name>Outgroup (disambiguate",
+        )
         res = self.tax.as_phyloxml()
         for part in ins:
             self.assertIn(part, res)
@@ -393,18 +516,32 @@ class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
 
     def test_dict_repr(self):
         res = self.tax.as_dict()
-        self.assertDictEqual({'name': 'Root', 'id': 10, 'children': [
-            {'name': 'Outgroup', 'id': 20, 'code': 'HELLO'},
-            {'name': 'A', 'id': 30, 'children':[
-                {'name': 'B', 'id': 40, 'code':'HELLO'},
-                {'name': 'A (disambiguate HELLO)', 'id': 30, 'code': 'HELLO'}
-            ]}
-        ]}, res)
+        self.assertDictEqual(
+            {
+                "name": "Root",
+                "id": 10,
+                "children": [
+                    {"name": "Outgroup", "id": 20, "code": "HELLO"},
+                    {
+                        "name": "A",
+                        "id": 30,
+                        "children": [
+                            {"name": "B", "id": 40, "code": "HELLO"},
+                            {
+                                "name": "A (disambiguate HELLO)",
+                                "id": 30,
+                                "code": "HELLO",
+                            },
+                        ],
+                    },
+                ],
+            },
+            res,
+        )
 
     def test_induced_subtree_retains_internal_species(self):
         phylo = self.tax.get_induced_taxonomy([20, 40], augment_parents=True)
-        self.assertIn(30, phylo.tax_table['NCBITaxonId'])
-
+        self.assertIn(30, phylo.tax_table["NCBITaxonId"])
 
 
 class DBMock(object):
@@ -418,7 +555,7 @@ class DBMock(object):
 class MockDBTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        path = find_path_to_test_db('TestDb.h5')
+        path = find_path_to_test_db("TestDb.h5")
         cls.db = DBMock(tables.open_file(path))
 
     @classmethod
@@ -431,35 +568,39 @@ class GenomeIdResolverTest(MockDBTestCase):
         self.OmaIdMapper = OmaIdMapper(self.db)
 
     def test_resolve_uniprot_code(self):
-        query = 'YEAST'
+        query = "YEAST"
         g = self.OmaIdMapper.identify_genome(query)
-        self.assertEqual(g['UniProtSpeciesCode'], query.encode('ascii'))
+        self.assertEqual(g["UniProtSpeciesCode"], query.encode("ascii"))
 
     def test_resolve_non_existing_uniprot_code(self):
-        query = 'XED22'
+        query = "XED22"
         with self.assertRaises(UnknownSpecies):
             self.OmaIdMapper.identify_genome(query)
 
     def test_resolve_taxon_id(self):
-        expected = b'PLAF7'
-        for query in (36329, b'36329', "36329"):
+        expected = b"PLAF7"
+        for query in (36329, b"36329", "36329"):
             g = self.OmaIdMapper.identify_genome(query)
-            self.assertEqual(g['UniProtSpeciesCode'], expected, "failed for {} (type {})".format(query, type(query)))
+            self.assertEqual(
+                g["UniProtSpeciesCode"],
+                expected,
+                "failed for {} (type {})".format(query, type(query)),
+            )
 
     def test_resolve_nonexisting_code(self):
         with self.assertRaises(UnknownSpecies):
             self.OmaIdMapper.identify_genome(2)
 
     def test_approx_search_genome(self):
-        query = 'sacero cervesa'
-        expect = 'YEAST'
+        query = "sacero cervesa"
+        expect = "YEAST"
         cands = self.OmaIdMapper.approx_search_genomes(query)
         self.assertIn(expect, [g.uniprot_species_code for g in cands])
 
 
 class TestPerGenomeMetaData(MockDBTestCase):
     def setUp(self) -> None:
-        self.pg = PerGenomeMetaData(self.db.get_hdf5_handle(), 'YEAST')
+        self.pg = PerGenomeMetaData(self.db.get_hdf5_handle(), "YEAST")
 
     def test_in_oma_groups_matches(self):
         pass

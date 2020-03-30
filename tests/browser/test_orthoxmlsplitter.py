@@ -4,6 +4,7 @@ import tempfile
 import os
 import shutil
 import lxml.etree
+
 try:
     import unittest.mock as mock
 except ImportError:
@@ -56,8 +57,8 @@ class OrthoXMLSplitterTester(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmpdir = tempfile.mkdtemp()
-        cls.infile = os.path.join(cls.tmpdir, 'input.orthoxml')
-        with open(cls.infile, 'w') as fh:
+        cls.infile = os.path.join(cls.tmpdir, "input.orthoxml")
+        with open(cls.infile, "w") as fh:
             fh.write(TEST_ORTHXML)
 
     @classmethod
@@ -65,7 +66,7 @@ class OrthoXMLSplitterTester(unittest.TestCase):
         shutil.rmtree(cls.tmpdir)
 
     def setUp(self):
-        self.outdir = os.path.join(self.tmpdir, 'splits')
+        self.outdir = os.path.join(self.tmpdir, "splits")
         self.splitter = OrthoXMLSplitter(self.infile, self.outdir)
         self.splitter.create_new_orthoxml = mock.MagicMock()
 
@@ -78,7 +79,9 @@ class OrthoXMLSplitterTester(unittest.TestCase):
         self.assertEqual(2, self.splitter.create_new_orthoxml.call_count)
 
     def test_extract_subset_into_single_file(self):
-        self.splitter(hogs_to_extract=[1, 2], single_hog_files=True, basename="single.orthoxml")
+        self.splitter(
+            hogs_to_extract=[1, 2], single_hog_files=True, basename="single.orthoxml"
+        )
         self.assertEqual(1, self.splitter.create_new_orthoxml.call_count)
         args, kwargs = self.splitter.create_new_orthoxml.call_args
         self.assertEqual(args[0], os.path.join(self.outdir, "single.orthoxml"))
@@ -92,8 +95,8 @@ class OrthoXMLSplitterResultTester(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmpdir = tempfile.mkdtemp()
-        cls.infile = os.path.join(cls.tmpdir, 'input.orthoxml')
-        with open(cls.infile, 'w') as fh:
+        cls.infile = os.path.join(cls.tmpdir, "input.orthoxml")
+        with open(cls.infile, "w") as fh:
             fh.write(TEST_ORTHXML)
 
     @classmethod
@@ -101,16 +104,21 @@ class OrthoXMLSplitterResultTester(unittest.TestCase):
         shutil.rmtree(cls.tmpdir)
 
     def setUp(self):
-        self.outdir = os.path.join(self.tmpdir, 'splits')
+        self.outdir = os.path.join(self.tmpdir, "splits")
         self.splitter = OrthoXMLSplitter(self.infile, self.outdir)()
 
     def load_data_of_file(self, fn):
         xml = lxml.etree.parse(fn)
-        genes = [g.get('id') for g in xml.getroot().findall('.//{http://orthoXML.org/2011/}gene')]
+        genes = [
+            g.get("id")
+            for g in xml.getroot().findall(".//{http://orthoXML.org/2011/}gene")
+        ]
         return genes
 
     def test_properly_split_in_hogs(self):
         for nr in range(1, 4):
             fn = os.path.join(self.outdir, "HOG{:06d}.orthoxml".format(nr))
             exp = [str(nr), str(nr + 10)]
-            self.assertEqual(sorted(self.load_data_of_file(fn)), sorted(exp), "{} failed.".format(fn))
+            self.assertEqual(
+                sorted(self.load_data_of_file(fn)), sorted(exp), "{} failed.".format(fn)
+            )

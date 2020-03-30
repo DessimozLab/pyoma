@@ -62,9 +62,21 @@ class PairwiseRelationTable(tables.IsDescription):
     EntryNr1 = tables.UInt32Col(pos=0)
     EntryNr2 = tables.UInt32Col(pos=1)
     RelType = tables.EnumCol(
-        tables.Enum({'1:1': 0, '1:n': 1, 'm:1': 2, 'm:n': 3,
-                     'close paralog': 4, 'homeolog': 5, 'n/a': 6}),
-        'n/a', base='uint8', pos=2)
+        tables.Enum(
+            {
+                "1:1": 0,
+                "1:n": 1,
+                "m:1": 2,
+                "m:n": 3,
+                "close paralog": 4,
+                "homeolog": 5,
+                "n/a": 6,
+            }
+        ),
+        "n/a",
+        base="uint8",
+        pos=2,
+    )
     Score = tables.Float32Col(pos=3, dflt=-1)
     Distance = tables.Float32Col(pos=4, dflt=-1)
     AlignmentOverlap = tables.Float16Col(pos=5, dflt=-1)
@@ -75,20 +87,47 @@ class PairwiseRelationTable(tables.IsDescription):
 class XRefTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     XRefSource = tables.EnumCol(
-        tables.Enum({'UniProtKB/SwissProt': 0, 'UniProtKB/TrEMBL': 10,
-                     'Ensembl Protein': 20, 'Ensembl Gene': 25,  'Ensembl Transcript': 30,
-                     'RefSeq': 40, 'EntrezGene': 50, 'FlyBase': 60, 'WormBase': 65,
-                     'EnsemblGenomes': 70, 'NCBI': 75, 'EMBL': 80,
-                     'SourceID': 95, 'SourceAC': 100,
-                     'HGNC': 105, 'Gene Name': 110, 'Synonym': 115, 'Protein Name': 120,
-                     'ORF Name': 125, 'Ordered Locus Name': 130,
-                     'PMP': 150, 'PDB': 155, 'WikiGene': 160,
-                     'IPI': 240, 'GI': 241, 'n/a': 255}),  # last line: deprecated systems
-        'n/a', base='uint8', pos=2)
+        tables.Enum(
+            {
+                "UniProtKB/SwissProt": 0,
+                "UniProtKB/TrEMBL": 10,
+                "Ensembl Protein": 20,
+                "Ensembl Gene": 25,
+                "Ensembl Transcript": 30,
+                "RefSeq": 40,
+                "EntrezGene": 50,
+                "FlyBase": 60,
+                "WormBase": 65,
+                "EnsemblGenomes": 70,
+                "NCBI": 75,
+                "EMBL": 80,
+                "SourceID": 95,
+                "SourceAC": 100,
+                "HGNC": 105,
+                "Gene Name": 110,
+                "Synonym": 115,
+                "Protein Name": 120,
+                "ORF Name": 125,
+                "Ordered Locus Name": 130,
+                "PMP": 150,
+                "PDB": 155,
+                "WikiGene": 160,
+                "IPI": 240,
+                "GI": 241,
+                "n/a": 255,
+            }
+        ),  # last line: deprecated systems
+        "n/a",
+        base="uint8",
+        pos=2,
+    )
     XRefId = tables.StringCol(50, pos=3)
     Verification = tables.EnumCol(
-        tables.Enum({'exact': 0, 'unchecked': 2, 'modified': 4}),
-        'unchecked', base='uint8', pos=4)
+        tables.Enum({"exact": 0, "unchecked": 2, "modified": 4}),
+        "unchecked",
+        base="uint8",
+        pos=4,
+    )
 
 
 class GeneOntologyTable(tables.IsDescription):

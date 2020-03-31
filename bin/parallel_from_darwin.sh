@@ -43,23 +43,21 @@ darwin -E -q << EOF
         if IsMyJob(pInf, g) then
             outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/prots/'.g.'.json';
             if $overwrite or length(FileStat(outfn))=0 then
-                GetProteinsForGenome(g); 
+                GetProteinsForGenome(g);
             fi:
-            
+
             outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/cps/'.g.'.json';
             if $overwrite or length(FileStat(outfn))=0 then
-                GetSameSpeciesRelations(g); 
+                GetSameSpeciesRelations(g);
             fi:
-            
-            if $doVPS=true then 
+
+            if $doVPS=true then
                 outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/vps/'.g.'.json';
                 if $overwrite or length(FileStat(outfn))=0 then
-                     GetVPsForGenome(g); 
+                     GetVPsForGenome(g);
                 fi:
             fi:
         fi:
     od:
     done
 EOF
-
-

@@ -185,7 +185,7 @@ def read_vps_from_tsv(gs, ref_genome, basedir=None):
     for g in range(len(gs)):
         if g == ref_genome_idx:
             continue
-        g1, g2 = sorted((g, ref_genome_idx,))
+        g1, g2 = sorted((g, ref_genome_idx))
         off1, off2 = gs.read_coordinates(numpy.array((g1, g2)), "EntryOff")
         fn = os.path.join(
             basedir,
@@ -2101,7 +2101,7 @@ class XRefImporter(object):
     def _add_to_xrefs(self, eNr, enum_nr, key, verif="unchecked"):
         if not isinstance(eNr, int):
             raise ValueError("eNr is of wrong type:" + str(eNr))
-        self.xrefs.append((eNr, enum_nr, key.encode("utf-8"), self.verif_enum[verif],))
+        self.xrefs.append((eNr, enum_nr, key.encode("utf-8"), self.verif_enum[verif]))
 
     def key_value_handler(self, key, eNr, enum_nr, verif="unchecked"):
         """basic handler that simply adds a key (the xref) under a given enum_nr"""

@@ -7,8 +7,8 @@ Welcome to PyOMA - Library to infer and query OMA orthology's documentation!
 ============================================================================
 
 PyOMA is a python library to infer and query the OMA orthologs. This documentation
-is still very rough and a lot of things are missing. Also, the whole library is 
-still very much under development. mostly intended to be used within the group. 
+is still very rough and a lot of things are missing. Also, the whole library is
+still very much under development. mostly intended to be used within the group.
 
 Contents:
 
@@ -27,4 +27,3 @@ Indices and tables
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
-

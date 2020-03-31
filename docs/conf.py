@@ -234,7 +234,7 @@ latex_documents = [
         "PyOMA - Library to infer and query OMA orthology Documentation",
         "DessimozLab",
         "manual",
-    ),
+    )
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -290,7 +290,7 @@ texinfo_documents = [
         "PyOMA-LibrarytoinferandqueryOMAorthology",
         "One line description of project.",
         "Miscellaneous",
-    ),
+    )
 ]
 
 # Documents to append as an appendix to all manuals.

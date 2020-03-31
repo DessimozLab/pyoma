@@ -2,16 +2,26 @@
 
 import pyoma.browser.linkout
 import logging
-logger = logging.getLogger('ncbi_linkout')
+
+logger = logging.getLogger("ncbi_linkout")
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Compute (and push) xrefs for NCBI LinkOut")
-    parser.add_argument('hdf5', help="Path to the hdf5 database")
-    parser.add_argument('--out', default="./", help="folder where to write output files")
-    parser.add_argument('--skip-find', action='store_true', help="skip step of finding links")
-    parser.add_argument('--push', action='store_true', help="Push files to NCBI ftp host")
-    parser.add_argument('-p', '--password', help="Password of NCBI ftp account")
+
+    parser = argparse.ArgumentParser(
+        description="Compute (and push) xrefs for NCBI LinkOut"
+    )
+    parser.add_argument("hdf5", help="Path to the hdf5 database")
+    parser.add_argument(
+        "--out", default="./", help="folder where to write output files"
+    )
+    parser.add_argument(
+        "--skip-find", action="store_true", help="skip step of finding links"
+    )
+    parser.add_argument(
+        "--push", action="store_true", help="Push files to NCBI ftp host"
+    )
+    parser.add_argument("-p", "--password", help="Password of NCBI ftp account")
     conf = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
 
@@ -19,6 +29,3 @@ if __name__ == "__main__":
         pyoma.browser.linkout.prepare_linkout_files(conf.out, conf.hdf5)
     if conf.push:
         pyoma.browser.linkout.copy_to_ncbi(conf.out, conf.password)
-
-
-

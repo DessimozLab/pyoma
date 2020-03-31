@@ -150,11 +150,11 @@ class GenomePair(object):
 
     def __getitem__(self, item):
         if not isinstance(item, int):
-            raise IndexError(u"Invalid index or slice: {0!r:s}".format(item,))
+            raise IndexError(u"Invalid index or slice: {0!r:s}".format(item))
         if item < 0:
-            raise IndexError(u"Invalid index or slice: {0!r:s}".format(item,))
+            raise IndexError(u"Invalid index or slice: {0!r:s}".format(item))
         if item < 0:
-            raise IndexError(u"Invalid index or slice: {0!r:s}".format(item,))
+            raise IndexError(u"Invalid index or slice: {0!r:s}".format(item))
         if item < 0:
             item += len(self.entry_offset)
         else:

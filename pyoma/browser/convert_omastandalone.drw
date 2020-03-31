@@ -185,12 +185,12 @@ TransformDataToCache := proc(cache_dir)
 
     milestone_file := root_dir.'/Cache/ortholog_milestone.drw.gz':
     milestone_sha2 := sha2(ReadRawFile(milestone_file)):
-    if FileExists(cache_dir.'/transform_done') and 
-       trim(ReadRawFile(cache_dir.'/transform_done'))=milestone_sha2 then 
+    if FileExists(cache_dir.'/transform_done') and
+       trim(ReadRawFile(cache_dir.'/transform_done'))=milestone_sha2 then
         StoreResults(json('success')):
         return();
     fi:
-    
+
     ReadProgram(root_dir.'/Cache/ortholog_milestone.drw.gz');
     Prot2Grp := CreateArray(1..Goff[NS+1]):
     for og to length(Ort) do for gNr to NS do if Ort[og,gNr]<>0 then
@@ -217,7 +217,7 @@ TransformDataToCache := proc(cache_dir)
     OpenWriting(previous):
 
     StoreResults(json('success'));
-    
+
 end:
 
 NumberOfAlignments := proc(name1:string,name2:string)
@@ -372,4 +372,3 @@ StoreResults := proc(res, fname)
     prints(res);
     OpenWriting(previous);
 end:
-

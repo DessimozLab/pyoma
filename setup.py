@@ -57,7 +57,7 @@ setup(
             "scikit-learn",
             "scikit-fuzzy",
             "lark-parser",
-        ],
+        ]
     },
     dependency_links=[
         "git+ssh://gitolite@lab.dessimoz.org:2222/family-analyzer@master#egg=familyanalyzer"

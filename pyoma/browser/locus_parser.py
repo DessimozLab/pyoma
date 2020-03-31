@@ -18,13 +18,13 @@ grammar = """?locus : join | complement | complement_join | location
              join  : "join" "(" (complement | location ) ("," (complement | location ))+ ")"
              complement : "complement(" location ")"
              complement_join : "complement" "(" "join" "(" location ("," location)+ ")" ")"
-             location : pos [ _RNG pos ] | "FromElsewhere" "('" _SEQID "'," pos [ _RNG pos ] ")" 
+             location : pos [ _RNG pos ] | "FromElsewhere" "('" _SEQID "'," pos [ _RNG pos ] ")"
              ?pos : num | "Before" "(" num ")" | "After" "(" num ")"
              ?num : /[0-9]+/             -> number
              _SEQID: /[A-Za-z0-9._-]+/
              _RNG: ".."
-             
-             
+
+
              %import common.NUMBER
              %import common.WS
              %ignore WS"""

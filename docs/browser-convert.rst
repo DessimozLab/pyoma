@@ -11,13 +11,13 @@ instance into a python compatible hdf5 database. The steps to create a darwin
 oma browser are explained in detail on the `Wiki <http://lab.dessimoz.org/wiki/oma_browser_release>`_
 
 As of now, the documentation is very small. Essentially, you can convert the database
-with a single command, e.g. 
+with a single command, e.g.
 
 .. code-block:: sh
 
     bin/importdata.py --release /path/to/release OmaServer.h5
 
-which will create the OmaServer.h5 file in the release path. If the optional argument is not 
+which will create the OmaServer.h5 file in the release path. If the optional argument is not
 specified, the release is extracted from the environment variable *DARWIN_BROWSERDATA_PATH*.
 
 
@@ -61,4 +61,3 @@ procedure. It has the following interface.
 .. autoclass:: pyoma.browser.OrthoXMLSplitter.OrthoXMLSplitter
     :members:
     :special-members: __call__
-

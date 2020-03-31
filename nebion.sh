@@ -22,8 +22,8 @@ python ~/pyoma/bin/export_for_genevestigator.py -v --out $DARWIN_BROWSERDATA_PAT
     'Canis lupus familiaris' \
     'Helianthus annuus' \
     'Medicago truncatula' \
-    'Brassica napus' 
+    'Brassica napus'
 
-    
+
     #nice to have at some point, but missing in OMA so far:
     # 'Nicotiana tabacum' \

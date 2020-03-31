@@ -168,8 +168,8 @@ class OntologyParser(AbstractParser):
         self.stanza_name_re = re.compile(r"\[(?P<name>[^]]*)\]")
 
     def stanzas(self):
-        """iterates over the stanzas in the ontology yielding 
-        objects according to the factory parameter provided 
+        """iterates over the stanzas in the ontology yielding
+        objects according to the factory parameter provided
         in the constructor."""
         curStanza = None
         for line in self.fp:
@@ -296,11 +296,11 @@ class GeneOntology(object):
 
 
 class FreqAwareGeneOntology(GeneOntology):
-    """GO hierarchy represents the Gene Ontology vocabulary. 
-    
-    It gets loaded from the xml file and, in conjunction with 
+    """GO hierarchy represents the Gene Ontology vocabulary.
+
+    It gets loaded from the xml file and, in conjunction with
     an annotation file (GOA) the relative frequencies per term get
-    estimated. this estimation respects the hierarchy of the 
+    estimated. this estimation respects the hierarchy of the
     vocabulary.
     Further, this class provides methods to traverse the hierarchy
     in an easy way."""

@@ -67,8 +67,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         description="""Dump all HOGs at a specific taxonomic level. Input comes from an hdf5 file.
-                    HOGs that do not reach back as far as the selected reference taxonomic level 
-                    will be returned as well at their deepest level (if it is a subclade of the 
+                    HOGs that do not reach back as far as the selected reference taxonomic level
+                    will be returned as well at their deepest level (if it is a subclade of the
                     selected clade)."""
     )
     parser.add_argument(

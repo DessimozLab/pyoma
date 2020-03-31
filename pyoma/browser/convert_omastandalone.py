@@ -53,7 +53,7 @@ class StandaloneExporter(DarwinExporter):
                     "{}.txt.gz".format(genome),
                 )
                 if os.path.exists(cache_file):
-                    data = load_tsv_to_numpy((cache_file, 0, 0, False,))
+                    data = load_tsv_to_numpy((cache_file, 0, 0, False))
                 else:
                     # fallback to read from VPsDB
                     data = self.call_darwin_export("GetVPsForGenome({})".format(genome))

@@ -1,5 +1,5 @@
 from __future__ import division, print_function, unicode_literals
-from builtins import chr, bytes, str
+
 import random
 import types
 import unittest
@@ -314,9 +314,7 @@ class XRefIdMapperTest(unittest.TestCase):
     def test_map_many_entries(self):
         all_mapped = self.xrefmapper.map_many_entry_nrs(numpy.arange(1, 4))
         self.assertEqual((4,), all_mapped.shape)
-        self.assertEqual(
-            self.xrefmapper.xref_tab.dtype, all_mapped.dtype,
-        )
+        self.assertEqual(self.xrefmapper.xref_tab.dtype, all_mapped.dtype)
 
     def test_map_entry_iterator(self):
         it = self.xrefmapper.iter_xrefs_for_entry_nr(1)

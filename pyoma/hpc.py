@@ -51,7 +51,7 @@ def detect_hpc_jobarray(nr_procs, this_proc_nr=None):
     elif os.getenv("SGE_TASK_ID"):
         return JobArray(nr_procs, os.getenv("SGE_TASK_ID"))
     elif os.getenv("SLURM_ARRAY_JOB_ID"):
-        return JobArray(nr_procs, os.getenv("SLURM_ARRAY_JOB_ID"))
+        return JobArray(nr_procs, os.getenv("SLURM_ARRAY_TASK_ID"))
     elif os.getenv("THIS_PROC_NR"):
         return JobArray(nr_procs, os.getenv("THIS_PROC_NR"))
     elif nr_procs is None or nr_procs == 1:

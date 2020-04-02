@@ -2489,7 +2489,16 @@ class FastMapper(object):
 
         for rec in records:
             logger.debug("projecting function to {}".format(rec))
+            if len(rec) < 25:
+                logger.warning("Skipping short sequence (len={} AA)".format(len(rec)))
+                continue
+            t0 = time.time()
             r = self.db.seq_search.search(str(rec.seq))
+            logger.info(
+                "sequence matching of {} ({} AA) took {:.3f}sec".format(
+                    rec.id, len(rec), time.time() - t0
+                )
+            )
             if r is not None:
                 logger.debug(str(r))
                 go_df = None

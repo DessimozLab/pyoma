@@ -13,6 +13,7 @@ from pyoma.browser import tablefmt
 from Bio.SeqRecord import SeqRecord
 from Bio.Seq import Seq
 from Bio.Alphabet import IUPAC
+from Bio import SeqIO
 
 
 class TestHelperFunctions(unittest.TestCase):
@@ -601,4 +602,23 @@ class TestPerGenomeMetaData(MockDBTestCase):
         self.pg = PerGenomeMetaData(self.db.get_hdf5_handle(), "YEAST")
 
     def test_in_oma_groups_matches(self):
+        pass
+
+
+class FastMapperTester(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fast_mapper = FastMapper(Database(find_path_to_test_db()))
+
+    def tearDown(self) -> None:
+        self.fast_mapper.db.close()
+
+    def test_search_small_sequence(self):
+        test_seq = io.StringIO(">test\nAS")
+        seq_iter = SeqIO.parse(test_seq, format="fasta")
+        with self.assertLogs("pyoma", level=logging.INFO) as cm:
+            anno = list(self.fast_mapper.iter_projected_goannotations(seq_iter))
+        self.assertIn("Skipping", "\n".join(cm.output))
+        self.assertEqual(0, len(anno))
+
+    def test_search_existing_sequance(self):
         pass

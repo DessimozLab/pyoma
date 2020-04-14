@@ -369,29 +369,54 @@ class OmaGroup(object):
 
 
 class HOG(object):
-    def __init__(self, db, hog):
-        self._hog = hog
+    def __init__(self, db, hog, level=None):
+        self._stored_hog = hog
+        self._stored_level = level
         self._db = db
+
+    @LazyProperty
+    def _hog(self):
+        if isinstance(self._stored_hog, (int, numpy.integer)):
+            # load hog at root
+            return self._db.get_hog(
+                self._db.format_hogid(self._stored_hog), level=self._stored_level
+            )
+        elif isinstance(self._stored_hog, (str, bytes)):
+            # load hog using ID
+            return self._db.get_hog(self._stored_hog, self._stored_level)
+        else:
+            return self._stored_hog
 
     @property
     def fam(self):
-        return int(self._hog["fam"])
+        return int(self._hog["Fam"])
 
     @property
     def hog_id(self):
-        return str(self._hog["hog_id"])
+        return self._hog["ID"].decode()
 
     @property
     def level(self):
-        return str(self._hog["level"])
+        return self._hog["Level"].decode()
 
     @property
-    def NrMemberGenes(self):
+    def nr_member_genes(self):
         return int(self._hog["NrMemberGenes"])
 
     @property
-    def IsRoot(self):
-        return self._hog["IsRoot"]
+    def is_root(self):
+        return bool(self._hog["IsRoot"])
+
+    @property
+    def completeness_score(self):
+        return float(self._hog["CompletenessScore"])
+
+    @LazyProperty
+    def members(self):
+        return [
+            ProteinEntry(self._db, pe)
+            for pe in self._db.hog_members_from_hog_id(self.hog_id, self.level)
+        ]
 
 
 class PairwiseRelation(object):

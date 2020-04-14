@@ -669,27 +669,16 @@ class Database(object):
         applies, i.e. a set of taxonomic ranges for which no duplication
         occurred in between.
 
-        The method returns a numpy array of dtype :class:`HogLevel`.
+        The method returns an array of :class:`models.HOG` instances.
 
         :param hog_id: the hog_id of interest
+
+        :see_also: :meth:`get_hog` that returns a single HOG instance
+        for a specific level or the root level one for a specific HOG id.
         """
         hog_id_ascii = hog_id if isinstance(hog_id, bytes) else hog_id.encode("ascii")
         arr = self.db.root.HogLevel.read_where("ID == {!r}".format(hog_id_ascii))
-
-        hogs = []
-
-        for h in arr:
-
-            res = {
-                "fam": h[0],
-                "hog_id": h[1].decode(),
-                "level": h[2].decode(),
-                "NrMemberGenes": h[5],
-                "IsRoot": h[6],
-            }
-
-            hogs.append(HOG(self, res))
-
+        hogs = [HOG(self, hog_row) for hog_row in arr]
         return hogs
 
     def get_subhogids_at_level(self, fam_nr, level):
@@ -838,14 +827,17 @@ class Database(object):
             members = members[keep]
         return members
 
-    def count_hog_members(self, hog_id, level=None):
-        """Count the number of members in a (sub)hog.
+    def get_hog(self, hog_id, level=None, field=None):
+        """Retrieve the one relevant HOG for a certain hog-id.
 
-        If the level is not specified, the deepest level having the given
-        hog-id is used.
+        If a level is provided, returns the (sub)hog at this level, otherwise
+        it will return the deepest (sub)hog for that ID.
 
-        :param bytes hog_id: the query hog id
-        :param str level: the taxonomic level of interest"""
+        param (bytes,str) hog_id: the query hog id
+        param str level: the taxonomic level of interest, defaults to None
+        param field: the attribute of the HogLevel table to be returned. Defaults
+                     to all attributes of the table."""
+
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
         query_fam = self.parse_hog_id(hog_id)
@@ -859,13 +851,25 @@ class Database(object):
             )
         try:
             row = next(self.db.root.HogLevel.where(query))
-            return row["NrMemberGenes"]
+            if field is not None:
+                return row[field]
+            return row.fetch_all_fields()
         except StopIteration:
             raise ValueError(
                 'HOG-ID/Level combination "{}/{:s}" unknown'.format(
                     hog_id.decode(), level
                 )
             )
+
+    def count_hog_members(self, hog_id, level=None):
+        """Count the number of members in a (sub)hog.
+
+        If the level is not specified, the deepest level having the given
+        hog-id is used.
+
+        :param bytes hog_id: the query hog id
+        :param str level: the taxonomic level of interest"""
+        return self.get_hog(hog_id, level, field="NrMemberGenes")
 
     def get_orthoxml(self, fam):
         """returns the orthoxml of a given toplevel HOG family

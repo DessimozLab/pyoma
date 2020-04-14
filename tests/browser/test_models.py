@@ -10,7 +10,7 @@ import unittest
 from .test_db import find_path_to_test_db
 
 
-class ProteinEntryTests(unittest.TestCase):
+class TestDbBase(unittest.TestCase):
     db = None
 
     @classmethod
@@ -22,6 +22,8 @@ class ProteinEntryTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.db.get_hdf5_handle().close()
 
+
+class ProteinEntryTests(TestDbBase):
     def test_init_from_enr(self):
         protein_entry = models.ProteinEntry.from_entry_nr(self.db, 12)
         self.assertEqual(protein_entry.entry_nr, 12)
@@ -58,6 +60,33 @@ class ProteinEntryTests(unittest.TestCase):
         protein_entry = models.ProteinEntry.from_entry_nr(self.db, 12)
         protein_entry.cdna = "GCGAATAT"
         self.assertAlmostEqual(protein_entry.gc_content, 3.0 / 8.0)
+
+
+class HOGModelTest(TestDbBase):
+    def test_instant_with_fam(self):
+        hog = models.HOG(self.db, 2)
+        self.assertEqual(self.db.format_hogid(2), hog.hog_id)
+        self.assertTrue(hog.is_root)
+
+    def test_instance_from_hogid(self):
+        hog = models.HOG(self.db, self.db.format_hogid(1))
+        self.assertEqual(1, hog.fam)
+        self.assertTrue(hog.is_root)
+
+    def test_invalid_level(self):
+        with self.assertRaises(ValueError):
+            hog = models.HOG(self.db, 2, "Metazoa")
+            hog.hog_id
+
+    def test_with_valid_level(self):
+        hog = models.HOG(self.db, 2, "Fungi")
+        self.assertEqual("Fungi", hog.level)
+        self.assertFalse(hog.is_root)
+
+    def test_members_and_nr_members(self):
+        hog = models.HOG(self.db, "HOG:0000002.1a")
+        self.assertEqual(2, hog.fam)
+        self.assertEqual(hog.nr_member_genes, len(hog.members))
 
 
 class ExonStructureTest(unittest.TestCase):

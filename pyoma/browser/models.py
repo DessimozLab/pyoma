@@ -143,7 +143,7 @@ class ProteinEntry(object):
     def nr_exons(self):
         # print("doing it")
         # exon = self.exons
-        return int(2)
+        return int(len(self.exons))
 
     @property
     def oma_group(self):

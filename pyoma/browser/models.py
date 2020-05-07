@@ -141,8 +141,6 @@ class ProteinEntry(object):
 
     @property
     def nr_exons(self):
-        # print("doing it")
-        # exon = self.exons
         return int(len(self.exons))
 
     @property

@@ -141,8 +141,9 @@ class ProteinEntry(object):
 
     @property
     def nr_exons(self):
-        print("doing it")
-        return ExonStructure.__len__()
+        # print("doing it")
+        # exon = self.exons
+        return 2
 
     @property
     def oma_group(self):

@@ -609,7 +609,7 @@ class DarwinExporter(object):
             # replace NaN in column from rels_df by the default value of the target column
             merged.loc[merged[source].isnull(), source] = tab.coldescrs[target].dflt
             # update the data in the target hdf5 column by the source column data
-            tab.modify_column(column=merged[source].as_matrix(), colname=target)
+            tab.modify_column(column=merged[source].to_numpy(), colname=target)
         tab.flush()
 
     def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):

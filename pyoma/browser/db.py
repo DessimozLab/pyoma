@@ -368,13 +368,39 @@ class Database(object):
         )
         return self.db.get_node("/PairwiseRelation/{}/{}".format(genome, subtab))
 
+    def nr_ortholog_relations(self, entry_nr):
+        """returns the number of orthologous relations for a given entry.
+
+        The return value is a numpy.void tuple with all the gene centric orthology/paralogy
+        counts. The named fields are:
+
+          - *NrPairwiseOrthologs*: nr of pairwise orthologs as computed by OMA
+          - *NrHogInducedPWOrthologs*: nr of induced pairwise orthologs according
+            HOG inference process
+          - *NrHogInducedPWParalogs*: nr of induced pairwise paralogs
+          - *NrOMAGroupOrthologs*: nr of orthologs according to the OMA Groups
+          - *NrAnyOrthologs*: sum of all orthologs according to pairwise orthologs,
+            induced pairwise orthologs and OMA Group based orthologs.
+
+        :param int entry_nr: entry number to check
+        """
+        tab = self.db.get_node("/Protein/OrthologsCountCache")
+        return tab[entry_nr - 1]
+
     def count_vpairs(self, entry_nr):
-        vptab = self._get_vptab(entry_nr)
+        """number of pairwise orthologs
+
+        :see_also: :meth:`nr_ortholog_relations`"""
         try:
-            cnt = count_elements(vptab.where("(EntryNr1=={:d})".format(entry_nr)))
-        except (TypeError, ValueError):
-            cnt = 0
-        return cnt
+            return int(self.nr_ortholog_relations(entry_nr)["NrPairwiseOrthologs"])
+        except tables.NoSuchNodeError:
+            # fallback in case Cache does not exist yet
+            vptab = self._get_vptab(entry_nr)
+            try:
+                cnt = count_elements(vptab.where("(EntryNr1=={:d})".format(entry_nr)))
+            except (TypeError, ValueError):
+                cnt = 0
+            return cnt
 
     def count_homoeologs(self, entry_nr):
         pwtab = self._get_pw_tab(entry_nr, "within")

@@ -167,7 +167,7 @@ def compute_and_store_cached_data(db_fpath, cache_path, nr_procs=None, force=Fal
 
     path, name = split(cache_path)
     with tables.open_file(db_fpath, "a") as h5:
-        tab = h5.create_carray(
+        tab = h5.create_table(
             path, name, ProteinCacheInfo, createparents=True, obj=cache
         )
         tab.colinstances["EntryNr"].create_csindex()

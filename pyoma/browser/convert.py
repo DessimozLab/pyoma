@@ -36,6 +36,7 @@ from .OrthoXMLSplitter import OrthoXMLSplitter
 from .geneontology import GeneOntology, OntologyParser
 from .synteny import SyntenyScorer
 from .homoeologs import HomeologsConfidenceCalculator
+from .compute_cache import compute_and_store_cached_data
 
 with hooks():
     import urllib.request
@@ -2546,3 +2547,8 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level="INFO"
     )
     augment_genomes_json_download_file(genomes_json_fname, x.h5)
     x.close()
+
+    # compute cached orthology counts
+    compute_and_store_cached_data(
+        x.h5.filename, "/Protein/OrthologsCountCache", min(os.cpu_count(), 12)
+    )

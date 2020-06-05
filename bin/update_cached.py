@@ -18,5 +18,5 @@ if __name__ == "__main__":
     logging.basicConfig(level=30 - 10 * min(conf.v, 2))
 
     cache = pyoma.browser.compute_cache.compute_and_store_cached_data(
-        conf.hdf5, "/Proteins/OrthologSummaryCache", conf.nr_procs
+        conf.hdf5, "/Protein/OrthologsCountCache", conf.nr_procs
     )

@@ -403,6 +403,7 @@ class Database(object):
             return cnt
 
     def count_homoeologs(self, entry_nr):
+        """number of homoeologs of a given protein entry"""
         pwtab = self._get_pw_tab(entry_nr, "within")
         homolog_typ_nr = pwtab.get_enum("RelType")["homeolog"]
         try:
@@ -700,7 +701,7 @@ class Database(object):
         :param hog_id: the hog_id of interest
 
         :see_also: :meth:`get_hog` that returns a single HOG instance
-        for a specific level or the root level one for a specific HOG id.
+            for a specific level or the root level one for a specific HOG id.
         """
         hog_id_ascii = hog_id if isinstance(hog_id, bytes) else hog_id.encode("ascii")
         arr = self.db.root.HogLevel.read_where("ID == {!r}".format(hog_id_ascii))
@@ -859,10 +860,11 @@ class Database(object):
         If a level is provided, returns the (sub)hog at this level, otherwise
         it will return the deepest (sub)hog for that ID.
 
-        param (bytes,str) hog_id: the query hog id
-        param str level: the taxonomic level of interest, defaults to None
-        param field: the attribute of the HogLevel table to be returned. Defaults
-                     to all attributes of the table."""
+        :param (bytes,str) hog_id: the query hog id
+        :param str level: the taxonomic level of interest, defaults to None
+        :param field: the attribute of the HogLevel table to be returned. Defaults
+                      to all attributes of the table.
+        """
 
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
@@ -894,7 +896,8 @@ class Database(object):
         hog-id is used.
 
         :param bytes hog_id: the query hog id
-        :param str level: the taxonomic level of interest"""
+        :param str level: the taxonomic level of interest
+        """
         return self.get_hog(hog_id, level, field="NrMemberGenes")
 
     def get_orthoxml(self, fam):

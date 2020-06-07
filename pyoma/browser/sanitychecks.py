@@ -38,7 +38,7 @@ class SanitySession(object):
         return tables.open_file(self.db_path, mode="r")
 
     def close_oma_db(self):
-        self.db.close()
+        self.h5_handle.close()
 
     def get_species2(self):
         """Uses the h5 file to get species"""

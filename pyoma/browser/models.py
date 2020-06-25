@@ -140,6 +140,10 @@ class ProteinEntry(object):
         return ExonStructure.from_entry_nr(self._db, self.entry_nr)
 
     @property
+    def nr_exons(self):
+        return int(len(self.exons))
+
+    @property
     def oma_group(self):
         return int(self._entry["OmaGroup"])
 

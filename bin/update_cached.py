@@ -14,9 +14,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "-n", "--nr-procs", default=None, type=int, help="nr of processes to use"
     )
+    parser.add_argument(
+        "-c", "--cache-file", default=None, help="Path to a temporary cache file"
+    )
     conf = parser.parse_args()
     logging.basicConfig(level=30 - 10 * min(conf.v, 2))
 
     cache = pyoma.browser.compute_cache.compute_and_store_cached_data(
-        conf.hdf5, "/Protein/OrthologsCountCache", conf.nr_procs
+        conf.hdf5, "/Protein/OrthologsCountCache", conf.nr_procs, tmp_cache=conf.cache_file
     )

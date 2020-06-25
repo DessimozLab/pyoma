@@ -473,10 +473,12 @@ class DarwinExporter(object):
         anygenome = self.h5.root.Genome[0]["UniProtSpeciesCode"].decode()
         basedir = None
         for base in ("DARWIN_OMADATA_PATH", "DARWIN_OMA_SCRATCH_PATH"):
-            if os.path.isdir(os.path.join(os.getenv(base, "/"), "Phase4", anygenome)):
+            testdir = os.path.join(os.getenv(base, "/"), "Phase4", anygenome)
+            if os.path.isdir(testdir) and any(map(lambda x:x.endswith('.orth.txt.gz'), os.listdir(testdir))):
                 basedir = os.path.join(os.getenv(base), "Phase4")
                 break
 
+        self.logger.info("using {} as base dir for pairwise orthology".format(basedir)) 
         for gs in self.h5.root.Genome.iterrows():
             genome = gs["UniProtSpeciesCode"].decode()
             rel_node_for_genome = self._get_or_create_node(
@@ -492,7 +494,7 @@ class DarwinExporter(object):
                 if os.path.exists(cache_file):
                     with open(cache_file, "r") as fd:
                         data = json.load(fd)
-                elif base is not None:
+                elif basedir is not None:
                     # we have the *.orth.txt.gz files in basedir
                     data = read_vps_from_tsv(
                         self.h5.root.Genome, genome.encode("utf-8"), basedir=basedir
@@ -749,10 +751,12 @@ class DarwinExporter(object):
     def _write_to_table(self, tab, data):
         if len(data) > 0:
             tab.append(data)
-        self.logger.info(
-            "wrote %s : compression ratio %.3f%%"
-            % (tab._v_pathname, 100 * tab.size_on_disk / tab.size_in_memory)
-        )
+            self.logger.info(
+                "wrote %s : compression ratio %.3f%%"
+                % (tab._v_pathname, 100 * tab.size_on_disk / tab.size_in_memory)
+            )
+        else:
+            self.logger.info("no data written for {}".format(tab._v_pathname))
 
     def add_hogs(self, hog_path=None, hog_file=None, tree_filename=None):
         if hog_path is None:
@@ -888,6 +892,7 @@ class DarwinExporter(object):
 
     def close(self):
         self.h5.root._f_setattr("conversion_end", time.strftime("%c"))
+        self.h5.flush()
         self.h5.close()
         self.logger.info("closed {}".format(self.h5.filename))
 

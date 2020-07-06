@@ -474,11 +474,13 @@ class DarwinExporter(object):
         basedir = None
         for base in ("DARWIN_OMADATA_PATH", "DARWIN_OMA_SCRATCH_PATH"):
             testdir = os.path.join(os.getenv(base, "/"), "Phase4", anygenome)
-            if os.path.isdir(testdir) and any(map(lambda x:x.endswith('.orth.txt.gz'), os.listdir(testdir))):
+            if os.path.isdir(testdir) and any(
+                map(lambda x: x.endswith(".orth.txt.gz"), os.listdir(testdir))
+            ):
                 basedir = os.path.join(os.getenv(base), "Phase4")
                 break
 
-        self.logger.info("using {} as base dir for pairwise orthology".format(basedir)) 
+        self.logger.info("using {} as base dir for pairwise orthology".format(basedir))
         for gs in self.h5.root.Genome.iterrows():
             genome = gs["UniProtSpeciesCode"].decode()
             rel_node_for_genome = self._get_or_create_node(

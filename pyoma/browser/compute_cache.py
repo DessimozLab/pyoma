@@ -22,7 +22,7 @@ Protein = collections.namedtuple("Protein", ("entry_nr", "hog_id", "group"))
 
 
 def signal_handler(signum, frame):
-    logger.info("received signal "+str(signum))
+    logger.info("received signal " + str(signum))
     raise KeyboardInterrupt(signum)
 
 
@@ -126,12 +126,15 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
     nr_procs = nr_procs if nr_procs else mp.cpu_count()
 
     if from_cache is not None and os.path.isfile(from_cache):
-        with tables.open_file(from_cache,'r') as cache:
+        with tables.open_file(from_cache, "r") as cache:
             results = [cache.root.results.read()]
             jobs = list(cache.root.pending_jobs.read()[0])
-        shutil.copy2(from_cache, from_cache+".restarted")
-        logger.info("loaded results for {} proteins and {} remaining jobs"
-                    .format(len(results[0]), len(jobs)))
+        shutil.copy2(from_cache, from_cache + ".restarted")
+        logger.info(
+            "loaded results for {} proteins and {} remaining jobs".format(
+                len(results[0]), len(jobs)
+            )
+        )
     else:
         db = Database(db_fpath)
         nr_fams = db.get_nr_toplevel_hogs()
@@ -144,10 +147,16 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
         nr_entries = len(db.get_hdf5_handle().get_node("/Protein/Entries"))
         db.close()
 
-        logger.info("found {} hog and {} singleton jobs to be computed".format(nr_fams, len(singletons)))
-        jobs = [("analyse_fam", (fam+1,)) for fam in range(nr_fams)]
+        logger.info(
+            "found {} hog and {} singleton jobs to be computed".format(
+                nr_fams, len(singletons)
+            )
+        )
+        jobs = [("analyse_fam", (fam + 1,)) for fam in range(nr_fams)]
         jobs.extend([("analyse_singleton", singleton) for singleton in singletons])
-        logger.info("nr of jobs: {} (expected {})".format(len(jobs), nr_fams + len(singletons)))
+        logger.info(
+            "nr of jobs: {} (expected {})".format(len(jobs), nr_fams + len(singletons))
+        )
         results = []
 
     workers = []
@@ -172,15 +181,21 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
             if reply is None:
                 finished += 1
                 if finished == nr_procs:
-                   if len(pending_jobs) > 0:
-                       logger.error("still {} pending jobs...: {}".format(len(pending_jobs), pending_jobs)) 
-                   break
+                    if len(pending_jobs) > 0:
+                        logger.error(
+                            "still {} pending jobs...: {}".format(
+                                len(pending_jobs), pending_jobs
+                            )
+                        )
+                    break
             else:
                 job, res = reply
                 results.append(res)
                 pending_jobs.remove(job)
                 if time.time() - last_cache_timestamp > 60 and from_cache is not None:
-                    sofar_results = numpy.lib.recfunctions.stack_arrays(results, usemask=False)
+                    sofar_results = numpy.lib.recfunctions.stack_arrays(
+                        results, usemask=False
+                    )
                     write_cache(from_cache, sofar_results, pending_jobs)
                     last_cache_timestamp = time.time()
         for w in workers:
@@ -193,7 +208,6 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
         write_cache(from_cache, sofar_results, pending_jobs)
         sys.exit(99)
 
-
     ret = numpy.lib.recfunctions.stack_arrays(results, usemask=False)
     ret.sort(order="EntryNr")
     print(ret)
@@ -203,24 +217,26 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
 
 def write_cache(fn, sofar_results, pending_jobs):
     if os.path.exists(fn):
-        os.replace(fn, fn+".0")
-    with tables.open_file(fn, 'w') as h5:
-        h5.create_table('/', 'results', ProteinCacheInfo, obj=sofar_results)
-        a = h5.create_vlarray('/', 'pending_jobs', tables.ObjectAtom())
+        os.replace(fn, fn + ".0")
+    with tables.open_file(fn, "w") as h5:
+        h5.create_table("/", "results", ProteinCacheInfo, obj=sofar_results)
+        a = h5.create_vlarray("/", "pending_jobs", tables.ObjectAtom())
         a.append(pending_jobs)
         h5.flush()
     logger.info("written to cache {}".format(fn))
- 
+
 
 def check_all_there(nr_prots, cache):
     if len(cache) == nr_prots:
         return True
-    missings = set(range(1,nr_prots+1)) - set(cache["EntryNr"])
+    missings = set(range(1, nr_prots + 1)) - set(cache["EntryNr"])
     logger.error("Missing cache value for {}".format(missings))
     return False
 
 
-def compute_and_store_cached_data(db_fpath, cache_path, nr_procs=None, force=False, tmp_cache=None):
+def compute_and_store_cached_data(
+    db_fpath, cache_path, nr_procs=None, force=False, tmp_cache=None
+):
     with tables.open_file(db_fpath, "a") as h5:
         try:
             n = h5.get_node(cache_path)

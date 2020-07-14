@@ -411,4 +411,5 @@ def compute_profiles(db_path, min_hogsize=100, max_hogsize=None, nr_procs=None):
     print("finished computing profiles")
 
     with tables.open_file(db_path, "a") as db, tables.open_file(tmp_file, "r") as tmp:
-        tmp.root._f_copy_children(db.root, recursive=True)
+        tmp.root._f_copy_children(db.root, recursive=True, overwrite=True)
+    print("Finished writing everything")

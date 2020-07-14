@@ -13,6 +13,8 @@ scikit-fuzzy
 lark-parser
 pyopa>=0.8
 fuzzyset>=0.0.17
+datasketch
+pyham
 
 -e git+ssh://gitolite@lab.dessimoz.org:2222/family-analyzer@master#egg=familyanalyzer
 -e .

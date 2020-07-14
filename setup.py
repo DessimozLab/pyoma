@@ -14,6 +14,7 @@ req_packages = [
     "pyopa>=0.8",
     "pandas>=0.22",
     "biopython",
+    "datasketch",
 ]
 if sys.version_info < (3, 6):
     req_packages.extend(["biopython<1.77"])
@@ -59,6 +60,7 @@ setup(
             "scikit-learn",
             "scikit-fuzzy",
             "lark-parser",
+            "pyham",
         ]
     },
     dependency_links=[

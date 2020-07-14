@@ -1,8 +1,4 @@
-import datasketch
-import itertools
 import ete3
-import copy
-import math
 import numpy as np
 import pandas as pd
 
@@ -60,7 +56,6 @@ def hash_tree_profile(tp: ete3.PhyloNode, taxa_index, species_index, treeweights
     species_matrix[covered_species] = 1
     for i, event in enumerate(indices):
         if len(indices[event]) > 0:
-            taxindex = np.asarray(indices[event])
             hogindex = np.asarray(indices[event]) + i * len(taxa_index)
             hog_matrix_weighted[:, hogindex] = treeweights[hogindex, :].ravel()
             hog_matrix_binary[:, hogindex] = 1
@@ -86,20 +81,3 @@ def row2hash(row, taxa_index, species_index, treeweights, wmg):
     return pd.Series(
         [weighted_hash, hog_matrix, species_matrix], index=["hash", "rows", "species"]
     )
-
-
-def fam2hash_hdf5(fam, hdf5, dataset=None, nsamples=128):
-    # read the stored hash values and return a weighted minhash
-    """
-    Read the stored hash values and return a weighted minhash
-    :param fam: hog id
-    :param hdf5: h5py object of the hashvalues
-    :param dataset: which dataset to use when constructing the hash
-    :return: minhash1: the weighted hash of your HOG
-    """
-    if dataset is None:
-        dataset = list(hdf5.keys())[0]
-    hashvalues = np.asarray(hdf5[dataset][fam, :].reshape(nsamples, 2))
-    hashvalues = hashvalues.astype("int64")
-    minhash1 = datasketch.WeightedMinHash(seed=1, hashvalues=hashvalues)
-    return minhash1

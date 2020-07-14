@@ -1,15 +1,12 @@
 import functools
 import queue
-
 import tables
 import ete3
-import io
 import copy
 import multiprocessing as mp
 import time
 import tempfile
 import pandas as pd
-import numpy as np
 from datasketch import WeightedMinHashGenerator, MinHashLSHForest
 from ..db import Database
 from .pyhamutils import get_ham_treemap_from_row

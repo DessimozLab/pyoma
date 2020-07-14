@@ -8,7 +8,6 @@ import time
 import tempfile
 import pandas as pd
 from datasketch import WeightedMinHashGenerator, MinHashLSHForest
-from ..db import Database
 from .pyhamutils import get_ham_treemap_from_row
 from .hashutils import generate_treeweights, row2hash
 import logging
@@ -55,9 +54,7 @@ def leaf_index(tree: ete3.PhyloNode):
 
 
 class LSHBuilderBase(object):
-    def __init__(
-        self, db: Database, numperm=256, taxfilter=None, taxmask=None, **kwargs
-    ):
+    def __init__(self, db, numperm=256, taxfilter=None, taxmask=None, **kwargs):
         self.db = db
         tree_newick = get_newick_tree_from_tax_db(db.tax)
         full_tree = ete3.PhyloTree(tree_newick, format=1)
@@ -141,6 +138,8 @@ class ProfileBuilder(BaseProfileBuilderProcess):
         self.hash_pipeline = None
 
     def setup(self):
+        from ..db import Database
+
         self.builder = LSHBuilderBase(db=Database(self.db_path))
         self.ham_pipeline = functools.partial(
             get_ham_treemap_from_row, tree=self.builder.tree_newick
@@ -215,6 +214,8 @@ class Collector(BaseProfileBuilderProcess):
         return hashes, species, lsh_forest
 
     def setup(self):
+        from ..db import Database
+
         self.builder = LSHBuilderBase(db=Database(self.db_path))
         self.save_start = time.time()
         self.global_time = time.time()
@@ -278,6 +279,8 @@ class HogGenerator(SourceProcess):
         self.chunk_size = chunk_size
 
     def generate_data(self):
+        from ..db import Database
+
         db = Database(self.db_path)
         nr_groups = db.get_nr_toplevel_hogs()
         chunk = {}

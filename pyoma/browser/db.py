@@ -24,6 +24,7 @@ import tables.file as _tables_file
 from Bio.UniProt import GOA
 
 from .. import version
+from .hogprofile import Profiler
 from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .KmerEncoder import KmerEncoder
 from .geneontology import GeneOntology, OntologyParser, GOAspect
@@ -177,6 +178,7 @@ class Database(object):
         self.tax = Taxonomy(
             self.db.root.Taxonomy.read(), genomes={g.ncbi_taxon_id: g for g in genomes}
         )
+        self.hog_profiler = None
         self._re_fam = None
         self.format_hogid = None
         self._set_hogid_schema()
@@ -1182,6 +1184,30 @@ class Database(object):
         )
 
         return fam_row, sim_fams_df
+
+    def get_families_with_similar_hog_profile(self, fam, max_nr_similar_fams=50):
+        """Retrieves the family nr of families that have a similar
+        presence/loss/gain pattern of genes, i.e. potentially
+        co-evolving families.
+
+        :param (int,bytes,str) fam: the family of interest, either as a
+            hog-id or as a integer identifier
+
+        :param int max_nr_similar_fams: the maximum number of families that
+            is returned. Can also be fewer (or even zero).
+
+        :returns dict: a dictionary fam_nr -> np.array indicating which species
+            contain at least one gene."""
+        if not isinstance(fam, int):
+            fam = self.parse_hog_id(fam)
+        try:
+            if self.hog_profiler is None:
+                # create and cache Profiler instance. Not done in constructor
+                # as otherwise building of profiles fails.
+                self.hog_profiler = Profiler(self)
+            return self.hog_profiler.query(fam, k=max_nr_similar_fams)
+        except KeyError:
+            return {}
 
     def entrynrs_with_ec_annotation(self, ec):
         if isinstance(ec, str):

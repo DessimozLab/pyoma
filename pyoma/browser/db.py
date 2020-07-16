@@ -24,6 +24,7 @@ import tables.file as _tables_file
 from Bio.UniProt import GOA
 
 from .. import version
+from .hogprofile import Profiler
 from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .KmerEncoder import KmerEncoder
 from .geneontology import GeneOntology, OntologyParser, GOAspect
@@ -177,6 +178,7 @@ class Database(object):
         self.tax = Taxonomy(
             self.db.root.Taxonomy.read(), genomes={g.ncbi_taxon_id: g for g in genomes}
         )
+        self.hog_profiler = None
         self._re_fam = None
         self.format_hogid = None
         self._set_hogid_schema()
@@ -368,15 +370,42 @@ class Database(object):
         )
         return self.db.get_node("/PairwiseRelation/{}/{}".format(genome, subtab))
 
+    def nr_ortholog_relations(self, entry_nr):
+        """returns the number of orthologous relations for a given entry.
+
+        The return value is a numpy.void tuple with all the gene centric orthology/paralogy
+        counts. The named fields are:
+
+          - *NrPairwiseOrthologs*: nr of pairwise orthologs as computed by OMA
+          - *NrHogInducedPWOrthologs*: nr of induced pairwise orthologs according
+            HOG inference process
+          - *NrHogInducedPWParalogs*: nr of induced pairwise paralogs
+          - *NrOMAGroupOrthologs*: nr of orthologs according to the OMA Groups
+          - *NrAnyOrthologs*: sum of all orthologs according to pairwise orthologs,
+            induced pairwise orthologs and OMA Group based orthologs.
+
+        :param int entry_nr: entry number to check
+        """
+        tab = self.db.get_node("/Protein/OrthologsCountCache")
+        return tab[entry_nr - 1]
+
     def count_vpairs(self, entry_nr):
-        vptab = self._get_vptab(entry_nr)
+        """number of pairwise orthologs
+
+        :see_also: :meth:`nr_ortholog_relations`"""
         try:
-            cnt = count_elements(vptab.where("(EntryNr1=={:d})".format(entry_nr)))
-        except (TypeError, ValueError):
-            cnt = 0
-        return cnt
+            return int(self.nr_ortholog_relations(entry_nr)["NrPairwiseOrthologs"])
+        except tables.NoSuchNodeError:
+            # fallback in case Cache does not exist yet
+            vptab = self._get_vptab(entry_nr)
+            try:
+                cnt = count_elements(vptab.where("(EntryNr1=={:d})".format(entry_nr)))
+            except (TypeError, ValueError):
+                cnt = 0
+            return cnt
 
     def count_homoeologs(self, entry_nr):
+        """number of homoeologs of a given protein entry"""
         pwtab = self._get_pw_tab(entry_nr, "within")
         homolog_typ_nr = pwtab.get_enum("RelType")["homeolog"]
         try:
@@ -674,7 +703,7 @@ class Database(object):
         :param hog_id: the hog_id of interest
 
         :see_also: :meth:`get_hog` that returns a single HOG instance
-        for a specific level or the root level one for a specific HOG id.
+            for a specific level or the root level one for a specific HOG id.
         """
         hog_id_ascii = hog_id if isinstance(hog_id, bytes) else hog_id.encode("ascii")
         arr = self.db.root.HogLevel.read_where("ID == {!r}".format(hog_id_ascii))
@@ -833,10 +862,11 @@ class Database(object):
         If a level is provided, returns the (sub)hog at this level, otherwise
         it will return the deepest (sub)hog for that ID.
 
-        param (bytes,str) hog_id: the query hog id
-        param str level: the taxonomic level of interest, defaults to None
-        param field: the attribute of the HogLevel table to be returned. Defaults
-                     to all attributes of the table."""
+        :param (bytes,str) hog_id: the query hog id
+        :param str level: the taxonomic level of interest, defaults to None
+        :param field: the attribute of the HogLevel table to be returned. Defaults
+                      to all attributes of the table.
+        """
 
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
@@ -868,7 +898,8 @@ class Database(object):
         hog-id is used.
 
         :param bytes hog_id: the query hog id
-        :param str level: the taxonomic level of interest"""
+        :param str level: the taxonomic level of interest
+        """
         return self.get_hog(hog_id, level, field="NrMemberGenes")
 
     def get_orthoxml(self, fam):
@@ -1153,6 +1184,30 @@ class Database(object):
         )
 
         return fam_row, sim_fams_df
+
+    def get_families_with_similar_hog_profile(self, fam, max_nr_similar_fams=50):
+        """Retrieves the family nr of families that have a similar
+        presence/loss/gain pattern of genes, i.e. potentially
+        co-evolving families.
+
+        :param (int,bytes,str) fam: the family of interest, either as a
+            hog-id or as a integer identifier
+
+        :param int max_nr_similar_fams: the maximum number of families that
+            is returned. Can also be fewer (or even zero).
+
+        :returns dict: a dictionary fam_nr -> np.array indicating which species
+            contain at least one gene."""
+        if not isinstance(fam, int):
+            fam = self.parse_hog_id(fam)
+        try:
+            if self.hog_profiler is None:
+                # create and cache Profiler instance. Not done in constructor
+                # as otherwise building of profiles fails.
+                self.hog_profiler = Profiler(self)
+            return self.hog_profiler.query(fam, k=max_nr_similar_fams)
+        except KeyError:
+            return {}
 
     def entrynrs_with_ec_annotation(self, ec):
         if isinstance(ec, str):

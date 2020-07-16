@@ -97,11 +97,13 @@ GetVPsForGenome := proc(g)
     ReadDb(ddir.'/ServerVPs.db');
     gNr := SearchArray(g,genomes);
     vps := [seq(table(), NS)];
+    nr_orthologs := CreateArray(1..NS):
     for i from Goff[gNr]+1 to Goff[gNr+1] do
         for vp in parse(SearchTag('VP',Entry(i))) do
             gNr2 := SearchOrderedArray(vp-1, Goff);
             vps[gNr2, [i-Goff[gNr], vp-Goff[gNr2]]] := [i,vp,'n/a', -1, -1, -1];
             #vptab := append(vptab, [i, vp, 'n/a', -1, -1, -1])
+            nr_orthologs[gNr2] := nr_orthologs[gNr2] + 1;
         od:
     od:
     for gNr2 to NS do
@@ -115,7 +117,11 @@ GetVPsForGenome := proc(g)
             t := g1; g1 := g2; g2 := t:
             __reverse := true;
         fi:
-        ReadProgram(aadir.'/'.g1.'/'.g2);
+        err := traperror(ReadProgram(aadir.'/'.g1.'/'.g2));
+        if err=lasterror then
+            warning('could not load '.aadir.'/'.g1.'/'.g2);
+            if nr_orthologs[gNr2]>0 then  exit(1); fi:
+        fi:
     od:
     vptab := []:
     for gNr2 to NS do for key in Indices(vps[gNr2]) do

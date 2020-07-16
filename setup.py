@@ -12,9 +12,12 @@ req_packages = [
     "fuzzyset>=0.0.17",
     "tqdm",
     "pyopa>=0.8",
-    "pandas>=0.21",
+    "pandas>=0.22",
     "biopython",
+    "datasketch",
 ]
+if sys.version_info < (3, 6):
+    req_packages.extend(["biopython<1.77"])
 if sys.version_info < (3, 3):
     req_packages.extend(["mock", "functools32", "tables<3.6.0"])
 
@@ -41,10 +44,10 @@ setup(
         "Programming Language :: Python :: 2",
         "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.4",
         "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
     ],
     scripts=["bin/importdata.py", "bin/oma2hdf"],
     package_data={"pyoma": ["browser/*.drw"]},
@@ -57,6 +60,7 @@ setup(
             "scikit-learn",
             "scikit-fuzzy",
             "lark-parser",
+            "pyham",
         ]
     },
     dependency_links=[

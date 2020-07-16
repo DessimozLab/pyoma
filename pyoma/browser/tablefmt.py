@@ -51,6 +51,15 @@ class ProteinTable(tables.IsDescription):
     RootHogDownStream = tables.Int32Col(pos=19, dflt=-1)
 
 
+class ProteinCacheInfo(tables.IsDescription):
+    EntryNr = tables.UInt32Col(pos=0)
+    NrPairwiseOrthologs = tables.UInt32Col(pos=1)
+    NrHogInducedPWOrthologs = tables.UInt32Col(pos=2)
+    NrHogInducedPWParalogs = tables.UInt32Col(pos=3)
+    NrOMAGroupOrthologs = tables.UInt32Col(pos=4)
+    NrAnyOrthologs = tables.UInt32Col(pos=5)
+
+
 class LocusTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     Start = tables.UInt32Col(pos=2)

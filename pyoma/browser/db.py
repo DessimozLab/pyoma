@@ -1399,7 +1399,7 @@ class Database(object):
         positions = self.mds.fit(dist_matrix).embedding_
 
         for i in range(len(idx_map)):
-            gene_similarity_vals[idx_map[i]] = positions[i]
+            gene_similarity_vals[idx_map[i]] = positions[i][0]
 
         return go_annots_not_fetched, gene_similarity_vals
 

@@ -14,6 +14,8 @@ import time
 import functools
 from bisect import bisect_left
 from xml.etree import ElementTree as et
+from datasketch import MinHash
+from sklearn import manifold
 import fuzzyset
 import dateutil
 import numpy
@@ -181,6 +183,7 @@ class Database(object):
         self.hog_profiler = None
         self._re_fam = None
         self.format_hogid = None
+        self.mds = manifold.MDS(n_components=1, max_iter=100, dissimilarity="precomputed", n_jobs=-1)
         self._set_hogid_schema()
 
     def close(self):
@@ -1349,6 +1352,56 @@ class Database(object):
                 + "\n"
             )
         )
+
+    def get_gene_similarities_hog(self, entry_id):
+        """Retrieve the gene similarity matrix for a HOG
+
+        The method returns the 1-D coordinates of the genes of a HOG, indicating
+        how close or far they are. Alongside this, the method also returns the 
+        genes that don't have any go_annotatations present.
+
+        The result is returned as a dictionary
+
+        :param str entry_id: HOG ID
+        """
+
+        entry_nr = self.id_resolver.resolve(entry_id)
+        hog_members = self.member_of_fam(self.hog_family(entry_nr)) # Stores all the members of the given HoG
+
+        go_annots_not_fetched = []
+        minhash_signatures = {}
+        idx_map = {}
+        gene_similarity_vals = {}
+
+        total_members = len(hog_members[:]['EntryNr'])
+
+        for i,member in enumerate(hog_members[:]['EntryNr']):
+            annos = self.get_gene_ontology_annotations(entry_nr=self.id_resolver.resolve(member), as_dataframe=False)
+            
+            if len(annos)==0:
+                go_annots_not_fetched.append(member)
+            else:
+                idx_map[(i-len(go_annots_not_fetched))] = member
+                minhash_signatures[member] = MinHash()
+                
+                for d in ((annos[:]['TermNr']).astype('unicode')):
+                    minhash_signatures[member].update(d.encode('utf8'))
+
+        n = total_members-len(go_annots_not_fetched)
+        dist_matrix = np.zeros((n, n))
+
+        for p1 in range(0,n):
+            for p2 in range(p1+1, n):
+                score = minhash_signatures[idx_map[p1]].jaccard(minhash_signatures[idx_map[p2]])
+                dist_matrix[p1][p2] =  1 - score
+                dist_matrix[p2][p1] = 1 - score
+
+        positions = self.mds.fit(dist_matrix).embedding_
+
+        for i in range(len(idx_map)):
+            gene_similarity_vals[idx_map[i]] = positions[i]
+
+        return go_annots_not_fetched, gene_similarity_vals
 
 
 class PerGenomeMetaData(object):

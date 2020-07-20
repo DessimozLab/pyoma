@@ -18,7 +18,11 @@ if __name__ == "__main__":
         "-c", "--cache-file", default=None, help="Path to a temporary cache file"
     )
     parser.add_argument(
-        "-f", "--overwrite", action="store_true", default=False, help="Overwrite existing cache values"
+        "-f",
+        "--overwrite",
+        action="store_true",
+        default=False,
+        help="Overwrite existing cache values",
     )
     conf = parser.parse_args()
     logging.basicConfig(level=30 - 10 * min(conf.v, 2))

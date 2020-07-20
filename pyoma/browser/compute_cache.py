@@ -29,11 +29,11 @@ def signal_handler(signum, frame):
 
 def length_limited_set_formatter(s):
     if len(s) > 10:
-       x = s.pop()
-       s.add(x)
-       return "Set(size={}, ex: {})".format(len(s),x)
+        x = s.pop()
+        s.add(x)
+        return "Set(size={}, ex: {})".format(len(s), x)
     else:
-       return str(s)
+        return str(s)
 
 
 def are_orthologous(a: Protein, b: Protein):
@@ -66,7 +66,9 @@ class CacheBuilderWorker(mp.Process):
                     res = getattr(self, fun)(*params)
                     self.out_queue.put((job, res))
             except Empty:
-                logger.warning("No item nor termination signal received in Queue. Giving up")
+                logger.warning(
+                    "No item nor termination signal received in Queue. Giving up"
+                )
                 logger.exception("Work-queue is empty")
             self.out_queue.put("DONE")
         except KeyboardInterrupt:
@@ -107,15 +109,22 @@ class CacheBuilderWorker(mp.Process):
         counts = numpy.zeros(
             len(fam_members), dtype=tables.dtype_from_descr(ProteinCacheInfo)
         )
-        for i, p1 in tqdm(enumerate(fam_members), disable=len(fam_members)<500, desc="fam {}".format(fam)):
+        for i, p1 in tqdm(
+            enumerate(fam_members),
+            disable=len(fam_members) < 500,
+            desc="fam {}".format(fam),
+        ):
             vps = set(self.load_vps(p1.entry_nr))
             ind_orth = set(p2.entry_nr for p2 in fam_members if are_orthologous(p1, p2))
             grp = grp_members.get(p1.group, set([])) - set([p1.entry_nr])
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
                     "entry {}: vps: {} ipw: {} grp: {} any: {}".format(
-                         p1.entry_nr, length_limited_set_formatter(vps), length_limited_set_formatter(ind_orth), 
-                         length_limited_set_formatter(grp), length_limited_set_formatter(vps | ind_orth | grp)
+                        p1.entry_nr,
+                        length_limited_set_formatter(vps),
+                        length_limited_set_formatter(ind_orth),
+                        length_limited_set_formatter(grp),
+                        length_limited_set_formatter(vps | ind_orth | grp),
                     )
                 )
             counts[i]["EntryNr"] = p1.entry_nr

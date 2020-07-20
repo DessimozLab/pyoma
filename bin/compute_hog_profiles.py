@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from pyoma.browser.hogprofile import compute_profiles
+from pyoma.browser.hogprofile.build import compute_profiles
 import logging
 import argparse
 

@@ -17,6 +17,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c", "--cache-file", default=None, help="Path to a temporary cache file"
     )
+    parser.add_argument(
+        "-f",
+        "--overwrite",
+        action="store_true",
+        default=False,
+        help="Overwrite existing cache values",
+    )
     conf = parser.parse_args()
     logging.basicConfig(level=30 - 10 * min(conf.v, 2))
 
@@ -24,5 +31,6 @@ if __name__ == "__main__":
         conf.hdf5,
         "/Protein/OrthologsCountCache",
         conf.nr_procs,
+        force=conf.overwrite,
         tmp_cache=conf.cache_file,
     )

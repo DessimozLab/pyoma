@@ -7,6 +7,8 @@ import multiprocessing as mp
 import time
 import tempfile
 import pandas as pd
+import collections
+import itertools
 from datasketch import WeightedMinHashGenerator, MinHashLSHForest
 from .pyhamutils import get_ham_treemap_from_row
 from .hashutils import generate_treeweights, row2hash
@@ -17,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 def get_newick_tree_from_tax_db(tax):
+    def traverse(node):
+        yield node
+        if "children" in node:
+            for child in node["children"]:
+                yield from traverse(child)
+
     def rec(node):
         if "children" not in node:
             return str(node["id"])
@@ -25,7 +33,22 @@ def get_newick_tree_from_tax_db(tax):
             children.append(rec(child))
         return "({}){}".format(",".join(children), node["id"])
 
-    return rec(tax.as_dict()) + ";"
+    def get_duplicates(node):
+        c = collections.Counter(x["id"] for x in traverse(node))
+        return list(
+            item[0] for item in itertools.takewhile(lambda x: x[1] > 1, c.most_common())
+        )
+
+    def rename_internal_duplicates(node, duplicates):
+        for n in traverse(node):
+            if n["id"] in duplicates and "children" in n:
+                n["id"] = "{}Rep".format(n["id"])
+
+    taxdict = tax.as_dict()
+    dupl = get_duplicates(taxdict)
+    rename_internal_duplicates(taxdict, dupl)
+    res = rec(taxdict) + ";"
+    return res
 
 
 def filter_tree(tree: ete3.PhyloNode, root_node=None, taxfilter=None):

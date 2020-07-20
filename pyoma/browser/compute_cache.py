@@ -9,9 +9,10 @@ import shutil
 import time
 import os
 import sys
+import functools
 
 from tqdm import tqdm
-
+from queue import Empty
 from .db import Database
 from .tablefmt import ProteinCacheInfo
 from os.path import commonprefix, split
@@ -24,6 +25,15 @@ Protein = collections.namedtuple("Protein", ("entry_nr", "hog_id", "group"))
 def signal_handler(signum, frame):
     logger.info("received signal " + str(signum))
     raise KeyboardInterrupt(signum)
+
+
+def length_limited_set_formatter(s):
+    if len(s) > 10:
+       x = s.pop()
+       s.add(x)
+       return "Set(size={}, ex: {})".format(len(s),x)
+    else:
+       return str(s)
 
 
 def are_orthologous(a: Protein, b: Protein):
@@ -47,16 +57,22 @@ class CacheBuilderWorker(mp.Process):
     def run(self):
         self.db = Database(self.db_fpath)
         self.h5 = self.db.get_hdf5_handle()
+        timelimit_get_from_in_queue = functools.partial(self.in_queue.get, timeout=120)
 
         try:
-            for job in iter(self.in_queue.get, None):
-                fun, params = job
-                res = getattr(self, fun)(*params)
-                self.out_queue.put((job, res))
-            self.out_queue.put(None)
+            try:
+                for job in iter(timelimit_get_from_in_queue, None):
+                    fun, params = job
+                    res = getattr(self, fun)(*params)
+                    self.out_queue.put((job, res))
+            except Empty:
+                logger.warning("No item nor termination signal received in Queue. Giving up")
+                logger.exception("Work-queue is empty")
+            self.out_queue.put("DONE")
         except KeyboardInterrupt:
             logger.info("received interrupt. Terminating")
         self.db.close()
+        logger.info("terminating worker process {}".format(self.name))
 
     def load_fam_members(self, fam):
         members = []
@@ -83,6 +99,7 @@ class CacheBuilderWorker(mp.Process):
     def analyse_fam(self, fam):
         logger.debug("analysing family {}".format(fam))
         fam_members = self.load_fam_members(fam)
+        logger.debug("family {} with {} members".format(fam, len(fam_members)))
         grp_members = {
             grp: set(self.load_grp_members(grp))
             for grp in set(z.group for z in fam_members if z.group > 0)
@@ -90,15 +107,17 @@ class CacheBuilderWorker(mp.Process):
         counts = numpy.zeros(
             len(fam_members), dtype=tables.dtype_from_descr(ProteinCacheInfo)
         )
-        for i, p1 in enumerate(fam_members):
+        for i, p1 in tqdm(enumerate(fam_members), disable=len(fam_members)<500, desc="fam {}".format(fam)):
             vps = set(self.load_vps(p1.entry_nr))
             ind_orth = set(p2.entry_nr for p2 in fam_members if are_orthologous(p1, p2))
             grp = grp_members.get(p1.group, set([])) - set([p1.entry_nr])
-            logger.debug(
-                "entry {}: vps: {} ipw: {} grp: {} any: {}".format(
-                    p1.entry_nr, vps, ind_orth, grp, vps | ind_orth | grp
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "entry {}: vps: {} ipw: {} grp: {} any: {}".format(
+                         p1.entry_nr, length_limited_set_formatter(vps), length_limited_set_formatter(ind_orth), 
+                         length_limited_set_formatter(grp), length_limited_set_formatter(vps | ind_orth | grp)
+                    )
                 )
-            )
             counts[i]["EntryNr"] = p1.entry_nr
             counts[i]["NrPairwiseOrthologs"] = len(vps)
             counts[i]["NrHogInducedPWOrthologs"] = len(ind_orth)
@@ -125,6 +144,8 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
     result_queue = mp.Queue()
     nr_procs = nr_procs if nr_procs else mp.cpu_count()
 
+    db = Database(db_fpath)
+    nr_entries = len(db.get_hdf5_handle().get_node("/Protein/Entries"))
     if from_cache is not None and os.path.isfile(from_cache):
         with tables.open_file(from_cache, "r") as cache:
             results = [cache.root.results.read()]
@@ -136,7 +157,6 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
             )
         )
     else:
-        db = Database(db_fpath)
         nr_fams = db.get_nr_toplevel_hogs()
         singletons = [
             (int(r["EntryNr"]), int(r["OmaGroup"]))
@@ -144,8 +164,6 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
             .get_node("/Protein/Entries")
             .where('OmaHOG == b""')
         ]
-        nr_entries = len(db.get_hdf5_handle().get_node("/Protein/Entries"))
-        db.close()
 
         logger.info(
             "found {} hog and {} singleton jobs to be computed".format(
@@ -158,6 +176,7 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
             "nr of jobs: {} (expected {})".format(len(jobs), nr_fams + len(singletons))
         )
         results = []
+    db.close()
 
     workers = []
     for i in range(nr_procs):
@@ -178,8 +197,9 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
         logger.info("start to receive results")
         last_cache_timestamp = time.time()
         for reply in tqdm(iter(result_queue.get, None), total=len(jobs)):
-            if reply is None:
+            if reply == "DONE":
                 finished += 1
+                logger.info("{} workers finished".format(finished))
                 if finished == nr_procs:
                     if len(pending_jobs) > 0:
                         logger.error(
@@ -198,8 +218,10 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
                     )
                     write_cache(from_cache, sofar_results, pending_jobs)
                     last_cache_timestamp = time.time()
+        logger.info("exit receiver loop. joining workers...")
         for w in workers:
             w.join()
+        logger.debug("all workers joined")
     except KeyboardInterrupt as e:
         logger.info("recived interrupt. writeing out temp results")
         sofar_results = numpy.lib.recfunctions.stack_arrays(results, usemask=False)
@@ -210,7 +232,7 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
 
     ret = numpy.lib.recfunctions.stack_arrays(results, usemask=False)
     ret.sort(order="EntryNr")
-    print(ret)
+    logger.info("sorted results: {}".format(ret))
     assert check_all_there(nr_entries, ret)
     return ret
 

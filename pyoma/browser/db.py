@@ -29,6 +29,7 @@ from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .KmerEncoder import KmerEncoder
 from .geneontology import GeneOntology, OntologyParser, GOAspect
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
+from .decorators import timethis
 
 logger = logging.getLogger(__name__)
 
@@ -2396,6 +2397,7 @@ class XrefIdMapper(object):
             mapped_junks.append(self.xref_tab.read_where(condition))
         return numpy.lib.recfunctions.stack_arrays(mapped_junks, usemask=False)
 
+    @timethis(logging.DEBUG)
     def search_xref(self, xref, is_prefix=False, match_any_substring=False):
         """identify proteins associcated with `xref`.
 
@@ -2426,6 +2428,7 @@ class XrefIdMapper(object):
             res = self.xref_tab.read_where(cond)
         if len(res) > 0 and len(self.idtype) < len(self.xrefEnum):
             res = res[numpy.in1d(res["XRefSource"], list(self.idtype))]
+
         return res
 
     def source_as_string(self, source):

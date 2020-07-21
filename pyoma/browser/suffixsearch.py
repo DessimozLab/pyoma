@@ -389,9 +389,8 @@ class SuffixSearcher(object):
                 jj = bisect_left(slicer, query_after)
                 if slicer[jj] == query or slicer[jj - 1] != query:
                     raise RuntimeError("index broken, should not happen")
-                # Left most found.
                 t2 = time.time()
-                # Find entry numbers and filter to remove incorrect entries
+                # Find row numbers
                 res = (
                     numpy.searchsorted(self.offset_arr, self.suffix_arr[ii:jj] + 1) - 1
                 )

@@ -2435,6 +2435,30 @@ class XrefIdMapper(object):
 
         return res
 
+    def search_id(self, query, limit=None):
+        source_filter = None
+        try:
+            prefix, term = query.split(":", maxsplit=1)
+            if prefix in self.xrefEnum:
+                source_filter = self.xrefEnum[prefix]
+            else:
+                term = query
+        except ValueError:
+            term = query
+
+        result = collections.defaultdict(dict)
+        for xref_row in self.xref_index.find(term):
+            xref = self.xref_tab[xref_row]
+            if not source_filter or xref["XRefSource"] == source_filter:
+                source = self.xrefEnum(xref["XRefSource"])
+                try:
+                    result[xref["EntryNr"]][source].append(xref["XRefId"].decode())
+                except KeyError:
+                    result[xref["EntryNr"]][source] = [xref["XRefId"].decode()]
+            if limit is not None and len(result) >= limit:
+                break
+        return result
+
     def source_as_string(self, source):
         """string representation of xref source enum value
 

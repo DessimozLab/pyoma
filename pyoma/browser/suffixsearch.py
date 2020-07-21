@@ -385,11 +385,11 @@ class SuffixSearcher(object):
             ii = bisect_left(slicer, query)
             t1 = time.time()
             if ii and (slicer[ii] == query):
+                query_after = query[:-1] + chr(query[-1] + 1).encode("utf-8")
+                jj = bisect_left(slicer, query_after)
+                if slicer[jj] == query or slicer[jj - 1] != query:
+                    raise RuntimeError("index broken, should not happen")
                 # Left most found.
-                jj = ii + 1
-                while (jj < len(slicer)) and (slicer[jj] == query):
-                    # zoom to end -> -> ->
-                    jj += 1
                 t2 = time.time()
                 # Find entry numbers and filter to remove incorrect entries
                 res = (
@@ -397,8 +397,8 @@ class SuffixSearcher(object):
                 )
                 t3 = time.time()
                 logger.debug(
-                    "SuffixIndex.find({}) bisect: {}, zoom: {}, extract: {}".format(
-                        query, t1 - t0, t2 - t1, t3 - t2
+                    "SuffixIndex.find({}) bisect: {}, zoom: {}, extract: {} --> {}rows".format(
+                        query, t1 - t0, t2 - t1, t3 - t2, len(res)
                     )
                 )
                 return res

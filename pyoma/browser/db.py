@@ -179,6 +179,10 @@ class Database(object):
         self.tax = Taxonomy(
             self.db.root.Taxonomy.read(), genomes={g.ncbi_taxon_id: g for g in genomes}
         )
+        try:
+            self.desc_searcher = DescriptionSearcher(self)
+        except SuffixIndexError:
+            self.desc_searcher = None
         self.hog_profiler = None
         self._re_fam = None
         self.format_hogid = None
@@ -2536,6 +2540,17 @@ class DomainNameIdMapper(object):
             "source": info["Source"].decode(),
             "domainid": domain_id.decode(),
         }
+
+
+class DescriptionSearcher(object):
+    def __init__(self, db):
+        self.entry_tab = db.get_hdf5_handle().get_node("/Protein/Entries")
+        self.desc_index = SuffixSearcher.from_tablecolumn(
+            self.entry_tab, "DescriptionOffset"
+        )
+
+    def search_term(self, term):
+        return self.desc_index.find(term)
 
 
 class FastMapper(object):

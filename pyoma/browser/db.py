@@ -1212,7 +1212,7 @@ class Database(object):
                 self.hog_profiler = Profiler(self)
             return self.hog_profiler.query(fam, k=max_nr_similar_fams)
         except KeyError:
-            return {}
+            return None
 
     def entrynrs_with_ec_annotation(self, ec):
         if isinstance(ec, str):

@@ -56,9 +56,7 @@ class Profiler(object):
 
     def _select_key_levels_and_ranges(self):
         def nodes_of_size(node, size):
-            for n in node.iter_leaves(
-                is_leaf_fn=lambda n: node.size <= size and node.size > 0.1 * size
-            ):
+            for n in node.iter_leaves(is_leaf_fn=lambda n: size >= n.size > 0.1 * size):
                 yield n
 
         indexes = {}
@@ -77,5 +75,13 @@ class Profiler(object):
         hashvalues = self.hashes[fam_nr].reshape(self.num_perm, 2)
         minhash = datasketch.WeightedMinHash(seed=1, hashvalues=hashvalues)
         similar = self.forest.query(minhash, k=k)
-        similar_fams = {int(fam): self.species_profile[int(fam)] for fam in similar}
-        return similar_fams
+        return ProfileSearchResult(self, fam_nr, similar)
+
+
+class ProfileSearchResult(object):
+    def __init__(self, p: Profiler, query_fam, similar_fams):
+        self.query_fam = query_fam
+        self.similar = {int(fam): p.species_profile[int(fam)] for fam in similar_fams}
+        self.query_profile = p.species_profile[query_fam]
+        self.tax_classes = p.tax_range_index
+        self.species_names = p.species_names

@@ -64,7 +64,7 @@ class Profiler(object):
         indexes = {}
         for size in (50, 200):
             indexes[size] = {
-                n.sciname: n.range for n in nodes_of_size(self.species_tree)
+                n.sciname: n.range for n in nodes_of_size(self.species_tree, size)
             }
         indexes["root"] = {n.sciname: n.range for n in self.species_tree.children}
         return indexes

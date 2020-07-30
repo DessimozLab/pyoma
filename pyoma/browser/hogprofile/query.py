@@ -17,12 +17,14 @@ class Profiler(object):
         self.tax_range_index = self._select_key_levels_and_ranges()
 
     def _map_taxid_to_name(self, taxid):
+        if int(taxid) == 0:
+            return "LUCA"
         tax_row = self.db.tax._taxon_from_numeric(int(taxid))
         return tax_row["Name"].decode()
 
     def _build_tree_range_lookup(self):
         leaf_idx = leaf_index(self.species_tree)
-        species_names = [] * len(leaf_idx)
+        species_names = [""] * len(leaf_idx)
         for x in self.species_tree.iter_leaves():
             species_names[leaf_idx[x.name]] = self._map_taxid_to_name(x.name)
 
@@ -54,12 +56,13 @@ class Profiler(object):
 
     def _select_key_levels_and_ranges(self):
         def nodes_of_size(node, size):
-            for n in node.iter_leaves(is_leaf_fn=lambda n: node.size < size):
-                if n.size >= int(0.8 * size):
-                    yield n
+            for n in node.iter_leaves(
+                is_leaf_fn=lambda n: node.size <= size and node.size > 0.1 * size
+            ):
+                yield n
 
         indexes = {}
-        for size in (20, 60, 200, 400):
+        for size in (50, 200):
             indexes[size] = {
                 n.sciname: n.range for n in nodes_of_size(self.species_tree)
             }

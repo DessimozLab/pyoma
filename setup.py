@@ -15,6 +15,7 @@ req_packages = [
     'biopython >= 1.76 ; python_version >= "3.6"',
     'biopython == 1.76 ; python_version < "3.6"',
     "datasketch",
+    "ete3",
 ]
 
 cur_dir = os.path.abspath(os.path.dirname(__file__))
@@ -33,16 +34,19 @@ with open(os.path.join(cur_dir, "README.md"), encoding="utf-8") as f:
 setup(
     name=name,
     version=__version__,
-    author="Adrian Altenhoff",
-    author_email="adrian.altenhoff@inf.ethz.ch",
-    description="python library to interact and build OMA hdf5 files",
+    author="DessimozLab",
+    author_email="contact@omabrowser.org",
+    description="library to interact and build OMA hdf5 files",
     long_description=long_description,
+    long_description_content_type="text/markdown",
+    licence="MPL 2.0",
     packages=find_packages(),
     classifiers=[
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
         "Intended Audience :: Science/Research",
         "Topic :: Scientific/Engineering :: Bio-Informatics",
+        "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
@@ -61,8 +65,10 @@ setup(
             "scikit-fuzzy",
             "lark-parser",
             "pyham",
-        ]
+        ],
+        "docs": ["sphinx"],
     },
+    test_require=["nose"],
     dependency_links=[
         "git+ssh://gitolite@lab.dessimoz.org:2222/family-analyzer@master#egg=familyanalyzer"
     ],

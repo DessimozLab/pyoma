@@ -12,7 +12,7 @@ req_packages = [
     "tqdm",
     "pyopa >= 0.8",
     "pandas >= 0.22",
-    'biopython >= 1.76, == 1.76 ; python_version < "3.6"',
+    'biopython >= 1.76; python_version >= "3.6", == 1.76 ; python_version < "3.6"',
     "datasketch",
 ]
 

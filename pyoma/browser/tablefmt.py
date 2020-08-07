@@ -152,7 +152,7 @@ class ECTable(tables.IsDescription):
 
 
 class GenomeTable(tables.IsDescription):
-    NCBITaxonId = tables.UInt32Col(pos=0)
+    NCBITaxonId = tables.Int32Col(pos=0)
     UniProtSpeciesCode = tables.StringCol(5, pos=1)
     TotEntries = tables.UInt32Col(pos=2)
     TotAA = tables.UInt32Col(pos=3)
@@ -168,8 +168,8 @@ class GenomeTable(tables.IsDescription):
 
 
 class TaxonomyTable(tables.IsDescription):
-    NCBITaxonId = tables.UInt32Col(pos=0)
-    ParentTaxonId = tables.UInt32Col(pos=1)
+    NCBITaxonId = tables.Int32Col(pos=0)
+    ParentTaxonId = tables.Int32Col(pos=1)
     Name = tables.StringCol(255, pos=2)
 
 

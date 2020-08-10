@@ -384,10 +384,12 @@ class SuffixSearcher(object):
             t0 = time.time()
             ii = bisect_left(slicer, query)
             t1 = time.time()
-            if ii and (slicer[ii] == query):
+            if ii and ii < len(self.suffix_arr) and (slicer[ii] == query):
                 query_after = query[:-1] + chr(query[-1] + 1).encode("utf-8")
                 jj = bisect_left(slicer, query_after)
-                if slicer[jj] == query or slicer[jj - 1] != query:
+                if (jj < len(self.suffix_arr) and slicer[jj] == query) or slicer[
+                    jj - 1
+                ] != query:
                     raise RuntimeError("index broken, should not happen")
                 t2 = time.time()
                 # Find row numbers

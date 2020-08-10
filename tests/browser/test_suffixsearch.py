@@ -267,6 +267,12 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
                         combined = b"".join(tab[target : target + 2]["CharCol"])
                         self.assertIn(query, combined)
 
+    def test_non_existing_pattern(self):
+        tab = self.h5.get_node("/test/table")
+        search = suffixsearch.SuffixSearcher.from_tablecolumn(tab, "VarCharOff")
+        res = search.find("ZZZZzz")
+        self.assertEqual(0, len(res))
+
 
 class SuffixArrayVarLenSearchTestsCaseSensitive(
     SuffixArrayVarLenSearchTestsCaseInsensitive

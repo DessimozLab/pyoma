@@ -1552,10 +1552,10 @@ class SequenceSearch(object):
         # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
         c = collections.Counter()
         for z in map(
-            lambda kmer: numpy.unique(self.kmer_lookup[int(kmer)], return_counts=True),
+            lambda kmer: numpy.unique(self.kmer_lookup[int(kmer)]),
             self.encoder.decompose(seq),
         ):
-            c.update(dict(zip(*z)))
+            c.update(z)
 
         # 2. Filter to top n if necessary
         z = len(seq) - self.k + 1

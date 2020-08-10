@@ -205,7 +205,6 @@ class DatabaseTests(unittest.TestCase):
                 ),
             )
 
-    @unittest.skip("no solution found to fix yet!")
     def test_specific_approx_search_that_failed_on_jenkins(self):
         # TODO fix this problem!
         enrs = [15885, 16452]

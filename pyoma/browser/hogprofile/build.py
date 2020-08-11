@@ -254,7 +254,10 @@ class HogGenerator(SourceProcess):
         chunk = {}
         logger.debug("nr of toplevel hogs: {}".format(nr_groups))
         for fam in range(1, nr_groups + 1):
-            orthoxml = db.get_orthoxml(fam).decode()
+            try:
+                orthoxml = db.get_orthoxml(fam).decode()
+            except ValueError as e:
+                continue
             nr_species = orthoxml.count("<species name=")
             if (self.max_hogsize is None or nr_species < self.max_hogsize) and (
                 self.min_hogsize is None or nr_species >= self.min_hogsize

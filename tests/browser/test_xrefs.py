@@ -15,6 +15,12 @@ import os
 from pyoma.browser import convert as pyoma
 
 
+@mock.patch.object(
+    pyoma.UniProtAdditionalXRefImporter,
+    "iter_xreftuples_for_up",
+    autospec=True,
+    return_value=[],
+)
 class XRefParsingTest(unittest.TestCase):
     def _create_genome_info(self):
         gs = numpy.zeros(3, dtype=tables.dtype_from_descr(pyoma.tablefmt.GenomeTable))
@@ -26,7 +32,7 @@ class XRefParsingTest(unittest.TestCase):
     def setUp(self):
         self.data = io.StringIO(
             """<E><ID>ENSG00000204640</ID><AC>ENSP00000366061; ENST00000376865</AC><DE>hypotetical protein</DE><GI>125233342</GI><UniProt/TrEMBL>P21522</UniProt/TrEMBL></E>
-            <E><ID>BLA22; BLABLA22.Rep22</ID><AC>BLA22.1</AC><EC>3.2.2.-; 4.2.99.18</EC><EntrezGene>32244</EntrezGene><PMP>P21122; Q24S32</PMP><GO>GO:0006270@[[IDA,{'PMID:2167836'}],[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]; GO:0006275@[[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]</GO></E>
+            <E><ID>BLA22; BLABLA22.Rep22</ID><AC>BLA22.1</AC><EC>3.2.2.-; 4.2.99.18</EC><EntrezGene>32244</EntrezGene><SMR>P21122; Q24S32</SMR><GO>GO:0006270@[[IDA,{'PMID:2167836'}],[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]; GO:0006275@[[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]</GO></E>
             <E><UniProt/TrEMBL>L8ECQ9_BACSU</UniProt/TrEMBL><SwissProt_AC>Q6CI62</SwissProt_AC><SwissProt>ASF1_YARLI</SwissProt><ID>FBgn0218776</ID><AC>FBpp0245919; FBtr0247427</AC><DE>β-hemoglobin</DE><GO></GO></E>
             <E><OS>CAEBR</OS><NR>1</NR><OG>0</OG><AC>CBG23988</AC><CHR>chrI</CHR><ID>CBG23988</ID><LOC>join(80..1057,2068..2664)</LOC><UniProt/TrEMBL>A8WJQ9_CAEBR</UniProt/TrEMBL><GO>GO:0016020@[[IEA,{'GO_REF:038'}]]; GO:0016021@[[IEA,{'GO_REF:038'}]]</GO><SEQ>A</SEQ></E>"""
         )
@@ -34,6 +40,7 @@ class XRefParsingTest(unittest.TestCase):
         self.desc_manager = mock.Mock()
         self.go_manager = mock.Mock()
         self.approx_adder = pyoma.ApproximateXRefImporter()
+        self.up_extra_adder = pyoma.UniProtAdditionalXRefImporter()
         self.xref_tab = mock.Mock()
         self.gs = self._create_genome_info()
         self.importer = pyoma.XRefImporter(
@@ -44,9 +51,10 @@ class XRefParsingTest(unittest.TestCase):
             self.go_manager,
             self.desc_manager,
             self.approx_adder,
+            self.up_extra_adder,
         )
 
-    def test_standard_handler(self):
+    def test_standard_handler(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get("XRefSource").enum
         verif = pyoma.tablefmt.XRefTable.columns.get("Verification").enum
@@ -56,25 +64,29 @@ class XRefParsingTest(unittest.TestCase):
             self.importer.xrefs,
         )
 
-    def test_multi_handler(self):
+    def test_multi_handler(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get("XRefSource").enum
         verif = pyoma.tablefmt.XRefTable.columns.get("Verification").enum
-        self.assertIn((2, enum.PMP, b"P21122", verif.exact), self.importer.xrefs)
-        self.assertIn((2, enum.PMP, b"Q24S32", verif.exact), self.importer.xrefs)
+        self.assertIn(
+            (2, enum["Swiss Model"], b"P21122", verif.unchecked), self.importer.xrefs
+        )
+        self.assertIn(
+            (2, enum["Swiss Model"], b"Q24S32", verif.unchecked), self.importer.xrefs
+        )
 
-    def test_regex_of_ensembl_ids(self):
+    def test_regex_of_ensembl_ids(self, mock_up):
         for case in ("ENSG00000162687", "ENSMUSP00000162687"):
             match = self.importer.ENS_RE.match(case)
             self.assertIsNotNone(match)
 
-    def test_potential_flush_gets_called(self):
+    def test_potential_flush_gets_called(self, mock_up):
         callback = mock.MagicMock(name="potential_flush")
         self.db_parser.add_post_entry_handler(callback)
         self.db_parser.parse_entrytags(self.data)
         self.assertEqual(callback.call_count, 4)
 
-    def test_ensembgenomes_ids(self):
+    def test_ensembgenomes_ids(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get("XRefSource").enum
         verif = pyoma.tablefmt.XRefTable.columns.get("Verification").enum
@@ -82,7 +94,7 @@ class XRefParsingTest(unittest.TestCase):
             (4, enum.EnsemblGenomes, b"CBG23988", verif.exact), self.importer.xrefs
         )
 
-    def test_uniprot_ids(self):
+    def test_uniprot_ids(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get("XRefSource").enum
         verif = pyoma.tablefmt.XRefTable.columns.get("Verification").enum
@@ -92,17 +104,18 @@ class XRefParsingTest(unittest.TestCase):
         self.assertIn(
             (3, enum["UniProtKB/TrEMBL"], b"Q6CI62", verif.exact), self.importer.xrefs
         )
+        mock_up.assert_called_with(self.up_extra_adder, "A8WJQ9", 4)
 
-    def test_go(self):
+    def test_go(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
         self.assertEqual(len(self.go_manager.add_annotations.call_args_list), 2)
 
-    def test_ec(self):
+    def test_ec(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
         self.assertIn((2, "3.2.2.-"), self.importer.ec)
         self.assertIn((2, "4.2.99.18"), self.importer.ec)
 
-    def test_disambiguate(self):
+    def test_disambiguate(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get("XRefSource").enum
         verif = pyoma.tablefmt.XRefTable.columns.get("Verification").enum
@@ -135,19 +148,30 @@ class XRefParsingTest(unittest.TestCase):
             self.importer.xrefs,
         )
 
-    def test_descriptions_passed_to_description_manager(self):
+    def test_descriptions_passed_to_description_manager(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
         self.assertEqual(len(self.desc_manager.add_description.call_args_list), 2)
         self.assertEqual(
             (3, "β-hemoglobin"), self.desc_manager.add_description.call_args[0]
         )
 
-    def test_remove_duplicated_xrefs(self):
+    def test_remove_duplicated_xrefs(self, mock_up):
         ref = (1, 10, "test_id", "unchecked")
         res = (1, 10, b"test_id", 2)
         self.importer.FLUSH_SIZE = 20
         for i in range(self.importer.FLUSH_SIZE + 1):
             self.importer._add_to_xrefs(*ref)
+        self.xref_tab.append.assert_not_called()
+        self.importer.potential_flush()
+        self.xref_tab.append.assert_called_once_with([res])
+
+    def test_remove_near_duplicated_xrefs(self, mock_up):
+        refs = [(1, 10, "test_id", "unchecked"), (1, 10, "test_id", "exact")]
+        res = (1, 10, b"test_id", 2)
+        self.importer.FLUSH_SIZE = 20
+        for i in range(self.importer.FLUSH_SIZE + 1):
+            for ref in refs:
+                self.importer._add_to_xrefs(*ref)
         self.xref_tab.append.assert_not_called()
         self.importer.potential_flush()
         self.xref_tab.append.assert_called_once_with([res])

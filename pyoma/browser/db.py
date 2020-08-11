@@ -2378,7 +2378,7 @@ class XrefIdMapper(object):
 
     def _combine_query_values(self, field, values):
         parts = ["({}=={})".format(field, z) for z in values]
-        return "|".join(parts)
+        return "(" + "|".join(parts) + ")"
 
     def map_many_entry_nrs(self, entry_nrs):
         """map several entry_nrs with as few db queries as possible
@@ -2388,16 +2388,23 @@ class XrefIdMapper(object):
 
         :param entry_nrs: a list with numeric protein entry ids"""
         mapped_junks = []
-        junk_size = 32 - len(self.idtype)  # respect max number of condition variables.
-        source_condition = self._combine_query_values("XRefSource", self.idtype)
-        for start in range(0, len(entry_nrs), junk_size):
-            condition = "({}) & ({}) & (Verification <= {:d})".format(
+        chunk_size = 32
+        source_condition = None
+        if len(self.idtype) < len(self.xrefEnum):
+            chunk_size -= len(self.idtype)  # respect max number of condition variables.
+            source_condition = self._combine_query_values("XRefSource", self.idtype)
+        for start in range(0, len(entry_nrs), chunk_size):
+            condition_list = [
                 self._combine_query_values(
-                    "EntryNr", entry_nrs[start : start + junk_size]
-                ),
-                source_condition,
-                self._max_verif_for_mapping_entrynrs,
+                    "EntryNr", entry_nrs[start : start + chunk_size]
+                )
+            ]
+            if source_condition:
+                condition_list.append(source_condition)
+            condition_list.append(
+                "(Verification <= {:d})".format(self._max_verif_for_mapping_entrynrs)
             )
+            condition = " & ".join(condition_list)
             mapped_junks.append(self.xref_tab.read_where(condition))
         return numpy.lib.recfunctions.stack_arrays(mapped_junks, usemask=False)
 

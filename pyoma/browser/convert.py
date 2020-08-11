@@ -1,42 +1,43 @@
 from __future__ import division, print_function
-from builtins import str, chr, range, object, super, bytes
 
-import pandas
-from future.standard_library import hooks
-from PySAIS import sais
-from tempfile import NamedTemporaryFile
-from tqdm import tqdm
-import csv
-import resource
-import tables
-import numpy
-import numpy.lib.recfunctions
-import os
-import subprocess
-import errno
-import json
-import time
-import familyanalyzer
-import re
-import multiprocessing as mp
-import lxml.html
 import collections
+import csv
+import errno
+import fileinput
 import gzip
 import hashlib
 import itertools
+import json
+import multiprocessing as mp
 import operator
-import fileinput
+import os
+import re
+import resource
+import subprocess
+import time
+from builtins import str, chr, range, object, super, bytes
+from tempfile import NamedTemporaryFile
 
-from .. import common, version
+import familyanalyzer
+import lxml.html
+import numpy
+import numpy.lib.recfunctions
+import pandas
+import tables
+from PySAIS import sais
+from future.standard_library import hooks
+from tqdm import tqdm
+
 from . import locus_parser
-from . import tablefmt
 from . import suffixsearch
+from . import tablefmt
 from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
-from .geneontology import GeneOntology, OntologyParser
-from .synteny import SyntenyScorer
-from .homoeologs import HomeologsConfidenceCalculator
 from .compute_cache import compute_and_store_cached_data
+from .geneontology import GeneOntology, OntologyParser
+from .homoeologs import HomeologsConfidenceCalculator
+from .synteny import SyntenyScorer
+from .. import common, version
 
 with hooks():
     import urllib.request
@@ -85,13 +86,32 @@ def callDarwinExport(func, drwfile=None):
             return json.loads(rawdata.translate(trans_tab))
 
 
-def uniq(seq):
+def uniq(seq, transform=None):
     """return uniq elements of a list, preserving order
+
+    The transform argument can be used to check the existance
+    on a transformed form of the elements, e.g. only to look
+    at a subset of the attributes/values.
+
+    :Example:
+
+        >>> seq = [(1,2,3),(1,2,4),(2,2,2)]
+        >>> uniq(seq, transform=lambda x: x[:1])
+        [(1, 2, 3), (2, 2, 2)]
+        >>> uniq(seq)
+        [(1, 2, 3), (1, 2, 4), (2, 2, 2)]
+
 
     :param seq: an iterable to be analyzed
     """
+
+    def pass_trough(x):
+        return x
+
     seen = set()
-    return [x for x in seq if not (x in seen or seen.add(x))]
+    if transform is None:
+        transform = pass_trough
+    return [x for x in seq if not (transform(x) in seen or seen.add(transform(x)))]
 
 
 def silentremove(filename):
@@ -875,13 +895,26 @@ class DarwinExporter(object):
                 os.getenv("DARWIN_NETWORK_SCRATCH_PATH"), "approximate_xrefs.tsv"
             )
         )
+        up_mapped_xrefs = UniProtAdditionalXRefImporter(
+            *(
+                os.path.join(os.getenv("DARWIN_NETWORK_SCRATCH_PATH"), z)
+                for z in ("uniprot_xrefs.tsv", "swissprot_xrefs.tsv")
+            )
+        )
         with DescriptionManager(
             self.h5, "/Protein/Entries", "/Protein/DescriptionBuffer"
         ) as de_man, GeneOntologyManager(
             self.h5, "/Annotations/GeneOntology", "/Ontologies/GO"
         ) as go_man:
             xref_importer = XRefImporter(
-                db_parser, gs, xref_tab, ec_tab, go_man, de_man, approx_adder
+                db_parser,
+                gs,
+                xref_tab,
+                ec_tab,
+                go_man,
+                de_man,
+                approx_adder,
+                up_mapped_xrefs,
             )
             files = self.xref_databases()
             dbs_iter = fileinput.input(files=files)
@@ -2001,6 +2034,7 @@ class XRefImporter(object):
         go_manager,
         desc_manager,
         approx_adder,
+        uniprot_xrefs_adder,
     ):
         self.xrefs = []
         self.ec = []
@@ -2009,6 +2043,7 @@ class XRefImporter(object):
         self.go_manager = go_manager
         self.desc_manager = desc_manager
         self.approx_adder = approx_adder
+        self.uniprot_xref_adder = uniprot_xrefs_adder
 
         self.verif_enum = tablefmt.XRefTable.columns.get("Verification").enum
         xrefEnum = tablefmt.XRefTable.columns.get("XRefSource").enum
@@ -2025,7 +2060,7 @@ class XRefImporter(object):
             "ProtName": (xrefEnum["Protein Name"], "unchecked"),
             "Synonyms": (xrefEnum["Synonym"], "unchecked"),
             "HGNC_Id": (xrefEnum["HGNC"], "unchecked"),
-            "PMP": (xrefEnum["PMP"], "exact"),
+            "SMR": (xrefEnum["Swiss Model"], "unchecked"),
             "PDB": (xrefEnum["PDB"], "unchecked"),
             "EMBL": (xrefEnum["EMBL"], "unchecked"),
             "ID": (xrefEnum["SourceID"], "exact"),
@@ -2096,7 +2131,7 @@ class XRefImporter(object):
     def flush_buffers(self):
         common.package_logger.info("flushing xrefs and ec buffers")
         if len(self.xrefs) > 0:
-            self.xref_tab.append(sorted(uniq(self.xrefs)))
+            self.xref_tab.append(sorted(uniq(self.xrefs, transform=lambda x: x[:2])))
             self.xrefs = []
         if len(self.ec) > 0:
             self.ec_tab.append(sorted(uniq(self.ec)))
@@ -2179,10 +2214,10 @@ class XRefImporter(object):
         )
         for key in multikey.split("; "):
             pos = key.find("_")
-            if pos > 0:
-                self._add_to_xrefs(eNr, enum_nr, key[0:pos], "exact")
-            else:
-                self._add_to_xrefs(eNr, enum_nr, key, "exact")
+            store_key = key if pos < 0 else key[:pos]
+            self._add_to_xrefs(eNr, enum_nr, store_key, "exact")
+            for tup in self.uniprot_xref_adder.iter_xreftuples_for_up(store_key, eNr):
+                self.xrefs.append(tup)
 
     def add_approx_xrefs(self, enr):
         self.xrefs.extend(self.approx_adder.iter_approx_xrefs_for(enr))
@@ -2226,6 +2261,57 @@ class XRefImporter(object):
             buf.append(ref)
             off.append([cur_pos])
             cur_pos += len(lc_ref)
+
+
+class UniProtAdditionalXRefImporter(object):
+    def __init__(self, *args):
+        self.verify_enum = tablefmt.XRefTable.columns.get("Verification").enum
+        xref_enum = tablefmt.XRefTable.columns.get("XRefSource").enum
+        self.mapping = {
+            x: xref_enum[x]
+            for x in (
+                "STRING",
+                "DisGeNET",
+                "neXtProt",
+                "Bgee",
+                "HGNC",
+                "EPD",
+                "GlyConnect",
+                "ChEMBL",
+                "SwissPalm",
+            )
+        }
+        self.mapping.update(
+            {
+                "GeneID": xref_enum["EntrezGene"],
+                "GeneWiki": xref_enum["WikiGene"],
+                "SMR": xref_enum["Swiss Model"],
+                "Ensembl": xref_enum["Ensembl Transcript"],
+            }
+        )
+        self._lookup = collections.defaultdict(list)
+        for fpath in args:
+            if os.path.exists(fpath):
+                self._load_projected_xrefs(fpath)
+            else:
+                common.package_logger.warning(
+                    'UniProt projected XRef file "{}" does not exist. Skipping'.format(
+                        fpath
+                    )
+                )
+
+    def _load_projected_xrefs(self, fpath):
+        with open(fpath, "rt", newline="", encoding="utf-8", errors="ignore") as fh:
+            csv_reader = csv.reader(fh, delimiter="\t")
+            for row in csv_reader:
+                self._lookup[row[0]].append((self.mapping[row[1]], row[2]))
+
+    def iter_xreftuples_for_up(self, accession, enr, confidence=None):
+        print("accession: " + accession)
+        if confidence is None:
+            confidence = self.verify_enum["unchecked"]
+        for xref in self._lookup[accession]:
+            yield enr, xref[1], xref[2].encode("utf-8"), confidence
 
 
 class ApproximateXRefImporter(object):

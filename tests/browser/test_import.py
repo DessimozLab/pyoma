@@ -323,7 +323,7 @@ class HogConverterTest(unittest.TestCase):
     def test_extract_levels(self):
         conv = HogConverter(self.h5.root.Entries)
         levels = conv.convert_file(self.orthoxml_file)
-        self.assertEqual(9, len(levels))
+        self.assertEqual(9, len(levels), "levels is broken: {}".format(levels))
         self.assertEqual(
             len(tables.dtype_from_descr(tablefmt.HOGsTable)), len(levels[0])
         )

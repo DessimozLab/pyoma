@@ -802,7 +802,8 @@ class DarwinExporter(object):
                 )
             splitter = OrthoXMLSplitter(hog_file, cache_dir=hog_path)
             splitter()
-        hog_converter = HogConverter(entryTab)
+        tax_tab = self.h5.get_node("/Taxonomy")
+        hog_converter = HogConverter(entryTab, tax_tab)
         hog_converter.attach_newick_taxonomy(tree_filename)
         hogTab = self.h5.create_table(
             "/",
@@ -830,10 +831,12 @@ class DarwinExporter(object):
         for root, dirs, filenames in os.walk(hog_path):
             for fn in filenames:
                 try:
-                    levels = hog_converter.convert_file(os.path.join(root, fn))
+                    input_file = os.path.join(root, fn)
+                    out_orthoxml = input_file + ".augmented"
+                    levels = hog_converter.convert_file(input_file, store=out_orthoxml)
                     hogTab.append(levels)
                     fam_nrs = set([z[0] for z in levels])
-                    self.add_orthoxml(os.path.join(root, fn), fam_nrs)
+                    self.add_orthoxml(out_orthoxml, fam_nrs)
                 except Exception as e:
                     self.logger.error("an error occured while processing " + fn + ":")
                     self.logger.exception(e)
@@ -1921,18 +1924,25 @@ class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
                         break
 
         if is_geneRef:
-            node.set("og", og)
+            node.set("LOFT", og)
         else:
             super()._annotateGroupR(node, og, idx)
 
 
 class HogConverter(object):
-    def __init__(self, entry_tab):
+    def __init__(self, entry_tab, tax_tab=None):
         self.fam_re = re.compile(r"HOG:(?P<fam_nr>\d+)")
         self.hogs = numpy.zeros(
             shape=(len(entry_tab) + 1,), dtype=entry_tab.cols.OmaHOG.dtype
         )
         self.entry_tab = entry_tab
+        self.taxrange_2_taxid = (
+            self._extract_taxrange_2_taxid_map(tax_tab) if tax_tab else None
+        )
+        print(self.taxrange_2_taxid)
+
+    def _extract_taxrange_2_taxid_map(self, tax_tab):
+        return {row["Name"].decode(): int(row["NCBITaxonId"]) for row in tax_tab}
 
     def attach_newick_taxonomy(self, tree):
         self.taxonomy = familyanalyzer.NewickTaxonomy(tree)
@@ -1942,25 +1952,27 @@ class HogConverter(object):
             if not grp.get("id").startswith("HOG:"):
                 grp.set("id", "HOG:{:07d}".format(int(grp.get("id"))))
 
-    def convert_file(self, fn):
+    def convert_file(self, fn, store=None):
         p = familyanalyzer.OrthoXMLParser(fn)
         self._assert_hogid_has_correct_prefix(p)
         if hasattr(self, "taxonomy"):
-            p.augmentTaxonomyInfo(self.taxonomy)
+            tax = self.taxonomy
         else:
-            p.augmentTaxonomyInfo(familyanalyzer.TaxonomyFactory.newTaxonomy(p))
-        GroupAnnotatorInclGeneRefs(p).annotateDoc()
+            tax = familyanalyzer.TaxonomyFactory.newTaxonomy(p)
+        annotator = GroupAnnotatorInclGeneRefs(p, self.taxrange_2_taxid)
+        annotator.annotateMissingTaxRanges(tax)
+        annotator.annotateDoc()
 
         levs = []
         for fam in p.getToplevelGroups():
-            m = self.fam_re.match(fam.get("og"))
+            m = self.fam_re.match(self.get_hog_id(fam))
             fam_nr = int(m.group("fam_nr"))
             for taxnode in familyanalyzer.OrthoXMLQuery.getTaxRangeNodes(
                 fam, recursively=True
             ):
                 ognode = taxnode.getparent()
                 levs.append(
-                    (fam_nr, ognode.get("og"), taxnode.get("value"))
+                    (fam_nr, self.get_hog_id(ognode), taxnode.get("value"))
                     + self.get_hog_scores(ognode, taxnode)
                     + (
                         self.get_nr_member_genes(ognode),
@@ -1972,8 +1984,9 @@ class HogConverter(object):
             ".//{{{ns0}}}geneRef".format(**familyanalyzer.OrthoXMLParser.ns)
         )
         for x in geneNodes:
-            self.hogs[int(x.get("id"))] = x.get("og")
-
+            self.hogs[int(x.get("id"))] = x.get("LOFT")
+        if store is not None:
+            p.write(store, pretty_print=True)
         return levs
 
     def write_hogs(self):
@@ -1983,6 +1996,14 @@ class HogConverter(object):
         .. note: This method will overwrite any previous value of the OmaHOG column"""
         self.entry_tab.modify_column(0, len(self.entry_tab), 1, self.hogs[1:], "OmaHOG")
         self.entry_tab.flush()
+
+    def get_hog_id(self, node):
+        try:
+            id = node.get("id")
+            id = id.split("_")[0]
+        except AttributeError:
+            id = node.get("og")
+        return id
 
     def get_hog_scores(self, og_node, tax_node):
         """extract the scores associated with an orthologGroup node

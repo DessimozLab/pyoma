@@ -59,7 +59,7 @@ setup(
     extras_require={
         "create_db": [
             "PySAIS",
-            "familyanalyzer >= 0.6.0",
+            "familyanalyzer>=0.7.1",
             "matplotlib",
             "scikit-learn",
             "scikit-fuzzy",
@@ -69,9 +69,6 @@ setup(
         "docs": ["sphinx"],
     },
     test_require=["nose"],
-    dependency_links=[
-        "git+ssh://gitolite@lab.dessimoz.org:2222/family-analyzer@master#egg=familyanalyzer"
-    ],
     python_requires=">=3.5",
 )
 

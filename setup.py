@@ -54,16 +54,13 @@ setup(
     extras_require={
         "create_db": [
             "PySAIS",
-            "familyanalyzer>=0.6.0",
+            "familyanalyzer>=0.7.1",
             "matplotlib",
             "scikit-learn",
             "scikit-fuzzy",
             "lark-parser",
         ]
     },
-    dependency_links=[
-        "git+ssh://gitolite@lab.dessimoz.org:2222/family-analyzer@master#egg=familyanalyzer"
-    ],
 )
 
 # Remove local copy of oma2hdf (installed)

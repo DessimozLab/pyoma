@@ -214,6 +214,18 @@ GetGroupData := proc()
     StoreResults(json(tab));
 end:
 
+GetRootHOGData := proc()
+    global KeywordT, GroupIDs:
+    KeywordT := []:
+    ReadProgram(ddir.'/RootHOG_Keywords.drw');
+    if KeywordT = [] then
+        error('cannot load RootHOGData');
+    fi:
+    tab := table():
+    tab['Keywords'] := KeywordT:
+    StoreResults(json(tab));
+end:
+
 
 StoreResults := proc(res)
     OpenWriting(outfn);

@@ -220,3 +220,11 @@ class OmaGroupTable(tables.IsDescription):
     KeywordOffset = tables.UInt32Col(pos=2)
     KeywordLength = tables.UInt16Col(pos=3)
     NrMembers = tables.UInt16Col(pos=4)
+
+
+class RootHOGMetaTable(tables.IsDescription):
+    FamNr = tables.UInt32Col(pos=0)
+    KeywordOffset = tables.UInt32Col(pos=1)
+    KeywordLength = tables.UInt32Col(pos=2)
+    FamDataJsonOffset = tables.UInt32Col(pos=3)
+    FamDataJsonLength = tables.UInt32Col(pos=4)

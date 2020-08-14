@@ -963,6 +963,10 @@ class DarwinExporter(object):
         m = OmaGroupMetadataLoader(self.h5)
         m.add_data()
 
+    def add_roothog_metadata(self):
+        m = RootHOGMetaDataLoader(self.h5)
+        m.add_data()
+
     def close(self):
         self.h5.root._f_setattr("conversion_end", time.strftime("%c"))
         self.h5.flush()
@@ -1668,47 +1672,52 @@ def filter_duplicated_domains(iterable):
     )
 
 
-class OmaGroupMetadataLoader(object):
-    """OMA Group Meta data extractor.
+class RootHOGMetaDataLoader(object):
+    """RootHOG Meta data extractor.
 
-    This class provides the means to import the Keywords and Fingerprints
-    of the OMA Groups into the hdf5 database. The data is stored under
-    in the node defined by :attr:`meta_data_path`, which defaults to
-    /OmaGroups/MetaData.
+    This class provides the means to import the Keywords of the RootHOGs
+    into the hdf5 database. The data is stored under in the node defined
+    by :attr:`meta_data_path`, which defaults to /RootHOG/MetaData.
     """
 
     keyword_name = "Keywords.drw"
-    finger_name = "Fingerprints"
-
-    meta_data_path = "/OmaGroups/MetaData"
+    expected_keys = ["Keywords"]
+    tab_description = tablefmt.RootHOGMetaTable
+    meta_data_path = "/RootHOG/MetaData"
 
     def __init__(self, db):
         self.db = db
 
     def add_data(self):
-        common.package_logger.info("adding OmaGroup Metadata")
+        common.package_logger.info("adding {}".format(self.meta_data_path))
         nr_groups = self._get_nr_of_groups()
         has_meta_data = self._check_textfiles_avail()
         if has_meta_data:
             data = self._load_data()
-            fingerprints = [x.encode("ascii") for x in data["Fingerprints"]]
-            keywords = [x.encode("utf-8") for x in data["Keywords"]]
+            encoded_data = {}
+            for key in self.expected_keys:
+                encoded_data[key] = [x.encode("utf-8") for x in data[key]]
+                if nr_groups != len(encoded_data[key]):
+                    raise DataImportError(
+                        "nr of oma groups does not match the number of {}".format(key)
+                    )
         else:
             common.package_logger.warning(
                 "No fingerprint nor keyword information available"
             )
-            fingerprints = [b"n/a"] * nr_groups
-            keywords = [b""] * nr_groups
-        if nr_groups != len(fingerprints) or nr_groups != len(keywords):
-            raise DataImportError(
-                "nr of oma groups does not match the number of fingerprints and keywords"
-            )
+            encoded_data = {}
+            for key in self.expected_keys:
+                if key == "Fingerprints":
+                    encoded_data[key] = [b"n/a"] * nr_groups
+                else:
+                    encoded_data[key] = [b""] * nr_groups
 
         grptab, keybuf = self._create_db_objects(nr_groups)
-        self._fill_data_into_db(fingerprints, keywords, grptab, keybuf)
-        grptab.modify_column(
-            column=self._get_group_member_counts(), colname="NrMembers"
-        )
+        self._fill_data_into_db(encoded_data, grptab, keybuf)
+        if "NrMembers" in grptab.colnames:
+            grptab.modify_column(
+                column=self._get_group_member_counts(), colname="NrMembers"
+            )
         self._create_indexes(grptab)
 
     def _create_db_objects(self, nrows):
@@ -1721,21 +1730,77 @@ class OmaGroupMetadataLoader(object):
             pass
         root, name = self.meta_data_path.rsplit("/", 1)
         grptab = self.db.create_table(
-            root, name, tablefmt.OmaGroupTable, expectedrows=nrows, createparents=True
+            root, name, self.tab_description, expectedrows=nrows, createparents=True
         )
         buffer = self.db.create_earray(
             root,
             "KeywordBuffer",
             tables.StringAtom(1),
             (0,),
-            "concatenated group keywords  descriptions",
+            "concatenated keywords descriptions",
             expectedrows=500 * nrows,
         )
         return grptab, buffer
 
-    def _fill_data_into_db(self, stable_ids, keywords, grp_tab, key_buf):
+    def _fill_data_into_db(self, encoded_data, grp_tab, key_buf):
         row = grp_tab.row
         buf_pos = 0
+        keywords = encoded_data["Keywords"]
+        for i in range(len(keywords)):
+            row["FamNr"] = i + 1
+            row["KeywordOffset"] = buf_pos
+            row["KeywordLength"] = len(keywords[i])
+            row.append()
+            key = numpy.ndarray(
+                (len(keywords[i]),), buffer=keywords[i], dtype=tables.StringAtom(1)
+            )
+            key_buf.append(key)
+            buf_pos += len(keywords[i])
+        grp_tab.flush()
+        key_buf.flush()
+
+    def _create_indexes(self, grp_tab):
+        create_index_for_columns(grp_tab, "FamNr")
+
+    def _load_data(self):
+        return callDarwinExport("GetRootHOGData()")
+
+    def _get_nr_of_groups(self):
+        tab = self.db.get_node("/HogLevel")
+        try:
+            return tab[tab.colindexes["Fam"][-1]]["Fam"]
+        except KeyError:
+            return max(tab.col("Fam"))
+
+    def _get_group_member_counts(self):
+        pass
+
+    def _check_textfiles_avail(self):
+        rootdir = os.getenv("DARWIN_BROWSERDATA_PATH", "")
+        fn = os.path.join(rootdir, self.keyword_name)
+        return os.path.exists(fn)
+
+
+class OmaGroupMetadataLoader(RootHOGMetaDataLoader):
+    """OMA Group Meta data extractor.
+
+    This class provides the means to import the Keywords and Fingerprints
+    of the OMA Groups into the hdf5 database. The data is stored under
+    in the node defined by :attr:`meta_data_path`, which defaults to
+    /OmaGroups/MetaData.
+    """
+
+    keyword_name = "Keywords.drw"
+    finger_name = "Fingerprints"
+    keys = ["Keywords", "Fingerprints"]
+    tab_description = tablefmt.OmaGroupTable
+    meta_data_path = "/OmaGroups/MetaData"
+
+    def _fill_data_into_db(self, encoded_data, grp_tab, key_buf):
+        row = grp_tab.row
+        buf_pos = 0
+        stable_ids = encoded_data["Fingerprints"]
+        keywords = encoded_data["Keywords"]
         for i in range(len(stable_ids)):
             row["GroupNr"] = i + 1
             row["Fingerprint"] = stable_ids[i]
@@ -1752,20 +1817,6 @@ class OmaGroupMetadataLoader(object):
 
     def _create_indexes(self, grp_tab):
         create_index_for_columns(grp_tab, "Fingerprint", "GroupNr")
-
-    def _parse_darwin_string_list_file(self, fh):
-        data = fh.read()
-        start, end = data.find(b"["), data.rfind(b", NULL]")
-        if end == -1:
-            end = data.rfind(b"]:")
-        part = data[start:end] + b"]"
-        as_json = (
-            part.replace(b"''", b"__apos__")
-            .replace(b"'", b'"')
-            .replace(b"__apos__", b"'")
-        )
-        as_list = json.loads(as_json.decode())
-        return [el.encode("utf8") for el in as_list]
 
     def _load_data(self):
         return callDarwinExport("GetGroupData()")
@@ -2688,6 +2739,7 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level="INFO"
     x.add_canonical_id()
     x.add_group_metadata()
     x.add_hog_domain_prevalence()
+    x.add_roothog_metadata()
     x.close()
 
     x = DarwinExporter(name, logger=log)

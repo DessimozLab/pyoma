@@ -70,71 +70,26 @@ class StandaloneExporter(DarwinExporter):
                 vp_tab.cols.EntryNr1.create_csindex()
 
     def add_hogs(self, **kwargs):
-        hog_path = os.path.join(os.environ["DARWIN_BROWSERDATA_PATH"], "Output")
-
-        entryTab = self.h5.get_node("/Protein/Entries")
-
-        hog_converter = HogConverter(entryTab)
+        fn = "HierarchicalGroups.orthoxml"
+        hog_file = os.path.join(os.environ["DARWIN_BROWSERDATA_PATH"], "Output", fn)
+        hog_cache_dir = os.path.join(self.cache_dir, "split_hogs")
         for tree_file in (
             "ManualSpeciesTree.nwk",
             "EstimatedSpeciesTree.nwk",
             "LineageSpeciesTree.nwk",
         ):
             tree_filename = os.path.join(
-                os.environ["DARWIN_BROWSERDATA_PATH"], tree_file
+                os.environ["DARWIN_BROWSERDATA_PATH"], "Output", tree_file
             )
             if os.path.exists(tree_filename):
                 self.logger.info("Use " + tree_filename + " as HOG backbone tree file")
                 break
-
+        hog_treefile = None
         if os.path.exists(tree_filename):
-            hog_converter.attach_newick_taxonomy(tree_filename)
-
-        fn = "HierarchicalGroups.orthoxml"
-
-        # Split the OrthoXML up (puts in cache_dir/split_hog).
-        hog_cache_dir = os.path.join(self.cache_dir, "split_hogs")
-        ortho_splitter = OrthoXMLSplitter.OrthoXMLSplitter(
-            os.path.join(hog_path, fn), cache_dir=hog_cache_dir
+            hog_treefile = tree_filename
+        return super().add_hogs(
+            hog_path=hog_cache_dir, hog_file=hog_file, tree_filename=hog_treefile
         )
-        ortho_splitter()
-
-        hogTab = self.h5.create_table(
-            "/",
-            "HogLevel",
-            tablefmt.HOGsTable,
-            "nesting structure for each HOG",
-            expectedrows=1e8,
-        )
-        self.orthoxml_buffer = self.h5.create_earray(
-            "/OrthoXML",
-            "Buffer",
-            tables.StringAtom(1),
-            (0,),
-            "concatenated orthoxml files",
-            expectedrows=1e9,
-            createparents=True,
-        )
-        self.orthoxml_index = self.h5.create_table(
-            "/OrthoXML",
-            "Index",
-            tablefmt.OrthoXmlHogTable,
-            "Range index per HOG into OrthoXML Buffer",
-            expectedrows=5e6,
-        )
-
-        try:
-            levels = hog_converter.convert_file(os.path.join(hog_path, fn))
-            hogTab.append(levels)
-            fam_nrs = set([z[0] for z in levels])
-            for fam_nr in fam_nrs:
-                hog_fn = "HOG{:06d}.orthoxml".format(fam_nr)
-                self.add_orthoxml(os.path.join(hog_cache_dir, hog_fn), [fam_nr])
-        except Exception as e:
-            self.logger.error("an error occured while processing " + fn + ":")
-            self.logger.exception(e)
-
-        hog_converter.write_hogs()
 
     def _get_genome_database_paths(self):
         return self.call_darwin_export("GetGenomeFileNames();")

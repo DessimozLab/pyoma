@@ -907,17 +907,28 @@ class Database(object):
         """
         return self.get_hog(hog_id, level, field="NrMemberGenes")
 
-    def get_orthoxml(self, fam):
+    def get_orthoxml(self, fam, augmented=False):
         """returns the orthoxml of a given toplevel HOG family
 
-        :param fam: numeric id of requested toplevel hog"""
+        :param fam: numeric id of requested toplevel hog
+        :param augmented: boolean flag to indicated whether or not to return
+                          the augmented orthoxml or not. (defaults to not)"""
         idx = self.db.root.OrthoXML.Index.read_where("Fam == {:d}".format(fam))
         if len(idx) < 1:
             raise ValueError("cannot retrieve orthoxml for {}".format(fam))
         idx = idx[0]
-        return self.db.root.OrthoXML.Buffer[
-            idx["HogBufferOffset"] : idx["HogBufferOffset"] + idx["HogBufferLength"]
-        ].tostring()
+        if augmented:
+            buf = self.db.root.OrthoXML.BufferAugmented
+            rng = slice(
+                idx["HogAugmentedBufferOffset"],
+                idx["HogAugmentedBufferOffset"] + idx["HogAugmentedBufferLength"],
+            )
+        else:
+            buf = self.db.root.OrthoXML.Buffer
+            rng = slice(
+                idx["HogBufferOffset"], idx["HogBufferOffset"] + idx["HogBufferLength"]
+            )
+        return buf[rng].tostring()
 
     def _hog_lex_range(self, hog):
         """return the lexographic range of a hog.

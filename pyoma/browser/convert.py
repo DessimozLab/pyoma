@@ -781,6 +781,16 @@ class DarwinExporter(object):
             self.logger.info("no data written for {}".format(tab._v_pathname))
 
     def add_hogs(self, hog_path=None, hog_file=None, tree_filename=None):
+        """adds the HOGs to the database
+
+        :param str hog_path: optional, directory where the split HOG files are stored or
+                             should be stored. If directory does not exist, the hog_file
+                             is split automatically into individual files and stored there.
+
+        :param str hog_file: File containing all HOGs. if hog_path does not
+                             exist, this file is split and stored in hog_path.
+
+        :param str tree_filename: newick species tree file."""
         if hog_path is None:
             hog_path = os.path.normpath(
                 os.path.join(
@@ -821,6 +831,15 @@ class DarwinExporter(object):
             expectedrows=1e9,
             createparents=True,
         )
+        self.orthoxml_buffer_augmented = self.h5.create_earray(
+            "/OrthoXML",
+            "BufferAugmented",
+            tables.StringAtom(1),
+            (0,),
+            "concatenated augmented orthoxml files",
+            expectedrows=1e9,
+            createparents=True,
+        )
         self.orthoxml_index = self.h5.create_table(
             "/OrthoXML",
             "Index",
@@ -836,14 +855,14 @@ class DarwinExporter(object):
                     levels = hog_converter.convert_file(input_file, store=out_orthoxml)
                     hogTab.append(levels)
                     fam_nrs = set([z[0] for z in levels])
-                    self.add_orthoxml(out_orthoxml, fam_nrs)
+                    self.add_orthoxml(input_file, out_orthoxml, fam_nrs)
                 except Exception as e:
                     self.logger.error("an error occured while processing " + fn + ":")
                     self.logger.exception(e)
 
         hog_converter.write_hogs()
 
-    def add_orthoxml(self, orthoxml_path, fam_nrs):
+    def add_orthoxml(self, orthoxml_path, augmented_orthoxml_path, fam_nrs):
         """append orthoxml file content to orthoxml_buffer array and add index for the HOG family"""
         if len(fam_nrs) > 1:
             self.logger.warning(
@@ -855,20 +874,36 @@ class DarwinExporter(object):
                 " --> the orthoxml files per family will be not correct, "
                 "i.e. they will contain all families of this file."
             )
-        with open(orthoxml_path, "r") as fh:
-            orthoxml = fh.read().encode("utf-8")
-            offset = len(self.orthoxml_buffer)
-            length = len(orthoxml)
-            self.orthoxml_buffer.append(
-                numpy.ndarray((length,), buffer=orthoxml, dtype=tables.StringAtom(1))
+        offset = {}
+        length = {}
+        for typ, fpath in zip(
+            ("base", "augmented"), (orthoxml_path, augmented_orthoxml_path)
+        ):
+            buffer = (
+                self.orthoxml_buffer
+                if typ == "base"
+                else self.orthoxml_buffer_augmented
             )
-            for fam in fam_nrs:
-                row = self.orthoxml_index.row
-                row["Fam"] = fam
-                row["HogBufferOffset"] = offset
-                row["HogBufferLength"] = length
-                offset += length
-                row.append()
+            offset[typ] = len(buffer)
+            try:
+                with open(fpath, "r") as fh:
+                    orthoxml = fh.read().encode("utf-8")
+                    length[typ] = len(orthoxml)
+                    buffer.append(
+                        numpy.ndarray(
+                            (length[typ],), buffer=orthoxml, dtype=tables.StringAtom(1)
+                        )
+                    )
+            except IOError:
+                length[typ] = 0
+        for fam in fam_nrs:
+            row = self.orthoxml_index.row
+            row["Fam"] = fam
+            row["HogBufferOffset"] = offset["base"]
+            row["HogBufferLength"] = length["base"]
+            row["HogAugmentedBufferOffset"] = offset["augmented"]
+            row["HogAugmentedBufferLength"] = length["augmented"]
+            row.append()
 
     def xref_databases(self):
         return os.path.join(os.environ["DARWIN_BROWSERDATA_PATH"], "ServerIndexed.db")

@@ -25,8 +25,10 @@ class HOGsTable(tables.IsDescription):
 
 class OrthoXmlHogTable(tables.IsDescription):
     Fam = tables.UInt32Col(pos=0)
-    HogBufferOffset = tables.UInt32Col(pos=1)
+    HogBufferOffset = tables.Int64Col(pos=1)
     HogBufferLength = tables.UInt32Col(pos=2)
+    HogAugmentedBufferOffset = tables.Int64Col(pos=3)
+    HogAugmentedBufferLength = tables.UInt32Col(pos=4)
 
 
 class ProteinTable(tables.IsDescription):

@@ -119,7 +119,7 @@ class Database(object):
     will typically be issued by methods of this object. Typically
     the result of queries will be :py:class:`numpy.recarray` objects."""
 
-    EXPECTED_DB_SCHEMA = "3.3"
+    EXPECTED_DB_SCHEMA = "3.4"
 
     def __init__(self, db):
         if isinstance(db, str):

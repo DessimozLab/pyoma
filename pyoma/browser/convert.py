@@ -329,7 +329,7 @@ def create_and_store_fast_famhoglevel_lookup(h5, hoglevtab, array_path):
 
 
 class DarwinExporter(object):
-    DB_SCHEMA_VERSION = "3.3"
+    DB_SCHEMA_VERSION = "3.4"
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
 
     def __init__(self, path, logger=None, mode=None):

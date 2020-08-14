@@ -37,6 +37,7 @@ class StandaloneExporter(DarwinExporter):
             os.environ["DARWIN_NETWORK_SCRATCH_PATH"] = os.getenv(
                 "DARWIN_BROWSERDATA_PATH"
             )
+            common.package_logger.info("successfully transformed data to json")
 
     def add_orthologs(self):
         self.assert_cached_results()

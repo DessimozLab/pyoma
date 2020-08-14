@@ -1564,6 +1564,8 @@ def download_url_if_not_present(url, force_copy=False):
                 'using file "{}" directly from source without copying.'.format(url)
             )
             return fname
+        common.package_logger.warning("file {} does not exist".format(fname))
+        return None
     tmpfolder = os.path.join(
         os.getenv("DARWIN_NETWORK_SCRATCH_PATH", "/tmp"), "Browser", "xref"
     )
@@ -1584,6 +1586,8 @@ def iter_domains(url):
     DomainTuple = collections.namedtuple("DomainTuple", ("md5", "id", "coords"))
 
     fname = download_url_if_not_present(url)
+    if fname is None:
+        return
     with gzip.open(fname, "rt") as uncompressed:
         dialect = csv.Sniffer().sniff(uncompressed.read(4096))
         uncompressed.seek(0)

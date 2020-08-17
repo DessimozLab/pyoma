@@ -1369,7 +1369,7 @@ class Database(object):
             )
         )
 
-    def get_gene_similarities_hog(self, entry_id):
+    def get_gene_similarities_hog(self, entry_nr):
         """Retrieve the gene similarity matrix for a HOG
 
         The method returns the 1-D coordinates of the genes of a HOG, indicating
@@ -1378,10 +1378,9 @@ class Database(object):
 
         The result is returned as a dictionary
 
-        :param str entry_id: HOG ID
+        :param str entry_nr: Entry number of the HOG
         """
 
-        entry_nr = self.id_resolver.resolve(entry_id)
         hog_members = self.member_of_fam(self.hog_family(entry_nr)) # Stores all the members of the given HoG
 
         go_annots_not_fetched = []

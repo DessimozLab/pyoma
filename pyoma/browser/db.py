@@ -1908,6 +1908,31 @@ class IDResolver(object):
                 nr = self.search_xrefs(e_id)
         return nr
 
+    def search_protein(self, query: str, limit=None):
+        candidates = collections.defaultdict(dict)
+        try:
+            nr = self._from_numeric(query)
+            candidates[nr]["numeric_id"] = [query]
+        except ValueError:
+            pass
+        try:
+            nr = self._from_omaid(query)
+            candidates[nr]["omaid"] = [query]
+        except InvalidOmaId:
+            pass
+        id_res = self._db.id_mapper["XRef"].search_id(query, limit)
+        for nr, res_dict in id_res.items():
+            candidates[nr].update(res_dict)
+        try:
+            desc_res = DescriptionSearcher(self._db).search_term(query)
+            for row_nr in desc_res[:limit]:
+                nr = row_nr + 1
+                candidates[nr]["Description"] = [self._db.get_description(nr).decode()]
+        except SuffixIndexError as e:
+            logger.warning(e)
+            logger.warning("No Descriptions searched")
+        return candidates
+
 
 class Taxonomy(object):
     """Taxonomy provides an interface to navigate the taxonomy data.
@@ -2591,6 +2616,7 @@ class DescriptionSearcher(object):
             self.entry_tab, "DescriptionOffset"
         )
 
+    @timethis(logging.DEBUG)
     def search_term(self, term):
         return self.desc_index.find(term)
 

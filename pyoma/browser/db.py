@@ -31,6 +31,7 @@ from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .KmerEncoder import KmerEncoder
 from .geneontology import GeneOntology, OntologyParser, GOAspect
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
+from .decorators import timethis
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ class Database(object):
     will typically be issued by methods of this object. Typically
     the result of queries will be :py:class:`numpy.recarray` objects."""
 
-    EXPECTED_DB_SCHEMA = "3.3"
+    EXPECTED_DB_SCHEMA = "3.4"
 
     def __init__(self, db):
         if isinstance(db, str):
@@ -180,6 +181,10 @@ class Database(object):
         self.tax = Taxonomy(
             self.db.root.Taxonomy.read(), genomes={g.ncbi_taxon_id: g for g in genomes}
         )
+        try:
+            self.desc_searcher = DescriptionSearcher(self)
+        except SuffixIndexError:
+            self.desc_searcher = None
         self.hog_profiler = None
         self._re_fam = None
         self.format_hogid = None
@@ -905,17 +910,28 @@ class Database(object):
         """
         return self.get_hog(hog_id, level, field="NrMemberGenes")
 
-    def get_orthoxml(self, fam):
+    def get_orthoxml(self, fam, augmented=False):
         """returns the orthoxml of a given toplevel HOG family
 
-        :param fam: numeric id of requested toplevel hog"""
+        :param fam: numeric id of requested toplevel hog
+        :param augmented: boolean flag to indicated whether or not to return
+                          the augmented orthoxml or not. (defaults to not)"""
         idx = self.db.root.OrthoXML.Index.read_where("Fam == {:d}".format(fam))
         if len(idx) < 1:
             raise ValueError("cannot retrieve orthoxml for {}".format(fam))
         idx = idx[0]
-        return self.db.root.OrthoXML.Buffer[
-            idx["HogBufferOffset"] : idx["HogBufferOffset"] + idx["HogBufferLength"]
-        ].tostring()
+        if augmented:
+            buf = self.db.root.OrthoXML.BufferAugmented
+            rng = slice(
+                idx["HogAugmentedBufferOffset"],
+                idx["HogAugmentedBufferOffset"] + idx["HogAugmentedBufferLength"],
+            )
+        else:
+            buf = self.db.root.OrthoXML.Buffer
+            rng = slice(
+                idx["HogBufferOffset"], idx["HogBufferOffset"] + idx["HogBufferLength"]
+            )
+        return buf[rng].tostring()
 
     def _hog_lex_range(self, hog):
         """return the lexographic range of a hog.
@@ -1210,7 +1226,7 @@ class Database(object):
                 self.hog_profiler = Profiler(self)
             return self.hog_profiler.query(fam, k=max_nr_similar_fams)
         except KeyError:
-            return {}
+            return None
 
     def entrynrs_with_ec_annotation(self, ec):
         if isinstance(ec, str):
@@ -1600,10 +1616,10 @@ class SequenceSearch(object):
         # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
         c = collections.Counter()
         for z in map(
-            lambda kmer: numpy.unique(self.kmer_lookup[int(kmer)], return_counts=True),
+            lambda kmer: numpy.unique(self.kmer_lookup[int(kmer)]),
             self.encoder.decompose(seq),
         ):
-            c.update(dict(zip(*z)))
+            c.update(z)
 
         # 2. Filter to top n if necessary
         z = len(seq) - self.k + 1
@@ -1944,6 +1960,31 @@ class IDResolver(object):
             except (InvalidOmaId, UnknownSpecies) as e:
                 nr = self.search_xrefs(e_id)
         return nr
+
+    def search_protein(self, query: str, limit=None):
+        candidates = collections.defaultdict(dict)
+        try:
+            nr = self._from_numeric(query)
+            candidates[nr]["numeric_id"] = [query]
+        except ValueError:
+            pass
+        try:
+            nr = self._from_omaid(query)
+            candidates[nr]["omaid"] = [query]
+        except InvalidOmaId:
+            pass
+        id_res = self._db.id_mapper["XRef"].search_id(query, limit)
+        for nr, res_dict in id_res.items():
+            candidates[nr].update(res_dict)
+        try:
+            desc_res = DescriptionSearcher(self._db).search_term(query)
+            for row_nr in desc_res[:limit]:
+                nr = row_nr + 1
+                candidates[nr]["Description"] = [self._db.get_description(nr).decode()]
+        except SuffixIndexError as e:
+            logger.warning(e)
+            logger.warning("No Descriptions searched")
+        return candidates
 
 
 class Taxonomy(object):
@@ -2426,7 +2467,7 @@ class XrefIdMapper(object):
 
     def _combine_query_values(self, field, values):
         parts = ["({}=={})".format(field, z) for z in values]
-        return "|".join(parts)
+        return "(" + "|".join(parts) + ")"
 
     def map_many_entry_nrs(self, entry_nrs):
         """map several entry_nrs with as few db queries as possible
@@ -2436,19 +2477,27 @@ class XrefIdMapper(object):
 
         :param entry_nrs: a list with numeric protein entry ids"""
         mapped_junks = []
-        junk_size = 32 - len(self.idtype)  # respect max number of condition variables.
-        source_condition = self._combine_query_values("XRefSource", self.idtype)
-        for start in range(0, len(entry_nrs), junk_size):
-            condition = "({}) & ({}) & (Verification <= {:d})".format(
+        chunk_size = 32
+        source_condition = None
+        if len(self.idtype) < len(self.xrefEnum):
+            chunk_size -= len(self.idtype)  # respect max number of condition variables.
+            source_condition = self._combine_query_values("XRefSource", self.idtype)
+        for start in range(0, len(entry_nrs), chunk_size):
+            condition_list = [
                 self._combine_query_values(
-                    "EntryNr", entry_nrs[start : start + junk_size]
-                ),
-                source_condition,
-                self._max_verif_for_mapping_entrynrs,
+                    "EntryNr", entry_nrs[start : start + chunk_size]
+                )
+            ]
+            if source_condition:
+                condition_list.append(source_condition)
+            condition_list.append(
+                "(Verification <= {:d})".format(self._max_verif_for_mapping_entrynrs)
             )
+            condition = " & ".join(condition_list)
             mapped_junks.append(self.xref_tab.read_where(condition))
         return numpy.lib.recfunctions.stack_arrays(mapped_junks, usemask=False)
 
+    @timethis(logging.DEBUG)
     def search_xref(self, xref, is_prefix=False, match_any_substring=False):
         """identify proteins associcated with `xref`.
 
@@ -2479,7 +2528,32 @@ class XrefIdMapper(object):
             res = self.xref_tab.read_where(cond)
         if len(res) > 0 and len(self.idtype) < len(self.xrefEnum):
             res = res[numpy.in1d(res["XRefSource"], list(self.idtype))]
+
         return res
+
+    def search_id(self, query, limit=None):
+        source_filter = None
+        try:
+            prefix, term = query.split(":", maxsplit=1)
+            if prefix in self.xrefEnum:
+                source_filter = self.xrefEnum[prefix]
+            else:
+                term = query
+        except ValueError:
+            term = query
+
+        result = collections.defaultdict(dict)
+        for xref_row in self.xref_index.find(term):
+            xref = self.xref_tab[xref_row]
+            if not source_filter or xref["XRefSource"] == source_filter:
+                source = self.xrefEnum(xref["XRefSource"])
+                try:
+                    result[xref["EntryNr"]][source].append(xref["XRefId"].decode())
+                except KeyError:
+                    result[xref["EntryNr"]][source] = [xref["XRefId"].decode()]
+            if limit is not None and len(result) >= limit:
+                break
+        return result
 
     def source_as_string(self, source):
         """string representation of xref source enum value
@@ -2586,6 +2660,18 @@ class DomainNameIdMapper(object):
             "source": info["Source"].decode(),
             "domainid": domain_id.decode(),
         }
+
+
+class DescriptionSearcher(object):
+    def __init__(self, db):
+        self.entry_tab = db.get_hdf5_handle().get_node("/Protein/Entries")
+        self.desc_index = SuffixSearcher.from_tablecolumn(
+            self.entry_tab, "DescriptionOffset"
+        )
+
+    @timethis(logging.DEBUG)
+    def search_term(self, term):
+        return self.desc_index.find(term)
 
 
 class FastMapper(object):

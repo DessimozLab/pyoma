@@ -1,4 +1,6 @@
 from __future__ import division, print_function, absolute_import, unicode_literals
+
+import time
 from builtins import bytes, str, range, str
 from bisect import bisect_left
 import os
@@ -379,18 +381,28 @@ class SuffixSearcher(object):
             slicer = KeyWrapper(
                 self.suffix_arr, key=lambda i: self.buffer_arr[i : (i + n)].tobytes()
             )
+            t0 = time.time()
             ii = bisect_left(slicer, query)
-            if ii and (slicer[ii] == query):
-                # Left most found.
-                jj = ii + 1
-                while (jj < len(slicer)) and (slicer[jj] == query):
-                    # zoom to end -> -> ->
-                    jj += 1
-
-                # Find entry numbers and filter to remove incorrect entries
-                return (
+            t1 = time.time()
+            if ii and ii < len(self.suffix_arr) and (slicer[ii] == query):
+                query_after = query[:-1] + chr(query[-1] + 1).encode("utf-8")
+                jj = bisect_left(slicer, query_after)
+                if (jj < len(self.suffix_arr) and slicer[jj] == query) or slicer[
+                    jj - 1
+                ] != query:
+                    raise RuntimeError("index broken, should not happen")
+                t2 = time.time()
+                # Find row numbers
+                res = (
                     numpy.searchsorted(self.offset_arr, self.suffix_arr[ii:jj] + 1) - 1
                 )
+                t3 = time.time()
+                logger.debug(
+                    "SuffixIndex.find({}) bisect: {}, zoom: {}, extract: {} --> {}rows".format(
+                        query, t1 - t0, t2 - t1, t3 - t2, len(res)
+                    )
+                )
+                return res
         return []
 
 

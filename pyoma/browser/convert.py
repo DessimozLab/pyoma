@@ -1,42 +1,43 @@
 from __future__ import division, print_function
-from builtins import str, chr, range, object, super, bytes
 
-import pandas
-from future.standard_library import hooks
-from PySAIS import sais
-from tempfile import NamedTemporaryFile
-from tqdm import tqdm
-import csv
-import resource
-import tables
-import numpy
-import numpy.lib.recfunctions
-import os
-import subprocess
-import errno
-import json
-import time
-import familyanalyzer
-import re
-import multiprocessing as mp
-import lxml.html
 import collections
+import csv
+import errno
+import fileinput
 import gzip
 import hashlib
 import itertools
+import json
+import multiprocessing as mp
 import operator
-import fileinput
+import os
+import re
+import resource
+import subprocess
+import time
+from builtins import str, chr, range, object, super, bytes
+from tempfile import NamedTemporaryFile
 
-from .. import common, version
+import familyanalyzer
+import lxml.html
+import numpy
+import numpy.lib.recfunctions
+import pandas
+import tables
+from PySAIS import sais
+from future.standard_library import hooks
+from tqdm import tqdm
+
 from . import locus_parser
-from . import tablefmt
 from . import suffixsearch
+from . import tablefmt
 from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
-from .geneontology import GeneOntology, OntologyParser
-from .synteny import SyntenyScorer
-from .homoeologs import HomeologsConfidenceCalculator
 from .compute_cache import compute_and_store_cached_data
+from .geneontology import GeneOntology, OntologyParser
+from .homoeologs import HomeologsConfidenceCalculator
+from .synteny import SyntenyScorer
+from .. import common, version
 
 with hooks():
     import urllib.request
@@ -85,13 +86,32 @@ def callDarwinExport(func, drwfile=None):
             return json.loads(rawdata.translate(trans_tab))
 
 
-def uniq(seq):
+def uniq(seq, transform=None):
     """return uniq elements of a list, preserving order
+
+    The transform argument can be used to check the existance
+    on a transformed form of the elements, e.g. only to look
+    at a subset of the attributes/values.
+
+    :Example:
+
+        >>> seq = [(1,2,3),(1,2,4),(2,2,2)]
+        >>> uniq(seq, transform=lambda x: x[:1])
+        [(1, 2, 3), (2, 2, 2)]
+        >>> uniq(seq)
+        [(1, 2, 3), (1, 2, 4), (2, 2, 2)]
+
 
     :param seq: an iterable to be analyzed
     """
+
+    def pass_trough(x):
+        return x
+
     seen = set()
-    return [x for x in seq if not (x in seen or seen.add(x))]
+    if transform is None:
+        transform = pass_trough
+    return [x for x in seq if not (transform(x) in seen or seen.add(transform(x)))]
 
 
 def silentremove(filename):
@@ -309,7 +329,7 @@ def create_and_store_fast_famhoglevel_lookup(h5, hoglevtab, array_path):
 
 
 class DarwinExporter(object):
-    DB_SCHEMA_VERSION = "3.3"
+    DB_SCHEMA_VERSION = "3.4"
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
 
     def __init__(self, path, logger=None, mode=None):
@@ -761,6 +781,16 @@ class DarwinExporter(object):
             self.logger.info("no data written for {}".format(tab._v_pathname))
 
     def add_hogs(self, hog_path=None, hog_file=None, tree_filename=None):
+        """adds the HOGs to the database
+
+        :param str hog_path: optional, directory where the split HOG files are stored or
+                             should be stored. If directory does not exist, the hog_file
+                             is split automatically into individual files and stored there.
+
+        :param str hog_file: File containing all HOGs. if hog_path does not
+                             exist, this file is split and stored in hog_path.
+
+        :param str tree_filename: newick species tree file."""
         if hog_path is None:
             hog_path = os.path.normpath(
                 os.path.join(
@@ -782,7 +812,8 @@ class DarwinExporter(object):
                 )
             splitter = OrthoXMLSplitter(hog_file, cache_dir=hog_path)
             splitter()
-        hog_converter = HogConverter(entryTab)
+        tax_tab = self.h5.get_node("/Taxonomy")
+        hog_converter = HogConverter(entryTab, tax_tab)
         hog_converter.attach_newick_taxonomy(tree_filename)
         hogTab = self.h5.create_table(
             "/",
@@ -800,6 +831,15 @@ class DarwinExporter(object):
             expectedrows=1e9,
             createparents=True,
         )
+        self.orthoxml_buffer_augmented = self.h5.create_earray(
+            "/OrthoXML",
+            "BufferAugmented",
+            tables.StringAtom(1),
+            (0,),
+            "concatenated augmented orthoxml files",
+            expectedrows=1e9,
+            createparents=True,
+        )
         self.orthoxml_index = self.h5.create_table(
             "/OrthoXML",
             "Index",
@@ -810,17 +850,19 @@ class DarwinExporter(object):
         for root, dirs, filenames in os.walk(hog_path):
             for fn in filenames:
                 try:
-                    levels = hog_converter.convert_file(os.path.join(root, fn))
+                    input_file = os.path.join(root, fn)
+                    out_orthoxml = input_file + ".augmented"
+                    levels = hog_converter.convert_file(input_file, store=out_orthoxml)
                     hogTab.append(levels)
                     fam_nrs = set([z[0] for z in levels])
-                    self.add_orthoxml(os.path.join(root, fn), fam_nrs)
+                    self.add_orthoxml(input_file, out_orthoxml, fam_nrs)
                 except Exception as e:
                     self.logger.error("an error occured while processing " + fn + ":")
                     self.logger.exception(e)
 
         hog_converter.write_hogs()
 
-    def add_orthoxml(self, orthoxml_path, fam_nrs):
+    def add_orthoxml(self, orthoxml_path, augmented_orthoxml_path, fam_nrs):
         """append orthoxml file content to orthoxml_buffer array and add index for the HOG family"""
         if len(fam_nrs) > 1:
             self.logger.warning(
@@ -832,20 +874,36 @@ class DarwinExporter(object):
                 " --> the orthoxml files per family will be not correct, "
                 "i.e. they will contain all families of this file."
             )
-        with open(orthoxml_path, "r") as fh:
-            orthoxml = fh.read().encode("utf-8")
-            offset = len(self.orthoxml_buffer)
-            length = len(orthoxml)
-            self.orthoxml_buffer.append(
-                numpy.ndarray((length,), buffer=orthoxml, dtype=tables.StringAtom(1))
+        offset = {}
+        length = {}
+        for typ, fpath in zip(
+            ("base", "augmented"), (orthoxml_path, augmented_orthoxml_path)
+        ):
+            buffer = (
+                self.orthoxml_buffer
+                if typ == "base"
+                else self.orthoxml_buffer_augmented
             )
-            for fam in fam_nrs:
-                row = self.orthoxml_index.row
-                row["Fam"] = fam
-                row["HogBufferOffset"] = offset
-                row["HogBufferLength"] = length
-                offset += length
-                row.append()
+            offset[typ] = len(buffer)
+            try:
+                with open(fpath, "r") as fh:
+                    orthoxml = fh.read().encode("utf-8")
+                    length[typ] = len(orthoxml)
+                    buffer.append(
+                        numpy.ndarray(
+                            (length[typ],), buffer=orthoxml, dtype=tables.StringAtom(1)
+                        )
+                    )
+            except IOError:
+                length[typ] = 0
+        for fam in fam_nrs:
+            row = self.orthoxml_index.row
+            row["Fam"] = fam
+            row["HogBufferOffset"] = offset["base"]
+            row["HogBufferLength"] = length["base"]
+            row["HogAugmentedBufferOffset"] = offset["augmented"]
+            row["HogAugmentedBufferLength"] = length["augmented"]
+            row.append()
 
     def xref_databases(self):
         return os.path.join(os.environ["DARWIN_BROWSERDATA_PATH"], "ServerIndexed.db")
@@ -875,13 +933,26 @@ class DarwinExporter(object):
                 os.getenv("DARWIN_NETWORK_SCRATCH_PATH"), "approximate_xrefs.tsv"
             )
         )
+        up_mapped_xrefs = UniProtAdditionalXRefImporter(
+            *(
+                os.path.join(os.getenv("DARWIN_NETWORK_SCRATCH_PATH"), z)
+                for z in ("uniprot_xrefs.tsv", "swissprot_xrefs.tsv")
+            )
+        )
         with DescriptionManager(
             self.h5, "/Protein/Entries", "/Protein/DescriptionBuffer"
         ) as de_man, GeneOntologyManager(
             self.h5, "/Annotations/GeneOntology", "/Ontologies/GO"
         ) as go_man:
             xref_importer = XRefImporter(
-                db_parser, gs, xref_tab, ec_tab, go_man, de_man, approx_adder
+                db_parser,
+                gs,
+                xref_tab,
+                ec_tab,
+                go_man,
+                de_man,
+                approx_adder,
+                up_mapped_xrefs,
             )
             files = self.xref_databases()
             dbs_iter = fileinput.input(files=files)
@@ -890,6 +961,10 @@ class DarwinExporter(object):
 
     def add_group_metadata(self):
         m = OmaGroupMetadataLoader(self.h5)
+        m.add_data()
+
+    def add_roothog_metadata(self):
+        m = RootHOGMetaDataLoader(self.h5)
         m.add_data()
 
     def close(self):
@@ -1493,6 +1568,8 @@ def download_url_if_not_present(url, force_copy=False):
                 'using file "{}" directly from source without copying.'.format(url)
             )
             return fname
+        common.package_logger.warning("file {} does not exist".format(fname))
+        return None
     tmpfolder = os.path.join(
         os.getenv("DARWIN_NETWORK_SCRATCH_PATH", "/tmp"), "Browser", "xref"
     )
@@ -1513,6 +1590,8 @@ def iter_domains(url):
     DomainTuple = collections.namedtuple("DomainTuple", ("md5", "id", "coords"))
 
     fname = download_url_if_not_present(url)
+    if fname is None:
+        return
     with gzip.open(fname, "rt") as uncompressed:
         dialect = csv.Sniffer().sniff(uncompressed.read(4096))
         uncompressed.seek(0)
@@ -1593,47 +1672,52 @@ def filter_duplicated_domains(iterable):
     )
 
 
-class OmaGroupMetadataLoader(object):
-    """OMA Group Meta data extractor.
+class RootHOGMetaDataLoader(object):
+    """RootHOG Meta data extractor.
 
-    This class provides the means to import the Keywords and Fingerprints
-    of the OMA Groups into the hdf5 database. The data is stored under
-    in the node defined by :attr:`meta_data_path`, which defaults to
-    /OmaGroups/MetaData.
+    This class provides the means to import the Keywords of the RootHOGs
+    into the hdf5 database. The data is stored under in the node defined
+    by :attr:`meta_data_path`, which defaults to /RootHOG/MetaData.
     """
 
     keyword_name = "Keywords.drw"
-    finger_name = "Fingerprints"
-
-    meta_data_path = "/OmaGroups/MetaData"
+    expected_keys = ["Keywords"]
+    tab_description = tablefmt.RootHOGMetaTable
+    meta_data_path = "/RootHOG/MetaData"
 
     def __init__(self, db):
         self.db = db
 
     def add_data(self):
-        common.package_logger.info("adding OmaGroup Metadata")
+        common.package_logger.info("adding {}".format(self.meta_data_path))
         nr_groups = self._get_nr_of_groups()
         has_meta_data = self._check_textfiles_avail()
         if has_meta_data:
             data = self._load_data()
-            fingerprints = [x.encode("ascii") for x in data["Fingerprints"]]
-            keywords = [x.encode("utf-8") for x in data["Keywords"]]
+            encoded_data = {}
+            for key in self.expected_keys:
+                encoded_data[key] = [x.encode("utf-8") for x in data[key]]
+                if nr_groups != len(encoded_data[key]):
+                    raise DataImportError(
+                        "nr of oma groups does not match the number of {}".format(key)
+                    )
         else:
             common.package_logger.warning(
                 "No fingerprint nor keyword information available"
             )
-            fingerprints = [b"n/a"] * nr_groups
-            keywords = [b""] * nr_groups
-        if nr_groups != len(fingerprints) or nr_groups != len(keywords):
-            raise DataImportError(
-                "nr of oma groups does not match the number of fingerprints and keywords"
-            )
+            encoded_data = {}
+            for key in self.expected_keys:
+                if key == "Fingerprints":
+                    encoded_data[key] = [b"n/a"] * nr_groups
+                else:
+                    encoded_data[key] = [b""] * nr_groups
 
         grptab, keybuf = self._create_db_objects(nr_groups)
-        self._fill_data_into_db(fingerprints, keywords, grptab, keybuf)
-        grptab.modify_column(
-            column=self._get_group_member_counts(), colname="NrMembers"
-        )
+        self._fill_data_into_db(encoded_data, grptab, keybuf)
+        if "NrMembers" in grptab.colnames:
+            grptab.modify_column(
+                column=self._get_group_member_counts(), colname="NrMembers"
+            )
         self._create_indexes(grptab)
 
     def _create_db_objects(self, nrows):
@@ -1646,21 +1730,77 @@ class OmaGroupMetadataLoader(object):
             pass
         root, name = self.meta_data_path.rsplit("/", 1)
         grptab = self.db.create_table(
-            root, name, tablefmt.OmaGroupTable, expectedrows=nrows, createparents=True
+            root, name, self.tab_description, expectedrows=nrows, createparents=True
         )
         buffer = self.db.create_earray(
             root,
             "KeywordBuffer",
             tables.StringAtom(1),
             (0,),
-            "concatenated group keywords  descriptions",
+            "concatenated keywords descriptions",
             expectedrows=500 * nrows,
         )
         return grptab, buffer
 
-    def _fill_data_into_db(self, stable_ids, keywords, grp_tab, key_buf):
+    def _fill_data_into_db(self, encoded_data, grp_tab, key_buf):
         row = grp_tab.row
         buf_pos = 0
+        keywords = encoded_data["Keywords"]
+        for i in range(len(keywords)):
+            row["FamNr"] = i + 1
+            row["KeywordOffset"] = buf_pos
+            row["KeywordLength"] = len(keywords[i])
+            row.append()
+            key = numpy.ndarray(
+                (len(keywords[i]),), buffer=keywords[i], dtype=tables.StringAtom(1)
+            )
+            key_buf.append(key)
+            buf_pos += len(keywords[i])
+        grp_tab.flush()
+        key_buf.flush()
+
+    def _create_indexes(self, grp_tab):
+        create_index_for_columns(grp_tab, "FamNr")
+
+    def _load_data(self):
+        return callDarwinExport("GetRootHOGData()")
+
+    def _get_nr_of_groups(self):
+        tab = self.db.get_node("/HogLevel")
+        try:
+            return tab[tab.colindexes["Fam"][-1]]["Fam"]
+        except KeyError:
+            return max(tab.col("Fam"))
+
+    def _get_group_member_counts(self):
+        pass
+
+    def _check_textfiles_avail(self):
+        rootdir = os.getenv("DARWIN_BROWSERDATA_PATH", "")
+        fn = os.path.join(rootdir, self.keyword_name)
+        return os.path.exists(fn)
+
+
+class OmaGroupMetadataLoader(RootHOGMetaDataLoader):
+    """OMA Group Meta data extractor.
+
+    This class provides the means to import the Keywords and Fingerprints
+    of the OMA Groups into the hdf5 database. The data is stored under
+    in the node defined by :attr:`meta_data_path`, which defaults to
+    /OmaGroups/MetaData.
+    """
+
+    keyword_name = "Keywords.drw"
+    finger_name = "Fingerprints"
+    keys = ["Keywords", "Fingerprints"]
+    tab_description = tablefmt.OmaGroupTable
+    meta_data_path = "/OmaGroups/MetaData"
+
+    def _fill_data_into_db(self, encoded_data, grp_tab, key_buf):
+        row = grp_tab.row
+        buf_pos = 0
+        stable_ids = encoded_data["Fingerprints"]
+        keywords = encoded_data["Keywords"]
         for i in range(len(stable_ids)):
             row["GroupNr"] = i + 1
             row["Fingerprint"] = stable_ids[i]
@@ -1677,20 +1817,6 @@ class OmaGroupMetadataLoader(object):
 
     def _create_indexes(self, grp_tab):
         create_index_for_columns(grp_tab, "Fingerprint", "GroupNr")
-
-    def _parse_darwin_string_list_file(self, fh):
-        data = fh.read()
-        start, end = data.find(b"["), data.rfind(b", NULL]")
-        if end == -1:
-            end = data.rfind(b"]:")
-        part = data[start:end] + b"]"
-        as_json = (
-            part.replace(b"''", b"__apos__")
-            .replace(b"'", b'"')
-            .replace(b"__apos__", b"'")
-        )
-        as_list = json.loads(as_json.decode())
-        return [el.encode("utf8") for el in as_list]
 
     def _load_data(self):
         return callDarwinExport("GetGroupData()")
@@ -1888,18 +2014,25 @@ class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
                         break
 
         if is_geneRef:
-            node.set("og", og)
+            node.set("LOFT", og)
         else:
             super()._annotateGroupR(node, og, idx)
 
 
 class HogConverter(object):
-    def __init__(self, entry_tab):
+    def __init__(self, entry_tab, tax_tab=None):
         self.fam_re = re.compile(r"HOG:(?P<fam_nr>\d+)")
         self.hogs = numpy.zeros(
             shape=(len(entry_tab) + 1,), dtype=entry_tab.cols.OmaHOG.dtype
         )
         self.entry_tab = entry_tab
+        self.taxrange_2_taxid = (
+            self._extract_taxrange_2_taxid_map(tax_tab) if tax_tab else None
+        )
+        print(self.taxrange_2_taxid)
+
+    def _extract_taxrange_2_taxid_map(self, tax_tab):
+        return {row["Name"].decode(): int(row["NCBITaxonId"]) for row in tax_tab}
 
     def attach_newick_taxonomy(self, tree):
         self.taxonomy = familyanalyzer.NewickTaxonomy(tree)
@@ -1909,25 +2042,27 @@ class HogConverter(object):
             if not grp.get("id").startswith("HOG:"):
                 grp.set("id", "HOG:{:07d}".format(int(grp.get("id"))))
 
-    def convert_file(self, fn):
+    def convert_file(self, fn, store=None):
         p = familyanalyzer.OrthoXMLParser(fn)
         self._assert_hogid_has_correct_prefix(p)
         if hasattr(self, "taxonomy"):
-            p.augmentTaxonomyInfo(self.taxonomy)
+            tax = self.taxonomy
         else:
-            p.augmentTaxonomyInfo(familyanalyzer.TaxonomyFactory.newTaxonomy(p))
-        GroupAnnotatorInclGeneRefs(p).annotateDoc()
+            tax = familyanalyzer.TaxonomyFactory.newTaxonomy(p)
+        annotator = GroupAnnotatorInclGeneRefs(p, self.taxrange_2_taxid)
+        annotator.annotateMissingTaxRanges(tax)
+        annotator.annotateDoc()
 
         levs = []
         for fam in p.getToplevelGroups():
-            m = self.fam_re.match(fam.get("og"))
+            m = self.fam_re.match(self.get_hog_id(fam))
             fam_nr = int(m.group("fam_nr"))
             for taxnode in familyanalyzer.OrthoXMLQuery.getTaxRangeNodes(
                 fam, recursively=True
             ):
                 ognode = taxnode.getparent()
                 levs.append(
-                    (fam_nr, ognode.get("og"), taxnode.get("value"))
+                    (fam_nr, self.get_hog_id(ognode), taxnode.get("value"))
                     + self.get_hog_scores(ognode, taxnode)
                     + (
                         self.get_nr_member_genes(ognode),
@@ -1939,8 +2074,9 @@ class HogConverter(object):
             ".//{{{ns0}}}geneRef".format(**familyanalyzer.OrthoXMLParser.ns)
         )
         for x in geneNodes:
-            self.hogs[int(x.get("id"))] = x.get("og")
-
+            self.hogs[int(x.get("id"))] = x.get("LOFT")
+        if store is not None:
+            p.write(store, pretty_print=True)
         return levs
 
     def write_hogs(self):
@@ -1950,6 +2086,14 @@ class HogConverter(object):
         .. note: This method will overwrite any previous value of the OmaHOG column"""
         self.entry_tab.modify_column(0, len(self.entry_tab), 1, self.hogs[1:], "OmaHOG")
         self.entry_tab.flush()
+
+    def get_hog_id(self, node):
+        try:
+            id = node.get("id")
+            id = id.split("_")[0]
+        except AttributeError:
+            id = node.get("og")
+        return id
 
     def get_hog_scores(self, og_node, tax_node):
         """extract the scores associated with an orthologGroup node
@@ -2001,6 +2145,7 @@ class XRefImporter(object):
         go_manager,
         desc_manager,
         approx_adder,
+        uniprot_xrefs_adder,
     ):
         self.xrefs = []
         self.ec = []
@@ -2009,6 +2154,7 @@ class XRefImporter(object):
         self.go_manager = go_manager
         self.desc_manager = desc_manager
         self.approx_adder = approx_adder
+        self.uniprot_xref_adder = uniprot_xrefs_adder
 
         self.verif_enum = tablefmt.XRefTable.columns.get("Verification").enum
         xrefEnum = tablefmt.XRefTable.columns.get("XRefSource").enum
@@ -2025,7 +2171,7 @@ class XRefImporter(object):
             "ProtName": (xrefEnum["Protein Name"], "unchecked"),
             "Synonyms": (xrefEnum["Synonym"], "unchecked"),
             "HGNC_Id": (xrefEnum["HGNC"], "unchecked"),
-            "PMP": (xrefEnum["PMP"], "exact"),
+            "SMR": (xrefEnum["Swiss Model"], "unchecked"),
             "PDB": (xrefEnum["PDB"], "unchecked"),
             "EMBL": (xrefEnum["EMBL"], "unchecked"),
             "ID": (xrefEnum["SourceID"], "exact"),
@@ -2096,7 +2242,7 @@ class XRefImporter(object):
     def flush_buffers(self):
         common.package_logger.info("flushing xrefs and ec buffers")
         if len(self.xrefs) > 0:
-            self.xref_tab.append(sorted(uniq(self.xrefs)))
+            self.xref_tab.append(sorted(uniq(self.xrefs, transform=lambda x: x[:2])))
             self.xrefs = []
         if len(self.ec) > 0:
             self.ec_tab.append(sorted(uniq(self.ec)))
@@ -2179,10 +2325,10 @@ class XRefImporter(object):
         )
         for key in multikey.split("; "):
             pos = key.find("_")
-            if pos > 0:
-                self._add_to_xrefs(eNr, enum_nr, key[0:pos], "exact")
-            else:
-                self._add_to_xrefs(eNr, enum_nr, key, "exact")
+            store_key = key if pos < 0 else key[:pos]
+            self._add_to_xrefs(eNr, enum_nr, store_key, "exact")
+            for tup in self.uniprot_xref_adder.iter_xreftuples_for_up(store_key, eNr):
+                self.xrefs.append(tup)
 
     def add_approx_xrefs(self, enr):
         self.xrefs.extend(self.approx_adder.iter_approx_xrefs_for(enr))
@@ -2226,6 +2372,57 @@ class XRefImporter(object):
             buf.append(ref)
             off.append([cur_pos])
             cur_pos += len(lc_ref)
+
+
+class UniProtAdditionalXRefImporter(object):
+    def __init__(self, *args):
+        self.verify_enum = tablefmt.XRefTable.columns.get("Verification").enum
+        xref_enum = tablefmt.XRefTable.columns.get("XRefSource").enum
+        self.mapping = {
+            x: xref_enum[x]
+            for x in (
+                "STRING",
+                "DisGeNET",
+                "neXtProt",
+                "Bgee",
+                "HGNC",
+                "EPD",
+                "GlyConnect",
+                "ChEMBL",
+                "SwissPalm",
+            )
+        }
+        self.mapping.update(
+            {
+                "GeneID": xref_enum["EntrezGene"],
+                "GeneWiki": xref_enum["WikiGene"],
+                "SMR": xref_enum["Swiss Model"],
+                "Ensembl": xref_enum["Ensembl Transcript"],
+            }
+        )
+        self._lookup = collections.defaultdict(list)
+        for fpath in args:
+            if os.path.exists(fpath):
+                self._load_projected_xrefs(fpath)
+            else:
+                common.package_logger.warning(
+                    'UniProt projected XRef file "{}" does not exist. Skipping'.format(
+                        fpath
+                    )
+                )
+
+    def _load_projected_xrefs(self, fpath):
+        with open(fpath, "rt", newline="", encoding="utf-8", errors="ignore") as fh:
+            csv_reader = csv.reader(fh, delimiter="\t")
+            for row in csv_reader:
+                self._lookup[row[0]].append((self.mapping[row[1]], row[2]))
+
+    def iter_xreftuples_for_up(self, accession, enr, confidence=None):
+        print("accession: " + accession)
+        if confidence is None:
+            confidence = self.verify_enum["unchecked"]
+        for xref in self._lookup[accession]:
+            yield enr, xref[1], xref[2].encode("utf-8"), confidence
 
 
 class ApproximateXRefImporter(object):
@@ -2542,6 +2739,7 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level="INFO"
     x.add_canonical_id()
     x.add_group_metadata()
     x.add_hog_domain_prevalence()
+    x.add_roothog_metadata()
     x.close()
 
     x = DarwinExporter(name, logger=log)

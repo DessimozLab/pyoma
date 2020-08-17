@@ -2,78 +2,23 @@ import functools
 import queue
 import tables
 import ete3
-import copy
 import multiprocessing as mp
 import time
 import tempfile
 import pandas as pd
-import collections
-import itertools
 from datasketch import WeightedMinHashGenerator, MinHashLSHForest
 from .pyhamutils import get_ham_treemap_from_row
 from .hashutils import generate_treeweights, row2hash
+from .tree_helper import (
+    taxa_index,
+    leaf_index,
+    filter_tree,
+    get_newick_tree_from_tax_db,
+)
 import logging
 from logging.handlers import QueueHandler
 
 logger = logging.getLogger(__name__)
-
-
-def get_newick_tree_from_tax_db(tax):
-    def traverse(node):
-        yield node
-        if "children" in node:
-            for child in node["children"]:
-                yield from traverse(child)
-
-    def rec(node):
-        if "children" not in node:
-            return str(node["id"])
-        children = []
-        for child in node["children"]:
-            children.append(rec(child))
-        return "({}){}".format(",".join(children), node["id"])
-
-    def get_duplicates(node):
-        c = collections.Counter(x["id"] for x in traverse(node))
-        return list(
-            item[0] for item in itertools.takewhile(lambda x: x[1] > 1, c.most_common())
-        )
-
-    def rename_internal_duplicates(node, duplicates):
-        for n in traverse(node):
-            if n["id"] in duplicates and "children" in n:
-                n["id"] = "{}Rep".format(n["id"])
-
-    taxdict = tax.as_dict()
-    dupl = get_duplicates(taxdict)
-    rename_internal_duplicates(taxdict, dupl)
-    res = rec(taxdict) + ";"
-    return res
-
-
-def filter_tree(tree: ete3.PhyloNode, root_node=None, taxfilter=None):
-    newtree = copy.deepcopy(tree)
-    if root_node:
-        for n in newtree.traverse():
-            if str(n.name) == str(root_node):
-                newtree = n
-                break
-    if taxfilter:
-        for n in newtree.traverse():
-            if n.name in taxfilter:
-                n.detach()
-    return newtree
-
-
-def taxa_index(tree: ete3.PhyloNode):
-    """build a dictionary from tree-node name to idx"""
-    index = {n.name: i for i, n in enumerate(tree.traverse())}
-    return index
-
-
-def leaf_index(tree: ete3.PhyloNode):
-    index = {n.name: i for i, n in enumerate(tree.iter_leaves())}
-    return index
 
 
 class LSHBuilderBase(object):
@@ -309,7 +254,10 @@ class HogGenerator(SourceProcess):
         chunk = {}
         logger.debug("nr of toplevel hogs: {}".format(nr_groups))
         for fam in range(1, nr_groups + 1):
-            orthoxml = db.get_orthoxml(fam).decode()
+            try:
+                orthoxml = db.get_orthoxml(fam).decode()
+            except ValueError as e:
+                continue
             nr_species = orthoxml.count("<species name=")
             if (self.max_hogsize is None or nr_species < self.max_hogsize) and (
                 self.min_hogsize is None or nr_species >= self.min_hogsize

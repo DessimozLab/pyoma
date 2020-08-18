@@ -162,6 +162,7 @@ class CacheBuilderWorker(mp.Process):
             to_append['id'] = p1.entry_nr
             to_append['protid'] = protein.omaid
             to_append['sequence_length'] = protein.sequence_length
+            to_append['taxon'] = protein.genome.species_and_strain_as_dict
             to_append['xrefid'] = protein.xrefs[0]['xref']
             to_append['gc_content'] = protein.gc_content
             to_append['nr_exons'] = protein.nr_exons

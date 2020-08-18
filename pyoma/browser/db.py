@@ -1369,7 +1369,7 @@ class Database(object):
             )
         )
 
-    def get_gene_similarities_hog(self, entry_nr):
+    def get_gene_similarities_hog(self, hog_id):
         """Retrieve the gene similarity matrix for a HOG
 
         The method returns the 1-D coordinates of the genes of a HOG, indicating
@@ -1378,29 +1378,30 @@ class Database(object):
 
         The result is returned as a dictionary
 
-        :param str entry_nr: Entry number of the HOG
+        :param str hog_id: Example 'HOG:0508179'
         """
 
-        hog_members = self.member_of_fam(self.hog_family(entry_nr)) # Stores all the members of the given HoG
+        hog_members = self.member_of_hog_id(hog_id) # Stores all the members of the given HoG
 
         go_annots_not_fetched = []
         minhash_signatures = {}
         idx_map = {}
         gene_similarity_vals = {}
 
-        total_members = len(hog_members[:]['EntryNr'])
+        total_members = len(hog_members)
 
-        for i,member in enumerate(hog_members[:]['EntryNr']):
-            annos = self.get_gene_ontology_annotations(entry_nr=self.id_resolver.resolve(member), as_dataframe=False)
+        for i,member in enumerate(hog_members):
+            curr_prot_entrynr = member[0]
+            annos = self.get_gene_ontology_annotations(entry_nr=self.id_resolver.resolve(curr_prot_entrynr), as_dataframe=False)
             
             if len(annos)==0:
-                go_annots_not_fetched.append(member)
+                go_annots_not_fetched.append(curr_prot_entrynr)
             else:
-                idx_map[(i-len(go_annots_not_fetched))] = member
-                minhash_signatures[member] = MinHash()
+                idx_map[(i-len(go_annots_not_fetched))] = curr_prot_entrynr
+                minhash_signatures[curr_prot_entrynr] = MinHash()
                 
                 for d in ((annos[:]['TermNr']).astype('unicode')):
-                    minhash_signatures[member].update(d.encode('utf8'))
+                    minhash_signatures[curr_prot_entrynr].update(d.encode('utf8'))
 
         n = total_members-len(go_annots_not_fetched)
         dist_matrix = np.zeros((n, n))

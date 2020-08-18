@@ -10,10 +10,12 @@ import time
 import os
 import sys
 import functools
+import json
 
 from tqdm import tqdm
 from queue import Empty
 from .db import Database
+from .models import ProteinEntry
 from .tablefmt import ProteinCacheInfo
 from os.path import commonprefix, split
 
@@ -146,6 +148,31 @@ class CacheBuilderWorker(mp.Process):
             dtype=tables.dtype_from_descr(ProteinCacheInfo),
         )
         return counts
+
+    def analyse_gene_similarity(self, fam):
+        famhog_id = "HOG:{:07d}".format(fam)
+        logger.debug("analysing family {}".format(fam))
+        fam_members = self.load_fam_members(fam)
+        logger.debug("family {} with {} members".format(fam, len(fam_members)))
+        genes_null_similarity, gene_similarity_vals = self.db.get_gene_similarities_hog(famhog_id)
+        final_json_output = []
+        for i, p1 in tqdm(enumerate(fam_members)):
+            to_append = {}
+            protein = ProteinEntry(self.db, p1.entry_nr)
+            to_append['id'] = p1.entry_nr
+            to_append['protid'] = protein.omaid
+            to_append['sequence_length'] = protein.sequence_length
+            to_append['taxon'] = protein.genome.species_and_strain_as_dict
+            to_append['xrefid'] = protein.xrefs[0]['xref']
+            to_append['gc_content'] = protein.gc_content
+            to_append['nr_exons'] = protein.nr_exons
+            if p1.entry_nr in genes_null_similarity:
+                to_append['gene_similarity'] = None
+            else:
+                to_append['gene_similarity'] = gene_similarity_vals[p1.entry_nr]
+            final_json_output.append(to_append)
+            
+        return json.dumps(final_json_output)
 
 
 def build_cache(db_fpath, nr_procs=None, from_cache=None):

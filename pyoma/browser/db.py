@@ -188,7 +188,9 @@ class Database(object):
         self.hog_profiler = None
         self._re_fam = None
         self.format_hogid = None
-        self.mds = manifold.MDS(n_components=1, max_iter=100, dissimilarity="precomputed", n_jobs=-1)
+        self.mds = manifold.MDS(
+            n_components=1, max_iter=100, dissimilarity="precomputed", n_jobs=-1
+        )
         self._set_hogid_schema()
 
     def close(self):
@@ -1373,7 +1375,7 @@ class Database(object):
         """Retrieve the gene similarity matrix for a HOG
 
         The method returns the 1-D coordinates of the genes of a HOG, indicating
-        how close or far they are. Alongside this, the method also returns the 
+        how close or far they are. Alongside this, the method also returns the
         genes that don't have any go_annotatations present.
 
         The result is returned as a dictionary
@@ -1381,42 +1383,48 @@ class Database(object):
         :param str hog_id: Example 'HOG:0508179'
         """
 
-        hog_members = self.member_of_hog_id(hog_id) # Stores all the members of the given HoG
+        hog_members = self.member_of_hog_id(hog_id)
 
         go_annots_not_fetched = []
         minhash_signatures = {}
         idx_map = {}
         gene_similarity_vals = {}
-
         total_members = len(hog_members)
+        i = 0
+        for member in hog_members:
+            curr_prot_entrynr = member["EntryNr"]
+            annos = self.get_gene_ontology_annotations(
+                entry_nr=curr_prot_entrynr, as_dataframe=False
+            )
 
-        for i,member in enumerate(hog_members):
-            curr_prot_entrynr = member[0]
-            annos = self.get_gene_ontology_annotations(entry_nr=self.id_resolver.resolve(curr_prot_entrynr), as_dataframe=False)
-            
-            if len(annos)==0:
+            if len(annos) == 0:
                 go_annots_not_fetched.append(curr_prot_entrynr)
             else:
-                idx_map[(i-len(go_annots_not_fetched))] = curr_prot_entrynr
-                minhash_signatures[curr_prot_entrynr] = MinHash()
-                
-                for d in ((annos[:]['TermNr']).astype('unicode')):
-                    minhash_signatures[curr_prot_entrynr].update(d.encode('utf8'))
+                idx_map[i] = curr_prot_entrynr
+                h = MinHash()
+                for d in annos["TermNr"].astype("unicode"):
+                    h.update(d.encode("utf8"))
+                minhash_signatures[curr_prot_entrynr] = h
+                i += 1
 
-        n = total_members-len(go_annots_not_fetched)
-        dist_matrix = np.zeros((n, n))
+        n = total_members - len(go_annots_not_fetched)
+        if n > 0:
+            dist_matrix = numpy.zeros((n, n))
+            for p1 in range(n):
+                for p2 in range(p1 + 1, n):
+                    score = minhash_signatures[idx_map[p1]].jaccard(
+                        minhash_signatures[idx_map[p2]]
+                    )
+                    dist_matrix[p1][p2] = 1 - score
+                    dist_matrix[p2][p1] = 1 - score
 
-        for p1 in range(0,n):
-            for p2 in range(p1+1, n):
-                score = minhash_signatures[idx_map[p1]].jaccard(minhash_signatures[idx_map[p2]])
-                dist_matrix[p1][p2] =  1 - score
-                dist_matrix[p2][p1] = 1 - score
-
-        positions = self.mds.fit(dist_matrix).embedding_
-
-        for i in range(len(idx_map)):
-            gene_similarity_vals[idx_map[i]] = positions[i][0]
-
+            if dist_matrix.max() == 0:
+                # all values the same
+                positions = numpy.zeros((n, 1))
+            else:
+                positions = self.mds.fit(dist_matrix).embedding_
+            for i in range(len(idx_map)):
+                gene_similarity_vals[idx_map[i]] = positions[i][0]
         return go_annots_not_fetched, gene_similarity_vals
 
 

@@ -149,30 +149,134 @@ class CacheBuilderWorker(mp.Process):
         )
         return counts
 
-    def analyse_gene_similarity(self, fam):
-        famhog_id = "HOG:{:07d}".format(fam)
+    def compute_familydata_json(self, fam):
+        famhog_id = self.db.format_hogid(fam)
         logger.debug("analysing family {}".format(fam))
         fam_members = self.load_fam_members(fam)
         logger.debug("family {} with {} members".format(fam, len(fam_members)))
-        genes_null_similarity, gene_similarity_vals = self.db.get_gene_similarities_hog(famhog_id)
+        try:
+            (
+                genes_null_similarity,
+                gene_similarity_vals,
+            ) = self.db.get_gene_similarities_hog(famhog_id)
+        except Exception as e:
+            print("gene_similarity failed for {}: {}".format(fam, e))
+            raise
         final_json_output = []
-        for i, p1 in tqdm(enumerate(fam_members)):
+        for p1 in fam_members:
             to_append = {}
             protein = ProteinEntry(self.db, p1.entry_nr)
-            to_append['id'] = p1.entry_nr
-            to_append['protid'] = protein.omaid
-            to_append['sequence_length'] = protein.sequence_length
-            to_append['taxon'] = protein.genome.species_and_strain_as_dict
-            to_append['xrefid'] = protein.xrefs[0]['xref']
-            to_append['gc_content'] = protein.gc_content
-            to_append['nr_exons'] = protein.nr_exons
+            to_append["id"] = p1.entry_nr
+            to_append["protid"] = protein.omaid
+            to_append["sequence_length"] = protein.sequence_length
+            to_append["taxon"] = protein.genome.species_and_strain_as_dict
+            to_append["xrefid"] = protein.canonicalid
+            to_append["gc_content"] = protein.gc_content
+            to_append["nr_exons"] = protein.nr_exons
             if p1.entry_nr in genes_null_similarity:
-                to_append['gene_similarity'] = None
+                to_append["gene_similarity"] = None
             else:
-                to_append['gene_similarity'] = gene_similarity_vals[p1.entry_nr]
+                to_append["gene_similarity"] = gene_similarity_vals[p1.entry_nr]
             final_json_output.append(to_append)
-            
+
         return json.dumps(final_json_output)
+
+
+class ConsistenceyError(Exception):
+    pass
+
+
+class ResultHandler:
+    def __init__(self, cache_file):
+        self.cache_file = cache_file
+        self.ortholog_count_result = []
+        self.family_json_offset = []
+        self.in_memory_json_buffer = []
+        self.buffer_offset = 0
+        self.jobs = []
+        self._last_cache_timestamp = time.time()
+        self._offset_dtype = [("Fam", "i4"), ("offset", "i8"), ("length", "i4")]
+
+    def load_cache(self):
+        with tables.open_file(self.cache_file) as cache:
+            self.ortholog_count_result = [cache.root.ortholog_counts.read()]
+            self.buffer_offset = len(cache.root.family_json.buffer)
+            self.family_json_offset = [cache.root.family_json.offset.read()]
+            self.jobs = cache.root.pending_jobs.read(0)[0]
+
+    def add_jobs(self, jobs):
+        self.jobs.extend(jobs)
+
+    def handle_result(self, job, result):
+        if job[0] == "compute_familydata_json":
+            self.store_familydata_json_result(job, result)
+        elif job[0] in ("analyse_fam", "analyse_singleton"):
+            self.store_ortholog_count_result(job, result)
+        else:
+            raise ValueError("Unexpected result type")
+        self.jobs.remove(job)
+        if (
+            time.time() - self._last_cache_timestamp > 300
+            or sum(len(z) for z in self.in_memory_json_buffer) > 100e6
+        ):
+            self.write_to_disk()
+
+    def store_familydata_json_result(self, job, result):
+        fam = job[1][0]
+        encoded_json = result.encode("utf-8")
+        json_as_np = numpy.ndarray(
+            (len(encoded_json),), buffer=encoded_json, dtype=tables.StringAtom(1)
+        )
+        self.in_memory_json_buffer.append(json_as_np)
+        self.family_json_offset.append(
+            numpy.array(
+                [(fam, self.buffer_offset, len(encoded_json))], dtype=self._offset_dtype
+            )
+        )
+        self.buffer_offset += len(encoded_json)
+
+    def store_ortholog_count_result(self, job, result):
+        self.ortholog_count_result.append(result)
+
+    def write_to_disk(self):
+        logger.info("writing a milestone to disk...")
+        transfer_data = False
+        if os.path.exists(self.cache_file):
+            os.replace(self.cache_file, self.cache_file + ".0")
+            transfer_data = True
+        with tables.open_file(self.cache_file, "w") as h5:
+            buf = h5.create_earray(
+                "/family_json",
+                "buffer",
+                tables.StringAtom(1),
+                (0,),
+                createparents=True,
+                expectedrows=1e9,
+            )
+            if transfer_data:
+                with tables.open_file(self.cache_file + ".0", "r") as prev:
+                    buf.append(prev.root.family_json.buffer.read())
+            for el in self.in_memory_json_buffer:
+                buf.append(el)
+            off = numpy.lib.recfunctions.stack_arrays(
+                self.family_json_offset, usemask=False
+            )
+            h5.create_table("/family_json", "offset", None, obj=off)
+            cnts = numpy.lib.recfunctions.stack_arrays(
+                self.ortholog_count_result, usemask=False
+            )
+            h5.create_table("/", "ortholog_counts", ProteinCacheInfo, obj=cnts)
+            a = h5.create_vlarray("/", "pending_jobs", tables.ObjectAtom())
+            a.append(self.jobs)
+            h5.flush()
+            if len(buf) != self.buffer_offset:
+                raise ConsistenceyError(
+                    "buffer has unexpeced length: {}vs{}".format(
+                        len(buf), self.buffer_offset
+                    )
+                )
+            self.in_memory_json_buffer = []
+            logger.info("finished writing milestone to {}".format(self.cache_file))
 
 
 def build_cache(db_fpath, nr_procs=None, from_cache=None):
@@ -182,16 +286,11 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
 
     db = Database(db_fpath)
     nr_entries = len(db.get_hdf5_handle().get_node("/Protein/Entries"))
+    result_handler = ResultHandler(from_cache)
     if from_cache is not None and os.path.isfile(from_cache):
-        with tables.open_file(from_cache, "r") as cache:
-            results = [cache.root.results.read()]
-            jobs = list(cache.root.pending_jobs.read()[0])
-        shutil.copy2(from_cache, from_cache + ".restarted")
-        logger.info(
-            "loaded results for {} proteins and {} remaining jobs".format(
-                len(results[0]), len(jobs)
-            )
-        )
+        result_handler.load_cache()
+        jobs = result_handler.jobs
+        logger.debug(jobs)
     else:
         nr_fams = db.get_nr_toplevel_hogs()
         singletons = [
@@ -207,11 +306,14 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
             )
         )
         jobs = [("analyse_fam", (fam + 1,)) for fam in range(nr_fams)]
+        jobs.extend([("compute_familydata_json", (fam + 1,)) for fam in range(nr_fams)])
         jobs.extend([("analyse_singleton", singleton) for singleton in singletons])
         logger.info(
-            "nr of jobs: {} (expected {})".format(len(jobs), nr_fams + len(singletons))
+            "nr of jobs: {} (expected {})".format(
+                len(jobs), 2 * nr_fams + len(singletons)
+            )
         )
-        results = []
+        result_handler.add_jobs(jobs)
     db.close()
 
     workers = []
@@ -246,42 +348,24 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
                     break
             else:
                 job, res = reply
-                results.append(res)
-                pending_jobs.remove(job)
-                if time.time() - last_cache_timestamp > 60 and from_cache is not None:
-                    sofar_results = numpy.lib.recfunctions.stack_arrays(
-                        results, usemask=False
-                    )
-                    write_cache(from_cache, sofar_results, pending_jobs)
-                    last_cache_timestamp = time.time()
+                result_handler.handle_result(job, res)
+        result_handler.write_to_disk()
         logger.info("exit receiver loop. joining workers...")
         for w in workers:
             w.join()
         logger.debug("all workers joined")
     except KeyboardInterrupt as e:
         logger.info("recived interrupt. writeing out temp results")
-        sofar_results = numpy.lib.recfunctions.stack_arrays(results, usemask=False)
-        if from_cache is None:
-            from_cache = "partial_compute_cache.h5"
-        write_cache(from_cache, sofar_results, pending_jobs)
+        result_handler.write_to_disk()
         sys.exit(99)
 
-    ret = numpy.lib.recfunctions.stack_arrays(results, usemask=False)
+    ret = numpy.lib.recfunctions.stack_arrays(
+        result_handler.ortholog_count_result, usemask=False
+    )
     ret.sort(order="EntryNr")
     logger.info("sorted results: {}".format(ret))
     assert check_all_there(nr_entries, ret)
     return ret
-
-
-def write_cache(fn, sofar_results, pending_jobs):
-    if os.path.exists(fn):
-        os.replace(fn, fn + ".0")
-    with tables.open_file(fn, "w") as h5:
-        h5.create_table("/", "results", ProteinCacheInfo, obj=sofar_results)
-        a = h5.create_vlarray("/", "pending_jobs", tables.ObjectAtom())
-        a.append(pending_jobs)
-        h5.flush()
-    logger.info("written to cache {}".format(fn))
 
 
 def check_all_there(nr_prots, cache):
@@ -295,6 +379,8 @@ def check_all_there(nr_prots, cache):
 def compute_and_store_cached_data(
     db_fpath, cache_path, nr_procs=None, force=False, tmp_cache=None
 ):
+    if tmp_cache is None:
+        tmp_cache = "/tmp/compute_cache.h5"
     with tables.open_file(db_fpath, "a") as h5:
         try:
             n = h5.get_node(cache_path)
@@ -310,8 +396,28 @@ def compute_and_store_cached_data(
     cache = build_cache(db_fpath, nr_procs=nr_procs, from_cache=tmp_cache)
 
     path, name = split(cache_path)
-    with tables.open_file(db_fpath, "a") as h5:
+    with tables.open_file(db_fpath, "a") as h5, tables.open_file(
+        tmp_cache, "r"
+    ) as cache_h5:
         tab = h5.create_table(
             path, name, ProteinCacheInfo, createparents=True, obj=cache
         )
         tab.colinstances["EntryNr"].create_csindex()
+
+        json_off = cache_h5.root.family_json.offset.read()
+        json_off.sort(order="Fam")
+        tab = h5.root.RootHOG.MetaData.read()
+        for fam, off, length in json_off:
+            if tab[fam - 1]["Fam"] != fam:
+                raise ConsistenceyError("table not properly ordered")
+            tab[fam - 1]["FamDataJsonOffset"] = off
+            tab[fam - 1]["FamDataJsonLength"] = length
+        tab.modify_columns(
+            columns=tab[["FamDataJsonOffset", "FamDataJsonLength"]],
+            names=("FamDataJsonOffset", "FamDataJsonLength"),
+        )
+
+        json_in_buf = cache_h5.root.family_json.buffer
+        json_in_buf._f_copy(
+            h5.root.RootHOG, "JsonBuffer", expectedrows=len(json_in_buf)
+        )

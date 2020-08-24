@@ -15,7 +15,6 @@ import functools
 from bisect import bisect_left
 from xml.etree import ElementTree as et
 from datasketch import MinHash
-from sklearn import manifold
 import fuzzyset
 import dateutil
 import numpy
@@ -188,9 +187,7 @@ class Database(object):
         self.hog_profiler = None
         self._re_fam = None
         self.format_hogid = None
-        self.mds = manifold.MDS(
-            n_components=1, max_iter=100, dissimilarity="precomputed", n_jobs=-1
-        )
+        self.mds = None
         self._set_hogid_schema()
 
     def close(self):
@@ -1422,6 +1419,15 @@ class Database(object):
                 # all values the same
                 positions = numpy.zeros((n, 1))
             else:
+                if self.mds is None:
+                    from sklearn import manifold
+
+                    self.mds = manifold.MDS(
+                        n_components=1,
+                        max_iter=100,
+                        dissimilarity="precomputed",
+                        n_jobs=-1,
+                    )
                 positions = self.mds.fit(dist_matrix).embedding_
             for i in range(len(idx_map)):
                 gene_similarity_vals[idx_map[i]] = positions[i][0]

@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --account=cdessim2_oma
-#SBATCH --array=1-25
-#SBATCH --partition=ax-normal
+#SBATCH --array=1-40
+#SBATCH --partition=axiom
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -15,7 +15,7 @@
 module load oma-conv
 
 
-NProc=${1:-25}
+NProc=${1:-40}
 doVPS="${2:-false}"
 overwrite="${3:-true}"
 echo "Running with $NProc procs, doVPS=$doVPS"

@@ -1,4 +1,6 @@
 import datasketch
+import numpy
+
 from .tree_helper import leaf_index
 import logging
 
@@ -36,11 +38,10 @@ class Profiler(object):
                 taxid = int(node.name)
             except ValueError:
                 taxid = int(node.name[: node.name.index("Rep")])
-            try:
-                sciname = self._map_taxid_to_name(taxid)
-            except IndexError as e:
-                logger.exception("cannot load sciname for {}".format(taxid))
-                sciname = ""
+            # at some point the taxid's were uint32 with negative values
+            # need to cast them via np.int32
+            taxid = int(numpy.int32(taxid))
+            sciname = self._map_taxid_to_name(taxid)
             if node.is_leaf():
                 idx = leaf_idx[node.name]
                 node.add_features(range=(idx, idx + 1), size=1, sciname=sciname)

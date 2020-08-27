@@ -1426,7 +1426,7 @@ class Database(object):
                         n_components=1,
                         max_iter=100,
                         dissimilarity="precomputed",
-                        n_jobs=-1,
+                        n_jobs=1,
                     )
                 positions = self.mds.fit(dist_matrix).embedding_
             for i in range(len(idx_map)):

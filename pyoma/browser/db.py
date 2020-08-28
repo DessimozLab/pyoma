@@ -7,6 +7,8 @@ import itertools
 import json
 import logging
 import os
+
+import networkx as nx
 import pyopa
 import re
 import threading
@@ -889,6 +891,8 @@ class Database(object):
         try:
             row = next(self.db.root.HogLevel.where(query))
             if field is not None:
+                if field == "_NROW":
+                    return row.nrow
                 return row[field]
             return row.fetch_all_fields()
         except StopIteration:
@@ -945,6 +949,38 @@ class Database(object):
             hog_str.encode("ascii"),
             (hog_str[0:-1] + chr(1 + ord(hog_str[-1]))).encode("ascii"),
         )
+
+    def get_syntentic_hogs(self, hog_id, level, steps=2):
+        """Returns a graph of the ancestral synteny
+
+        This method returns a networkx.Graph object with HOGs as nodes
+        and weighted edges representing ancestral synteny.
+
+        :param str hog_id: the hog_id of the query HOG
+        :param str level: the taxonomic level of the ancestral genome
+        :param int step: number of breadth-first steps to take to get the local
+                         neighborhood of the query HOG.
+        """
+        hl_tab = self.db.get_node("/HogLevel")
+        hog_row = self.get_hog(hog_id, level, "_NROW")
+        try:
+            taxnodes = self.tax.get_taxnode_from_name_or_taxid(level)
+            taxid_of_level = int(taxnodes[0]["NCBITaxonId"])
+        except KeyError:
+            if level == "LUCA":
+                taxid_of_level = 0
+            else:
+                raise
+
+        G = nx.Graph()
+        G.add_weighted_edges_from(
+            self.db.get_node("/AncestralSynteny/tax{}".format(taxid_of_level)).read()
+        )
+        neighbors = [hog_row] + [
+            v for u, v in nx.bfs_edges(G, source=hog_row, depth_limit=steps)
+        ]
+        S = G.subgraph(neighbors)
+        return nx.relabel_nodes(S, lambda x: hl_tab[x]["ID"].decode())
 
     def oma_group_members(self, group_id):
         """get the member entries of an oma group.
@@ -2040,11 +2076,12 @@ class Taxonomy(object):
                 ]
             )
 
-    def _table_idx_from_numeric(self, tid):
-        i = self.tax_table["NCBITaxonId"].searchsorted(tid, sorter=self.taxid_key)
+    def _table_idx_from_numeric(self, tids):
+        i = self.tax_table["NCBITaxonId"].searchsorted(tids, sorter=self.taxid_key)
         idx = self.taxid_key[i]
-        if self.tax_table[idx]["NCBITaxonId"] != tid:
-            raise InvalidTaxonId("{0:d} is an invalid/unknown taxonomy id".format(tid))
+        if (self.tax_table[idx]["NCBITaxonId"] != tids).any():
+            unkn = tids[self.tax_table[idx]["NCBITaxonId"] != tids]
+            raise InvalidTaxonId("{} are invalid/unknown taxonomy ids".format(unkn))
         return idx
 
     def _get_root_taxon(self):
@@ -2137,6 +2174,12 @@ class Taxonomy(object):
 
         get_children(rid)
         return self.get_induced_taxonomy(subtree)
+
+    def get_taxnode_from_name_or_taxid(self, query):
+        if isinstance(query, (bytes, str, int)):
+            query = [query]
+        tids = self._get_taxids_from_any(query, skip_missing=False)
+        return self._taxon_from_numeric(tids)
 
     def get_taxid_of_extent_genomes(self):
         """returns a list of ncbi taxon ids of the extent genomes within the taxonomy"""

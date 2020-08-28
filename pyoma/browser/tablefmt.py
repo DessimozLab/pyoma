@@ -31,6 +31,12 @@ class OrthoXmlHogTable(tables.IsDescription):
     HogAugmentedBufferLength = tables.UInt32Col(pos=4)
 
 
+class AncestralSyntenyRels(tables.IsDescription):
+    HogRow1 = tables.UInt32Col(pos=0)
+    HogRow2 = tables.UInt32Col(pos=1)
+    Weight = tables.Float16Col(pos=2)
+
+
 class ProteinTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     SeqBufferOffset = tables.UInt64Col(pos=2)

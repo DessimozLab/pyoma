@@ -413,9 +413,11 @@ def compute_and_store_cached_data(
                 raise ConsistenceyError("table not properly ordered")
             tab[fam - 1]["FamDataJsonOffset"] = off
             tab[fam - 1]["FamDataJsonLength"] = length
-        h5.root.RootHOG.MetaData.modify_columns(
-            columns=tab[["FamDataJsonOffset", "FamDataJsonLength"]],
-            names=("FamDataJsonOffset", "FamDataJsonLength"),
+        h5.root.RootHOG.MetaData.modify_column(
+            column=tab["FamDataJsonOffset"], colname="FamDataJsonOffset"
+        )
+        h5.root.RootHOG.MetaData.modify_column(
+            column=tab["FamDataJsonLength"], colname="FamDataJsonLength"
         )
 
         json_in_buf = cache_h5.root.family_json.buffer

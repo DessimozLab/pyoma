@@ -409,7 +409,7 @@ def compute_and_store_cached_data(
         json_off.sort(order="Fam")
         tab = h5.root.RootHOG.MetaData.read()
         for fam, off, length in json_off:
-            if tab[fam - 1]["Fam"] != fam:
+            if tab[fam - 1]["FamNr"] != fam:
                 raise ConsistenceyError("table not properly ordered")
             tab[fam - 1]["FamDataJsonOffset"] = off
             tab[fam - 1]["FamDataJsonLength"] = length

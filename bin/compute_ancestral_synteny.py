@@ -22,3 +22,4 @@ if __name__ == "__main__":
     res = pyoma.browser.ancestral_synteny.infer_synteny(
         conf.orthoxml, conf.hdf5, conf.tree
     )
+    pyoma.browser.ancestral_synteny.write_syntenygraphs_to_hdf5(conf.hdf5, res[1])

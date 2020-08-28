@@ -276,6 +276,7 @@ class ResultHandler:
                     )
                 )
             self.in_memory_json_buffer = []
+            self._last_cache_timestamp = time.time()
             logger.info("finished writing milestone to {}".format(self.cache_file))
 
 
@@ -412,7 +413,7 @@ def compute_and_store_cached_data(
                 raise ConsistenceyError("table not properly ordered")
             tab[fam - 1]["FamDataJsonOffset"] = off
             tab[fam - 1]["FamDataJsonLength"] = length
-        tab.modify_columns(
+        h5.root.RootHOG.MetaData.modify_columns(
             columns=tab[["FamDataJsonOffset", "FamDataJsonLength"]],
             names=("FamDataJsonOffset", "FamDataJsonLength"),
         )

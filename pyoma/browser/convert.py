@@ -1792,7 +1792,7 @@ class OmaGroupMetadataLoader(RootHOGMetaDataLoader):
 
     keyword_name = "Keywords.drw"
     finger_name = "Fingerprints"
-    keys = ["Keywords", "Fingerprints"]
+    expected_keys = ["Keywords", "Fingerprints"]
     tab_description = tablefmt.OmaGroupTable
     meta_data_path = "/OmaGroups/MetaData"
 

@@ -59,7 +59,7 @@ setup(
     extras_require={
         "create_db": [
             "PySAIS",
-            "familyanalyzer>=0.7.1",
+            "familyanalyzer>=0.7.2",
             "matplotlib",
             "scikit-learn",
             "scikit-fuzzy",

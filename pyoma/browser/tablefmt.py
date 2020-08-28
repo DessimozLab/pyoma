@@ -226,5 +226,5 @@ class RootHOGMetaTable(tables.IsDescription):
     FamNr = tables.UInt32Col(pos=0)
     KeywordOffset = tables.UInt32Col(pos=1)
     KeywordLength = tables.UInt32Col(pos=2)
-    FamDataJsonOffset = tables.UInt32Col(pos=3)
+    FamDataJsonOffset = tables.UInt64Col(pos=3)
     FamDataJsonLength = tables.UInt32Col(pos=4)

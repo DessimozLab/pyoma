@@ -136,12 +136,14 @@ def import_oma_run(path, outfile, domains=None, log_level="INFO"):
     x.add_canonical_id()
     x.add_group_metadata()
     x.add_hog_domain_prevalence()
+    x.add_roothog_metadata()
     x.close()
 
     x = StandaloneExporter(path, outfile, logger=log)
     x.create_indexes()
     x.add_sequence_suffix_array()
     x.update_summary_stats()
+    x.add_per_species_aux_groupdata()
     x.close()
 
 

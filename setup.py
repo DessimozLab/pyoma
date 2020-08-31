@@ -16,6 +16,7 @@ req_packages = [
     'biopython == 1.76 ; python_version < "3.6"',
     "datasketch",
     "ete3",
+    "networkx",
 ]
 
 cur_dir = os.path.abspath(os.path.dirname(__file__))

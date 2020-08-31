@@ -813,7 +813,11 @@ class DarwinExporter(object):
             splitter = OrthoXMLSplitter(hog_file, cache_dir=hog_path)
             splitter()
         tax_tab = self.h5.get_node("/Taxonomy")
-        hog_converter = HogConverter(entryTab, tax_tab)
+        tax_2_code = {
+            int(row["NCBITaxonId"]): row["UniProtSpeciesCode"].decode()
+            for row in self.h5.get_node("/Genome")
+        }
+        hog_converter = HogConverter(entryTab, tax_tab, tax_2_code)
         hog_converter.attach_newick_taxonomy(tree_filename)
         hogTab = self.h5.create_table(
             "/",
@@ -2020,7 +2024,7 @@ class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
 
 
 class HogConverter(object):
-    def __init__(self, entry_tab, tax_tab=None):
+    def __init__(self, entry_tab, tax_tab=None, tax_2_code=None):
         self.fam_re = re.compile(r"HOG:(?P<fam_nr>\d+)")
         self.hogs = numpy.zeros(
             shape=(len(entry_tab) + 1,), dtype=entry_tab.cols.OmaHOG.dtype
@@ -2029,7 +2033,7 @@ class HogConverter(object):
         self.taxrange_2_taxid = (
             self._extract_taxrange_2_taxid_map(tax_tab) if tax_tab else None
         )
-        print(self.taxrange_2_taxid)
+        self.taxid_2_code = tax_2_code
 
     def _extract_taxrange_2_taxid_map(self, tax_tab):
         return {row["Name"].decode(): int(row["NCBITaxonId"]) for row in tax_tab}
@@ -2049,7 +2053,9 @@ class HogConverter(object):
             tax = self.taxonomy
         else:
             tax = familyanalyzer.TaxonomyFactory.newTaxonomy(p)
-        annotator = GroupAnnotatorInclGeneRefs(p, self.taxrange_2_taxid)
+        annotator = GroupAnnotatorInclGeneRefs(
+            p, self.taxrange_2_taxid, self.taxid_2_code
+        )
         annotator.annotateMissingTaxRanges(tax)
         annotator.annotateDoc()
 

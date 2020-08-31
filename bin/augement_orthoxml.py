@@ -10,7 +10,11 @@ logger = logging.getLogger("augment_orthoxml")
 def augment_orthoxml(h5, taxonomy, orthoxml):
     entry_tab = h5.get_node("/Protein/Entries")
     tax_tab = h5.get_node("/Taxonomy")
-    hog_converter = HogConverter(entry_tab, tax_tab)
+    tax_2_code = {
+        int(row["NCBITaxonId"]): row["UniProtSpeciesCode"].decode()
+        for row in h5.get_node("/Genome")
+    }
+    hog_converter = HogConverter(entry_tab, tax_tab, tax_2_code)
     hog_converter.attach_newick_taxonomy(taxonomy)
     out_orthoxml = orthoxml + ".augmented"
     levels = hog_converter.convert_file(orthoxml, store=out_orthoxml)

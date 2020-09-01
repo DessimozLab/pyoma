@@ -172,7 +172,11 @@ def extract_hog_row_links(h5, level, graph):
 def infer_synteny(orthoxml, h5name, tree):
     h5 = db.Database(h5name)
     ham = pyham.Ham(
-        tree_file=tree, hog_file=orthoxml, tree_format="newick", use_internal_name=True
+        tree_file=tree,
+        hog_file=orthoxml,
+        tree_format="newick",
+        use_internal_name=True,
+        species_resolve_mode="OMA",
     )
     assign_extant_syteny(h5, ham)
     synteny_graphs_mapped = {}

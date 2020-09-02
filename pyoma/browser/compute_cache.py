@@ -198,10 +198,21 @@ class ResultHandler:
         self._offset_dtype = [("Fam", "i4"), ("offset", "i8"), ("length", "i4")]
 
     def load_cache(self):
+        def resilient_load_data_node(h5, node):
+            try:
+                res = [h5.get_node(node).read()]
+            except tables.NoSuchNodeError:
+                res = []
+            return res
+
         with tables.open_file(self.cache_file) as cache:
-            self.ortholog_count_result = [cache.root.ortholog_counts.read()]
+            self.ortholog_count_result = resilient_load_data_node(
+                cache, "/ortholog_counts"
+            )
+            self.family_json_offset = resilient_load_data_node(
+                cache, "/family_json/offset"
+            )
             self.buffer_offset = len(cache.root.family_json.buffer)
-            self.family_json_offset = [cache.root.family_json.offset.read()]
             self.jobs = cache.root.pending_jobs.read(0)[0]
 
     def add_jobs(self, jobs):
@@ -258,14 +269,19 @@ class ResultHandler:
                     buf.append(prev.root.family_json.buffer.read())
             for el in self.in_memory_json_buffer:
                 buf.append(el)
-            off = numpy.lib.recfunctions.stack_arrays(
-                self.family_json_offset, usemask=False
-            )
-            h5.create_table("/family_json", "offset", None, obj=off)
-            cnts = numpy.lib.recfunctions.stack_arrays(
-                self.ortholog_count_result, usemask=False
-            )
-            h5.create_table("/", "ortholog_counts", ProteinCacheInfo, obj=cnts)
+            buf.flush()
+            if len(self.family_json_offset) > 0:
+                off = numpy.lib.recfunctions.stack_arrays(
+                    self.family_json_offset, usemask=False
+                )
+                h5.create_table("/family_json", "offset", None, obj=off)
+
+            if len(self.ortholog_count_result) > 0:
+                cnts = numpy.lib.recfunctions.stack_arrays(
+                    self.ortholog_count_result, usemask=False
+                )
+                h5.create_table("/", "ortholog_counts", ProteinCacheInfo, obj=cnts)
+
             a = h5.create_vlarray("/", "pending_jobs", tables.ObjectAtom())
             a.append(self.jobs)
             h5.flush()

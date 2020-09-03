@@ -76,7 +76,8 @@ if __name__ == "__main__":
                     "target",
                     "is_main_isoform",
                     "HOG",
-                    "OMA_group" "PAM_distance",
+                    "OMA_group",
+                    "PAM_distance",
                     "Alignment_score",
                 ]
             )
@@ -92,7 +93,11 @@ if __name__ == "__main__":
                             break
                 try:
                     it = hog_mapper.imap_sequences(myjobs, target_species=conf.target)
+                    seen_queries = set([])
                     for map_res in it:
+                        if map_res.query in seen_queries:
+                            continue  # we keep just the very best mapping
+                        seen_queries.add(map_res.query)
                         if map_res.target.hog_family_nr != 0:
                             hog_id = db.format_hogid(map_res.target.hog_family_nr)
                         else:

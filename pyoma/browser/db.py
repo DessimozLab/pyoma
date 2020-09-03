@@ -2021,7 +2021,7 @@ class IDResolver(object):
         try:
             nr = self._from_omaid(query)
             candidates[nr]["omaid"] = [query]
-        except InvalidOmaId:
+        except (InvalidOmaId, UnknownSpecies) as e:
             pass
         id_res = self._db.id_mapper["XRef"].search_id(query, limit)
         for nr, res_dict in id_res.items():

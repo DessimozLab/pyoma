@@ -54,7 +54,7 @@ setup(
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
     ],
-    scripts=["bin/importdata.py", "bin/oma2hdf"],
+    scripts=["bin/importdata.py", "bin/oma2hdf", "bin/map_to_closest_seq"],
     package_data={"pyoma": ["browser/*.drw"]},
     install_requires=req_packages,
     extras_require={

@@ -218,7 +218,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn(enr, enrs_with_approx_match)
 
     def test_map_to_hog(self):
-        hog_mapper = SimpleSeqToHOGMapper(self.db)
+        hog_mapper = ClosestSeqMapper(self.db)
         seqs = []
         entry_nrs = []
         for _ in range(10):

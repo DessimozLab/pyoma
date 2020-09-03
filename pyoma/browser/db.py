@@ -1594,7 +1594,13 @@ class SequenceSearch(object):
         )
 
     def search(
-        self, seq, n=None, coverage=None, is_sanitised=None, compute_distance=False
+        self,
+        seq,
+        n=None,
+        coverage=None,
+        is_sanitised=None,
+        compute_distance=False,
+        entrynr_range=None,
     ):
         """
             Searches the database for entries that match. If can't find an exact
@@ -1604,14 +1610,17 @@ class SequenceSearch(object):
         seq = self._sanitise_seq(seq) if not is_sanitised else seq
         m = self.exact_search(seq, is_sanitised=True)
         # TODO: taxonomic filtering.
+        if entrynr_range is not None:
+            m = [x for x in m if entrynr_range[0] <= x <= entrynr_range[1]]
         if len(m) == 0:
             # Do approximate search
             m = self.approx_search(
                 seq,
                 n=n,
-                coverage=coverage,
                 is_sanitised=True,
+                coverage=coverage,
                 compute_distance=compute_distance,
+                entrynr_range=entrynr_range,
             )
             # TODO: taxonomic filtering.
             return ("approx", m) if m is not [] else None
@@ -1634,12 +1643,12 @@ class SequenceSearch(object):
             )
             ii = bisect_left(z, seq, lo=self.n_entries)
 
-            if ii and (z[ii] == seq):
+            if ii and ii < len(self.seq_idx) and (z[ii] == seq):
                 # Left most found.
-                jj = ii + 1
-                while (jj < len(z)) and (z[jj] == seq):
-                    # zoom to end -> -> ->
-                    jj += 1
+                seq_after = seq[:-1] + chr(seq[-1] + 1).encode("utf-8")
+                jj = bisect_left(z, seq_after, lo=ii)
+                if (jj < len(self.seq_idx) and z[jj] == seq) or z[jj - 1] != seq:
+                    raise RuntimeError("suffix index broken. should not happen")
 
                 # Find entry numbers and filter to remove incorrect entries
                 return list(
@@ -1654,10 +1663,17 @@ class SequenceSearch(object):
         return []
 
     def approx_search(
-        self, seq, n=None, is_sanitised=None, coverage=None, compute_distance=False
+        self,
+        seq,
+        n=None,
+        is_sanitised=None,
+        coverage=None,
+        compute_distance=False,
+        entrynr_range=None,
     ):
         """
             Performs an exact match search using the suffix array.
+            :param entrynr_range:
         """
         seq = seq if is_sanitised else self._sanitise_seq(seq)
         n = n if n is not None else 50
@@ -1674,7 +1690,12 @@ class SequenceSearch(object):
         # 2. Filter to top n if necessary
         z = len(seq) - self.k + 1
         cut_off = coverage * z
-        c = [(x[0], (x[1] / z)) for x in c.items() if x[1] >= cut_off]
+        c = [
+            (enr, (cnts / z))
+            for enr, cnts in c.items()
+            if cnts >= cut_off
+            and (entrynr_range is None or entrynr_range[0] <= enr <= entrynr_range[1])
+        ]
         c = sorted(c, reverse=True, key=lambda x: x[1])[:n] if n > 0 else c
 
         # 3. Do local alignments and return count / score / alignment
@@ -2829,7 +2850,7 @@ HogMapperTuple = collections.namedtuple(
 )
 
 
-class SimpleSeqToHOGMapper(object):
+class ClosestSeqMapper(object):
     """Fast mapper of sequeces to closest sequence and taken their HOG annotation"""
 
     def __init__(self, db, threaded=False):
@@ -2839,12 +2860,18 @@ class SimpleSeqToHOGMapper(object):
         entry = ProteinEntry(self.db, self.db.entry_by_entry_nr(enr))
         return entry.get_main_isoform()
 
-    def imap_sequences(self, seqrecords):
+    def imap_sequences(self, seqrecords, target_species=None):
         """maps an iterator of Bio.Seq.SeqRecords to database and
         yields the mappings."""
+        entrynr_range = None
+        if target_species is not None:
+            entrynr_range = self.db.id_mapper["OMA"].genome_range(target_species)
+
         for rec in seqrecords:
             logger.debug("projecting {} to closest sequence".format(rec))
-            r = self.db.seq_search.search(str(rec.seq), compute_distance=True)
+            r = self.db.seq_search.search(
+                str(rec.seq), compute_distance=True, entrynr_range=entrynr_range
+            )
             if r is not None:
                 if r[0] == "exact":
                     # r[1] contains list of entry nr with exact sequence match (full length)

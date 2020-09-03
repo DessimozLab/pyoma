@@ -44,6 +44,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "-v", action="count", default=0, help="Increase verbosity to INFO/DEBUG"
     )
+    parser.add_argument(
+        "-t",
+        "--target",
+        default=None,
+        help="Target species. If not set, no restriction applies.",
+    )
     conf = parser.parse_args()
     logging.basicConfig(level=30 - 10 * min(conf.v, 2))
     nr_procs = conf.nr_proc
@@ -54,7 +60,7 @@ if __name__ == "__main__":
     outfn = pInf.modify_filename(conf.out)
 
     db = pyoma.browser.db.Database(conf.hdf5)
-    hog_mapper = pyoma.browser.db.SimpleSeqToHOGMapper(db)
+    hog_mapper = pyoma.browser.db.ClosestSeqMapper(db)
 
     last_id = None
     if os.path.exists(outfn + ".ckpt"):
@@ -70,7 +76,7 @@ if __name__ == "__main__":
                     "target",
                     "is_main_isoform",
                     "HOG",
-                    "PAM_distance",
+                    "OMA_group" "PAM_distance",
                     "Alignment_score",
                 ]
             )
@@ -85,18 +91,23 @@ if __name__ == "__main__":
                         if xx.id == last_id:
                             break
                 try:
-                    it = hog_mapper.imap_sequences(myjobs)
+                    it = hog_mapper.imap_sequences(myjobs, target_species=conf.target)
                     for map_res in it:
                         if map_res.target.hog_family_nr != 0:
                             hog_id = db.format_hogid(map_res.target.hog_family_nr)
                         else:
                             hog_id = "n/a"
+                        if map_res.target.oma_group != 0:
+                            oma_grp = "OmaGroup:{}".format(map_res.target.oma_group)
+                        else:
+                            oma_grp = "n/a"
                         csv_writer.writerow(
                             [
                                 map_res.query,
                                 map_res.target.omaid,
                                 map_res.target.entry_nr == map_res.closest_entry_nr,
                                 hog_id,
+                                oma_grp,
                                 map_res.distance,
                                 map_res.score,
                             ]

@@ -1987,19 +1987,16 @@ class IDResolver(object):
     def _from_omaid(self, e_id):
         return int(self._db.id_mapper["OMA"].omaid_to_entry_nr(e_id))
 
-    def search_xrefs(self, e_id):
+    def search_xrefs(self, e_id, return_seq_modified=False):
         """search for all xrefs. TODO: what happens if xref is ambiguous?"""
-        res = set([x["EntryNr"] for x in self._db.id_mapper["XRef"].search_xref(e_id)])
+        xref_res = self._db.id_mapper["XRef"].search_xref(e_id)
+        res = set([x["EntryNr"] for x in xref_res])
         if len(res) == 0:
             # let's try to mach as substring using suffix array case insensitive
-            res = set(
-                [
-                    x["EntryNr"]
-                    for x in self._db.id_mapper["XRef"].search_xref(
-                        e_id, match_any_substring=True
-                    )
-                ]
+            xref_res = self._db.id_mapper["XRef"].search_xref(
+                e_id, match_any_substring=True
             )
+            res = set([x["EntryNr"] for x in xref_res])
             if len(res) == 0:
                 raise InvalidId(e_id)
         if len(res) > 1:
@@ -2019,9 +2016,13 @@ class IDResolver(object):
                 raise AmbiguousID('Cross-ref "{}" is ambiguous'.format(e_id), res)
             else:
                 res = splice_variants
-        return int(res.pop())
+        return_val = int(res.pop())
+        if return_seq_modified:
+            idx = numpy.where(xref_res["EntryNr"] == return_val)
+            return return_val, bool(4 in xref_res[idx]["Verification"])
+        return return_val
 
-    def resolve(self, e_id):
+    def resolve(self, e_id, check_if_modified=False):
         """maps an id to the entry_nr of the current OMA release."""
         try:
             nr = self._from_numeric(e_id)
@@ -2029,7 +2030,9 @@ class IDResolver(object):
             try:
                 nr = self._from_omaid(e_id)
             except (InvalidOmaId, UnknownSpecies) as e:
-                nr = self.search_xrefs(e_id)
+                nr = self.search_xrefs(e_id, return_seq_modified=check_if_modified)
+        if check_if_modified and not isinstance(nr, tuple):
+            nr = (nr, False)
         return nr
 
     def search_protein(self, query: str, limit=None):

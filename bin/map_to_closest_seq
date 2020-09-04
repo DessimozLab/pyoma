@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import gzip
 import os
 
 import pyoma.browser.db
@@ -10,7 +11,7 @@ import hashlib
 import sys
 import signal
 
-logger = logging.getLogger("hog_mapper")
+logger = logging.getLogger("mapper")
 
 
 def handler(signum, frame):
@@ -36,7 +37,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--out",
-        default="map2hog.txt",
+        default="map2seq.txt",
         help="filename output file. Will be modified if run with more than one process",
     )
     parser.add_argument("-n", "--nr_proc", type=int, help="Nr of processes to use")
@@ -60,14 +61,15 @@ if __name__ == "__main__":
     outfn = pInf.modify_filename(conf.out)
 
     db = pyoma.browser.db.Database(conf.hdf5)
-    hog_mapper = pyoma.browser.db.ClosestSeqMapper(db)
+    mapper = pyoma.browser.db.ClosestSeqMapper(db)
 
     last_id = None
     if os.path.exists(outfn + ".ckpt"):
         with open(outfn + ".ckpt") as fh:
             last_id = fh.read()
 
-    with open(outfn, "at") as fout:
+    open_ = gzip.open if outfn.endswith(".gz") else open
+    with open_(outfn, "at") as fout:
         csv_writer = csv.writer(fout, delimiter="\t")
         if last_id is None and pInf.this_proc_nr == 1:
             csv_writer.writerow(
@@ -92,7 +94,7 @@ if __name__ == "__main__":
                         if xx.id == last_id:
                             break
                 try:
-                    it = hog_mapper.imap_sequences(myjobs, target_species=conf.target)
+                    it = mapper.imap_sequences(myjobs, target_species=conf.target)
                     seen_queries = set([])
                     for map_res in it:
                         if map_res.query in seen_queries:

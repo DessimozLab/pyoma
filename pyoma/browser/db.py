@@ -2881,6 +2881,8 @@ class ClosestSeqMapper(object):
                         yield HogMapperTuple(rec.id, enr, p, 0, 0)
                 else:
                     candidate_matches = r[1]
+                    if len(candidate_matches) <= 0:
+                        continue
                     # Take best matches, up to score>80 & score_i > .5*score_max
                     score_max = candidate_matches[0][1]["score"]
                     for enr, match_res in candidate_matches:

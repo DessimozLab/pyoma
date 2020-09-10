@@ -84,19 +84,8 @@ class Profiler(object):
         minhash = datasketch.WeightedMinHash(seed=1, hashvalues=hashvalues)
         similar = self.forest.query(minhash, k=k)
 
-        all_hash = {}
+        sorted_hogs = [1,2,4,5]
 
-        for sim in self.forest.query(minhash, k=k):
-             sval = self.hashes[int(sim)].reshape(self.num_perm, 2)
-             shash = datasketch.WeightedMinHash(seed=1, hashvalues=sval)
-
-             shash = shash.minhash(sval)
-             refhash = minhash.minhash(hashvalues)
-
-             all_hash[sim] = shash.jaccard(refhash)
-
-
-        sorted_hogs = all_hash
         return ProfileSearchResult(self, fam_nr, similar, sorted_hogs)
 
 

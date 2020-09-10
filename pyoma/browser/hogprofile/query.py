@@ -83,6 +83,8 @@ class Profiler(object):
         hashvalues = self.hashes[fam_nr].reshape(self.num_perm, 2)
         minhash = datasketch.WeightedMinHash(seed=1, hashvalues=hashvalues)
         similar = self.forest.query(minhash, k=k)
+        min_all = {int(fam): datasketch.WeightedMinHash(seed=1, hashvalues=self.hashes[fam].reshape(self.num_perm, 2)) for fam in similar}
+
         return ProfileSearchResult(self, fam_nr, similar)
 
 

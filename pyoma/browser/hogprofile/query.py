@@ -90,13 +90,15 @@ class Profiler(object):
              sval = self.hashes[int(sim)].reshape(self.num_perm, 2)
              shash = datasketch.WeightedMinHash(seed=1, hashvalues=sval)
 
-             all_hash[sim] = shash.jaccard(minhash)
+             shash = shash.minhash(sval)
+             refhash = minhash.minhash(hashvalues)
 
-        sortedhogs = [(k, v) for k, v in all_hash.items()]
-        sortedhogs = sorted(sortedhogs, key=lambda x: x[1])
-        #sortedhogs = [h[0] for h in sortedhogs.reverse()]
+             all_hash[sim] = shash.jaccard(refhash)
 
-        return ProfileSearchResult(self, fam_nr, similar, sortedhogs)
+
+        sorted_hogs = all_hash
+        return ProfileSearchResult(self, fam_nr, similar, sorted_hogs)
+
 
 
 class ProfileSearchResult(object):

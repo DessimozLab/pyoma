@@ -87,7 +87,7 @@ class Profiler(object):
         all_hash = {}
 
         for sim in self.forest.query(minhash, k=k):
-            all_hash[sim] = None
+            all_hash[sim] = hashvalues = self.hashes[int(sim)].reshape(self.num_perm, 2)
 
         sorted_hogs = [1,2,3]
         return ProfileSearchResult(self, fam_nr, similar, sorted_hogs)

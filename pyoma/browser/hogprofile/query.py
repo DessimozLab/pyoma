@@ -84,25 +84,21 @@ class Profiler(object):
         minhash = datasketch.WeightedMinHash(seed=1, hashvalues=hashvalues)
         similar = self.forest.query(minhash, k=k)
 
-        all_hash = {}
+        jaccard_distance = {}
         for sim in self.forest.query(minhash, k=k):
             sval = self.hashes[int(sim)].reshape(self.num_perm, 2)
             shash = datasketch.WeightedMinHash(seed=1, hashvalues=sval)
-            all_hash[sim] = shash.jaccard(minhash)
+            jaccard_distance[sim] = shash.jaccard(minhash)
 
-        sortedhogs = [(k, v) for k, v in all_hash.items()]
-        sortedhogs = sorted(sortedhogs, key=lambda x: x[1])
-        sortedhogs = [h[0] for h in sortedhogs.reverse()]
-
-        return ProfileSearchResult(self, fam_nr, similar, sortedhogs)
+        return ProfileSearchResult(self, fam_nr, similar, jaccard_distance)
 
 
 
 class ProfileSearchResult(object):
-    def __init__(self, p: Profiler, query_fam, similar_fams, sorted_hogs):
+    def __init__(self, p: Profiler, query_fam, similar_fams, jaccard_distance):
         self.query_fam = query_fam
         self.similar = {int(fam): p.species_profile[int(fam)] for fam in similar_fams}
-        self.sorted_hogs = sorted_hogs
+        self.jaccard_distance = jaccard_distance
         self.query_profile = p.species_profile[query_fam]
         self.tax_classes = p.tax_range_index
         self.species_names = p.species_names

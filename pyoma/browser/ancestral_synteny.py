@@ -54,7 +54,22 @@ def assign_ancestral_synteny(ham):
             graph = nx.Graph()
             graph.add_nodes_from(tree_node.genome.genes)
             for child in tree_node.children:
-                for u, v, weight in child.synteny.edges.data("weight", default=1):
+                # we remove nodes that do not have a parent hog and connect their neighbors
+                # (given they have exactly two neighbors) in a working copy that is used
+                # to propagate the synteny graph to the higher level.
+                G = child.synteny.copy()
+                for node in G:
+                    if node.parent is None and len(G.adj[node]) == 2:
+                        left, right = tuple(G.adj[node])
+                        if not G.has_edge(left, right):
+                            G.add_edge(
+                                left,
+                                right,
+                                weight=max(
+                                    G[left][node]["weight"], G[right][node]["weight"]
+                                ),
+                            )
+                for u, v, weight in G.edges.data("weight", default=1):
                     if (
                         u.parent is not None
                         and v.parent is not None

@@ -12,7 +12,6 @@ from pyoma.browser.db import *
 from pyoma.browser import tablefmt
 from Bio.SeqRecord import SeqRecord
 from Bio.Seq import Seq
-from Bio.Alphabet import IUPAC
 from Bio import SeqIO
 
 
@@ -224,7 +223,13 @@ class DatabaseTests(unittest.TestCase):
         for _ in range(10):
             s, enr, start_idx, end_idx = self.get_random_subsequence()
             entry_nrs.append(enr)
-            seqs.append(SeqRecord(Seq(s.decode(), IUPAC.protein), id=str(enr)))
+            seqs.append(
+                SeqRecord(
+                    Seq(s.decode()),
+                    id=str(enr),
+                    annotations={"molecule_type": "protein"},
+                )
+            )
         res = list(
             filter(
                 lambda x: x.query == str(x.closest_entry_nr),

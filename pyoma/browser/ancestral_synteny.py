@@ -55,7 +55,11 @@ def assign_ancestral_synteny(ham):
             graph.add_nodes_from(tree_node.genome.genes)
             for child in tree_node.children:
                 for u, v, weight in child.synteny.edges.data("weight", default=1):
-                    if u.parent is not None and v.parent is not None:
+                    if (
+                        u.parent is not None
+                        and v.parent is not None
+                        and u.parent != v.parent
+                    ):
                         assert u.parent in graph.nodes
                         assert v.parent in graph.nodes
                         parent_edge = (u.parent, v.parent)

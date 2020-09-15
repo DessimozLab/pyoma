@@ -113,6 +113,7 @@ def remove_nodes_on_path_without_parents(G: nx.Graph):
 
     :param nx.Graph G: input Graph to be analysed
     """
+    cnt_removed_nodes = 0
     for node in list(G.nodes):  # convert to list to allow graph modification
         if node.parent is None and len(G.adj[node]) == 2:
             left, right = tuple(G.adj[node])
@@ -123,6 +124,12 @@ def remove_nodes_on_path_without_parents(G: nx.Graph):
                     weight=max(G[left][node]["weight"], G[right][node]["weight"]),
                 )
                 G.remove_node(node)
+                cnt_removed_nodes += 1
+    logger.info(
+        "removed {} nodes that have synteny but no parent hog.".format(
+            cnt_removed_nodes
+        )
+    )
 
 
 def delete_irrelevant_edges(G: nx.Graph, min_importance=10, max_neighbors=10):
@@ -142,6 +149,7 @@ def delete_irrelevant_edges(G: nx.Graph, min_importance=10, max_neighbors=10):
 
     """
     remove_edge_under_weight = max(min_importance - 2, 1.001)
+    cnt_removed_edges = 0
     for u, nbrs in G.adjacency():
         weights = numpy.array([nbr["weight"] for nbr in nbrs.values()])
         weights.sort()
@@ -162,6 +170,8 @@ def delete_irrelevant_edges(G: nx.Graph, min_importance=10, max_neighbors=10):
                     else:
                         eattr["remove"] = 1
         G.remove_edges_from(to_remove)
+        cnt_removed_edges += len(to_remove)
+    logger.info("removed {} irrelevant edges".format(cnt_removed_edges))
 
 
 def remove_forks_from_gene_losses(G: nx.Graph):
@@ -177,6 +187,7 @@ def remove_forks_from_gene_losses(G: nx.Graph):
     the path from h_i to h_j via h_k needs to be simple, e.g. no
     further branching.
     """
+    logger.info("starting remove_fork_from_gene_losses...")
     deg_3_nodes = (n[0] for n in G.degree if n[1] == 3)
     pot_cases = list(
         filter(lambda uv: G.has_edge(*uv), itertools.combinations(deg_3_nodes, 2))
@@ -212,6 +223,7 @@ def remove_forks_from_gene_losses(G: nx.Graph):
             removed_forks, G.number_of_nodes(), G.number_of_edges()
         )
     )
+    logger.info("finished remove_fork_from_gene_losses")
 
 
 def extract_hog_row_links(h5, level, graph):
@@ -220,6 +232,7 @@ def extract_hog_row_links(h5, level, graph):
         "Level == {!r}".format(level.encode("utf-8"))
     ):
         lookup[row["ID"].decode()] = row.nrow
+    logger.info("hogmap: found {} hog at level {}".format(len(lookup), level))
 
     try:
         taxnode = h5.tax.get_taxnode_from_name_or_taxid(level)

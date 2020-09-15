@@ -282,10 +282,14 @@ class DatabaseTests(unittest.TestCase):
 
 
 class XRefDatabaseMock(Database):
-    def __init__(self):
-        f = tables.open_file(
-            "xref.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0
-        )
+    def __init__(self, name=None):
+        if name is None:
+            name = "xref.h5"
+        f = tables.open_file(name, "w", driver="H5FD_CORE", driver_core_backing_store=0)
+        entries = numpy.zeros(5, tables.dtype_from_descr(tablefmt.ProteinTable))
+        entries["EntryNr"] = numpy.arange(1, 6)
+        t = f.create_table("/Protein", "Entries", obj=entries, createparents=True)
+        t.colinstances["EntryNr"].create_csindex()
         xref = numpy.zeros(10, tables.dtype_from_descr(tablefmt.XRefTable))
         xref["EntryNr"] = numpy.arange(1, 6, 0.5).astype(numpy.int32)
         xref["XRefSource"] = numpy.tile([0, 20], 5)
@@ -333,6 +337,32 @@ class XRefIdMapperTest(unittest.TestCase):
         xrefs = [x["xref"] for x in res]
         self.assertNotIn("XA002g1.4", xrefs)
         self.assertIn("XA003g1.4", xrefs)
+
+
+class IdResolverTests(unittest.TestCase):
+    @classmethod
+    def setUp(self):
+        patch_db = XRefDatabaseMock("test_idresolver.h5")
+        self.xrefmapper = XrefIdMapper(patch_db)
+        self.id_resolver = IDResolver(patch_db)
+        patch_db.id_mapper = {"XRef": self.xrefmapper}
+
+    def tearDown(self):
+        self.xrefmapper._db.db.close()
+
+    def test_search_of_modified_xref(self):
+        xref = "XA002g1.4"
+        res = self.id_resolver.search_xrefs(xref, return_seq_modified=True)
+        self.assertEqual(2, res[0])
+        self.assertTrue(res[1], "expected that {} is a modified sequence".format(xref))
+
+    def test_search_of_unchecked_xref(self):
+        xref = "XA001g1.4"
+        res = self.id_resolver.search_xrefs(xref, return_seq_modified=True)
+        self.assertEqual(1, res[0])
+        self.assertFalse(
+            res[1], "expected that {} is a unchecked sequence".format(xref)
+        )
 
 
 class TaxonomyTest(unittest.TestCase):

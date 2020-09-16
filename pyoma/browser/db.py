@@ -305,7 +305,7 @@ class Database(object):
                 prefix = ""
             fmt = "{}{{:{}d}}".format(prefix, "07" if is_padded else "")
             self._re_fam = re.compile(
-                "{}(?P<fam>\d{})".format(prefix, "{7,}" if is_padded else "+").encode(
+                "{}(?P<fam>\d+)".format(prefix).encode(
                     "ascii"
                 )
             )

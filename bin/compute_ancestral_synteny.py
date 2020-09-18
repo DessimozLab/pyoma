@@ -17,7 +17,8 @@ if __name__ == "__main__":
         "-n", "--nr-procs", default=None, type=int, help="nr of processes to use"
     )
     conf = parser.parse_args()
-    logging.basicConfig(level=30 - 10 * min(conf.v, 2))
+    logging.basicConfig(level=30 - 10 * min(conf.v, 2),
+                        format='%(asctime)-15s %(levelname)s %(name)-8s %(message)s')
 
     res = pyoma.browser.ancestral_synteny.infer_synteny(
         conf.orthoxml, conf.hdf5, conf.tree

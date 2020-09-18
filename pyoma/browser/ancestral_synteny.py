@@ -228,9 +228,9 @@ def remove_forks_from_gene_losses(G: nx.Graph):
 
 def extract_hog_row_links(h5, level, graph):
     lookup = {}
-    for row in h5.get_hdf5_handle().root.HogLevel.where(
-        "Level == {!r}".format(level.encode("utf-8"))
-    ):
+    level_query = "Level == {!r}".format(level.encode("utf-8"))
+    row_iter = h5.get_hdf5_handle().root.HogLevel.where(level_query)
+    for row in row_iter:
         lookup[row["ID"].decode()] = row.nrow
     logger.info("hogmap: found {} hog at level {}".format(len(lookup), level))
 
@@ -242,6 +242,7 @@ def extract_hog_row_links(h5, level, graph):
             taxid = 0
         else:
             raise
+    logger.info("level '{}' -> taxid = {}".format(level, taxid))
 
     def map_id(id):
         try:

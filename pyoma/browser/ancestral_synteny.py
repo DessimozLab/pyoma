@@ -281,9 +281,13 @@ def infer_synteny(orthoxml, h5name, tree):
     )
     assign_extant_syteny(h5, ham)
     synteny_graphs_mapped = {}
-    for level, graph in assign_ancestral_synteny(ham):
+    for cnt, (level, graph) in enumerate(assign_ancestral_synteny(ham), start=1):
         taxid, edges = extract_hog_row_links(h5, level, graph)
         synteny_graphs_mapped[taxid] = edges
+        if cnt % 500 == 0:
+            logger.info("closing and reopening {} file".format(h5name))
+            h5.close()
+            h5 = db.Database(h5name)
     h5.close()
     return ham, synteny_graphs_mapped
 

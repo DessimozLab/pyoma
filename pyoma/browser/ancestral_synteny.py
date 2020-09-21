@@ -8,6 +8,8 @@ import tables
 from .tablefmt import AncestralSyntenyRels
 from . import db
 from .models import Genome
+from concurrent.futures import TimeoutError
+from pebble import ProcessExpired, concurrent
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +265,7 @@ def taxid_from_level(h5, level):
     return taxid
 
 
+@concurrent.process(timeout=1200)
 def hogid_2_rownr(h5, level):
     lookup = {}
     level_query = "Level == {!r}".format(level.encode("utf-8"))
@@ -291,12 +294,22 @@ def infer_synteny(orthoxml, h5name, tree):
     synteny_graphs_mapped = {}
     for cnt, (level, graph) in enumerate(assign_ancestral_synteny(ham), start=1):
         shallow_graph = level_only_graph_with_hogid_nodes(graph)
-        hogid_lookup = hogid_2_rownr(h5, level)
-        taxid = taxid_from_level(h5, level)
-        edges = extract_hog_row_links(shallow_graph, hogid_lookup, level)
-        synteny_graphs_mapped[taxid] = edges
+        future = hogid_2_rownr(h5, level)
+        try:
+            hogid_lookup = future.result()
+            taxid = taxid_from_level(h5, level)
+            edges = extract_hog_row_links(shallow_graph, hogid_lookup, level)
+            synteny_graphs_mapped[taxid] = edges
+        except TimeoutError as error:
+            logger.error(
+                "hogid_2_rownr took longer than %d seconds".format(error.args[1])
+            )
+        except ProcessExpired as error:
+            logger.error("{}. Exit code: {}}".format(error, error.exitcode))
+        except Exception as error:
+            logger.exception("hogid_2_rownr raised {}".format(error))
 
-        if cnt % 500 == 0:
+        if cnt % 200 == 0:
             logger.info("closing and reopening {} file".format(h5name))
             h5.close()
             h5 = db.Database(h5name)

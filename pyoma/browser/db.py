@@ -13,6 +13,7 @@ import pyopa
 import re
 import threading
 import time
+from tqdm import tqdm
 import functools
 from bisect import bisect_left
 from xml.etree import ElementTree as et
@@ -304,11 +305,7 @@ class Database(object):
             if prefix is None:
                 prefix = ""
             fmt = "{}{{:{}d}}".format(prefix, "07" if is_padded else "")
-            self._re_fam = re.compile(
-                "{}(?P<fam>\d+)".format(prefix).encode(
-                    "ascii"
-                )
-            )
+            self._re_fam = re.compile("{}(?P<fam>\d+)".format(prefix).encode("ascii"))
             self.format_hogid = lambda fam: fmt.format(fam)
             logger.info(
                 "setting HOG ID schema: re_fam: {}, hog_fmt: {}".format(
@@ -1424,7 +1421,11 @@ class Database(object):
         gene_similarity_vals = {}
         total_members = len(hog_members)
         i = 0
-        for member in hog_members:
+        for member in tqdm(
+            hog_members,
+            disable=len(hog_members) < 500,
+            desc="GO-loading {}".format(hog_id),
+        ):
             curr_prot_entrynr = member["EntryNr"]
             annos = self.get_gene_ontology_annotations(
                 entry_nr=curr_prot_entrynr, as_dataframe=False

@@ -9,9 +9,11 @@ from .tablefmt import AncestralSyntenyRels
 from . import db
 from .models import Genome
 from concurrent.futures import TimeoutError
+import multiprocessing as mp
 from pebble import ProcessExpired, concurrent
 
 logger = logging.getLogger(__name__)
+mp.set_start_method("fork")
 
 
 def assign_extant_syteny(h5, ham):

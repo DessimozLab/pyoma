@@ -45,6 +45,12 @@ def assign_extant_syteny(h5, ham):
 
 def assign_ancestral_synteny(ham):
     for tree_node in ham.taxonomy.tree.traverse("postorder"):
+        try:
+            genome = tree_node.genome
+        except AttributeError:
+            logger.warning("No genome stored for {}".format(tree_node.name))
+            continue
+
         if isinstance(tree_node.genome, pyham.ExtantGenome):
             logger.info(
                 "synteny for extant genome '{}' already assigned".format(

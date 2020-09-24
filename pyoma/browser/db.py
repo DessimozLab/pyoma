@@ -969,10 +969,19 @@ class Database(object):
             else:
                 raise
 
+        try:
+            edge_data = self.db.get_node(
+                "/AncestralSynteny/tax{}".format(taxid_of_level)
+            ).read()
+        except tables.NoSuchNodeError as e:
+            logger.exception(
+                "cannot find ancestral synteny data for taxid:{} ({})".format(
+                    taxid_of_level, level
+                )
+            )
+            edge_data = []
         G = nx.Graph()
-        G.add_weighted_edges_from(
-            self.db.get_node("/AncestralSynteny/tax{}".format(taxid_of_level)).read()
-        )
+        G.add_weighted_edges_from(edge_data)
         neighbors = [hog_row] + [
             v for u, v in nx.bfs_edges(G, source=hog_row, depth_limit=steps)
         ]

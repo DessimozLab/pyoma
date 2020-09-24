@@ -988,6 +988,23 @@ class Database(object):
         S = G.subgraph(neighbors)
         return nx.relabel_nodes(S, lambda x: hl_tab[x]["ID"].decode())
 
+    def get_neighbor_hogs(self, hog_id, level):
+        """returns the direct neighbor hogs of a given ancestral hog
+
+        This method returns just the adjacent HOGs from the ancestral
+        synteny graph of that level
+
+        :param hog_id: the reference HOG.
+        :param level: the taxonomic level of the ancestral genome
+        :returns dict: hog_id -> edge_weight of the neighboring hogs
+        """
+        G = self.get_syntentic_hogs(hog_id, level, 1)
+        try:
+            neighbors = {nbr: edg["weight"] for nbr, edg in G[hog_id]}
+        except KeyError:
+            neighbors = {}
+        return neighbors
+
     def oma_group_members(self, group_id):
         """get the member entries of an oma group.
 

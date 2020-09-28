@@ -1536,9 +1536,9 @@ class PerGenomeMetaData(object):
 
 class SequenceSearch(object):
     """
-        Contains all the methods for searching the sequence
+    Contains all the methods for searching the sequence
 
-        TODO: implement taxonomic filtering.
+    TODO: implement taxonomic filtering.
     """
 
     from .KmerEncoder import DIGITS_AA
@@ -1586,14 +1586,14 @@ class SequenceSearch(object):
     @LazyProperty
     def entry_idx(self):
         """
-            Caches the index lookup part of the SA.
+        Caches the index lookup part of the SA.
         """
         return self.seq_idx[: self.n_entries]
 
     def get_entrynr(self, ii):
         """
-            Get the entry number(s) corresponding to a location in the sequence
-            buffer.
+        Get the entry number(s) corresponding to a location in the sequence
+        buffer.
         """
         return numpy.searchsorted(self.entry_idx, ii) + 1
 
@@ -1612,8 +1612,8 @@ class SequenceSearch(object):
 
     def _sanitise_seq(self, seq):
         """
-            Sanitise a string protein sequence. Deletes "invalid" characters.
-            TODO: add functionality for biopython sequence / skbio sequence.
+        Sanitise a string protein sequence. Deletes "invalid" characters.
+        TODO: add functionality for biopython sequence / skbio sequence.
         """
         assert type(seq) == str
         return "".join(filter(lambda c: c in self.PROTEIN_CHARS, seq.upper())).encode(
@@ -1630,9 +1630,9 @@ class SequenceSearch(object):
         entrynr_range=None,
     ):
         """
-            Searches the database for entries that match. If can't find an exact
-            match performs a kmer + local alignment approach to approximate
-            search.
+        Searches the database for entries that match. If can't find an exact
+        match performs a kmer + local alignment approach to approximate
+        search.
         """
         seq = self._sanitise_seq(seq) if not is_sanitised else seq
         m = self.exact_search(seq, is_sanitised=True)
@@ -1656,7 +1656,7 @@ class SequenceSearch(object):
 
     def exact_search(self, seq, only_full_length=True, is_sanitised=None):
         """
-            Performs an exact match search using the suffix array.
+        Performs an exact match search using the suffix array.
         """
         # TODO: work out whether to just use the approximate search and then
         # check if any are actually exact matches. Do the counting and then
@@ -1699,8 +1699,8 @@ class SequenceSearch(object):
         entrynr_range=None,
     ):
         """
-            Performs an exact match search using the suffix array.
-            :param entrynr_range:
+        Performs an exact match search using the suffix array.
+        :param entrynr_range:
         """
         seq = seq if is_sanitised else self._sanitise_seq(seq)
         n = n if n is not None else 50
@@ -2367,8 +2367,8 @@ class Taxonomy(object):
     def as_dict(self):
         """Encode the Taxonomy as a nested dict.
 
-         This representation can for example be used to serialize
-         a Taxonomy in json format."""
+        This representation can for example be used to serialize
+        a Taxonomy in json format."""
 
         def _rec_phylogeny(node):
             res = {"name": node["Name"].decode(), "id": int(node["NCBITaxonId"])}
@@ -2587,9 +2587,15 @@ class XrefIdMapper(object):
         mapped_junks = []
         chunk_size = 32
         source_condition = None
+        verif_condition = None
         if len(self.idtype) < len(self.xrefEnum):
             chunk_size -= len(self.idtype)  # respect max number of condition variables.
             source_condition = self._combine_query_values("XRefSource", self.idtype)
+        if self._max_verif_for_mapping_entrynrs < max(x[1] for x in self.verif_enum):
+            chunk_size -= 1
+            verif_condition = "(Verification <= {:d})".format(
+                self._max_verif_for_mapping_entrynrs
+            )
         for start in range(0, len(entry_nrs), chunk_size):
             condition_list = [
                 self._combine_query_values(
@@ -2598,9 +2604,8 @@ class XrefIdMapper(object):
             ]
             if source_condition:
                 condition_list.append(source_condition)
-            condition_list.append(
-                "(Verification <= {:d})".format(self._max_verif_for_mapping_entrynrs)
-            )
+            if verif_condition:
+                condition_list.append(verif_condition)
             condition = " & ".join(condition_list)
             mapped_junks.append(self.xref_tab.read_where(condition))
         return numpy.lib.recfunctions.stack_arrays(mapped_junks, usemask=False)

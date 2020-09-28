@@ -2421,10 +2421,13 @@ class UniProtAdditionalXRefImporter(object):
         with open(fpath, "rt", newline="", encoding="utf-8", errors="ignore") as fh:
             csv_reader = csv.reader(fh, delimiter="\t")
             for row in csv_reader:
-                self._lookup[row[0]].append((self.mapping[row[1]], row[2]))
+                try:
+                    source = self.mapping[row[1]]
+                    self._lookup[row[0]].append((source, row[2]))
+                except KeyError:
+                    pass
 
     def iter_xreftuples_for_up(self, accession, enr, confidence=None):
-        print("accession: " + accession)
         if confidence is None:
             confidence = self.verify_enum["unchecked"]
         for xref in self._lookup[accession]:

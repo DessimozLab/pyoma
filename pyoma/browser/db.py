@@ -635,10 +635,10 @@ class Database(object):
                 target_chr,
             )
         )
-        data.sort(order=["EntryNr"])
-        idx = data["EntryNr"].searchsorted(entry_nr)
-        res = data[max(0, idx - window) : min(len(data), idx + window + 1)]
-        idx = res["EntryNr"].searchsorted(entry_nr)
+        data.sort(order=["LocusStart"])
+        idx = int((data["EntryNr"] == entry_nr).nonzero()[0])
+        res = data[max(0, idx - window) : idx + window + 1]
+        idx = int((res["EntryNr"] == entry_nr).nonzero()[0])
         return res, idx
 
     def parse_hog_id(self, hog_id):

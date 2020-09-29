@@ -8,8 +8,12 @@ import tables
 from .tablefmt import AncestralSyntenyRels
 from . import db
 from .models import Genome
+from concurrent.futures import TimeoutError
+import multiprocessing as mp
+from pebble import ProcessExpired, concurrent
 
 logger = logging.getLogger(__name__)
+mp.set_start_method("fork")
 
 
 def assign_extant_syteny(h5, ham):
@@ -41,6 +45,12 @@ def assign_extant_syteny(h5, ham):
 
 def assign_ancestral_synteny(ham):
     for tree_node in ham.taxonomy.tree.traverse("postorder"):
+        try:
+            genome = tree_node.genome
+        except AttributeError:
+            logger.warning("No genome stored for {}".format(tree_node.name))
+            continue
+
         if isinstance(tree_node.genome, pyham.ExtantGenome):
             logger.info(
                 "synteny for extant genome '{}' already assigned".format(
@@ -226,14 +236,31 @@ def remove_forks_from_gene_losses(G: nx.Graph):
     logger.info("finished remove_fork_from_gene_losses")
 
 
-def extract_hog_row_links(h5, level, graph):
-    lookup = {}
-    level_query = "Level == {!r}".format(level.encode("utf-8"))
-    row_iter = h5.get_hdf5_handle().root.HogLevel.where(level_query)
-    for row in row_iter:
-        lookup[row["ID"].decode()] = row.nrow
-    logger.info("hogmap: found {} hog at level {}".format(len(lookup), level))
+def extract_hog_row_links(graph, hogid_2_hogrow_lookup, level):
+    def map_id(id):
+        try:
+            k = id.index("_")
+            query = id[:k]
+        except ValueError:
+            query = id
+        return hogid_2_hogrow_lookup[query]
 
+    edges = []
+    nr_errors = 0
+    for u, v, w in graph.edges.data("weight", default=1):
+        try:
+            edges.append((map_id(u), map_id(v), w))
+        except KeyError as e:
+            nr_errors += 1
+            logger.error(
+                "unmappable relation ({}, {}) on level {}: {}".format(u, v, level, e)
+            )
+    if nr_errors > 0:
+        logger.warning("{} errors on level {}".format(nr_errors, level))
+    return numpy.array(edges, dtype=tables.dtype_from_descr(AncestralSyntenyRels()))
+
+
+def taxid_from_level(h5, level):
     try:
         taxnode = h5.tax.get_taxnode_from_name_or_taxid(level)
         taxid = int(taxnode["NCBITaxonId"])
@@ -243,31 +270,23 @@ def extract_hog_row_links(h5, level, graph):
         else:
             raise
     logger.info("level '{}' -> taxid = {}".format(level, taxid))
+    return taxid
 
-    def map_id(id):
-        try:
-            k = id.index("_")
-            query = id[:k]
-        except ValueError:
-            query = id
-        return lookup[query]
 
-    edges = []
-    nr_errors = 0
-    for u, v, w in graph.edges.data("weight", default=1):
-        try:
-            edges.append((map_id(u.hog_id), map_id(v.hog_id), w))
-        except KeyError as e:
-            nr_errors += 1
-            logger.error(
-                "unmappable relation ({}, {}) on level {}: {}".format(u, v, level, e)
-            )
-    if nr_errors > 0:
-        logger.warning("{} errors on level {}".format(nr_errors, level))
-    return (
-        taxid,
-        numpy.array(edges, dtype=tables.dtype_from_descr(AncestralSyntenyRels())),
-    )
+@concurrent.process(timeout=1200)
+def hogid_2_rownr(h5, level):
+    lookup = {}
+    level_query = "Level == {!r}".format(level.encode("utf-8"))
+    row_iter = h5.get_hdf5_handle().root.HogLevel.where(level_query)
+    for row in row_iter:
+        lookup[row["ID"].decode()] = row.nrow
+    logger.info("hogmap: found {} hog at level {}".format(len(lookup), level))
+    return lookup
+
+
+def level_only_graph_with_hogid_nodes(graph: nx.Graph) -> nx.Graph:
+    G = nx.relabel_nodes(graph, lambda n: n.hog_id)
+    return G
 
 
 def infer_synteny(orthoxml, h5name, tree):
@@ -282,9 +301,23 @@ def infer_synteny(orthoxml, h5name, tree):
     assign_extant_syteny(h5, ham)
     synteny_graphs_mapped = {}
     for cnt, (level, graph) in enumerate(assign_ancestral_synteny(ham), start=1):
-        taxid, edges = extract_hog_row_links(h5, level, graph)
-        synteny_graphs_mapped[taxid] = edges
-        if cnt % 500 == 0:
+        shallow_graph = level_only_graph_with_hogid_nodes(graph)
+        future = hogid_2_rownr(h5, level)
+        try:
+            hogid_lookup = future.result()
+            taxid = taxid_from_level(h5, level)
+            edges = extract_hog_row_links(shallow_graph, hogid_lookup, level)
+            synteny_graphs_mapped[taxid] = edges
+        except TimeoutError as error:
+            logger.error(
+                "hogid_2_rownr took longer than %d seconds".format(error.args[1])
+            )
+        except ProcessExpired as error:
+            logger.error("{}. Exit code: {}}".format(error, error.exitcode))
+        except Exception as error:
+            logger.exception("hogid_2_rownr raised {}".format(error))
+
+        if cnt % 200 == 0:
             logger.info("closing and reopening {} file".format(h5name))
             h5.close()
             h5 = db.Database(h5name)

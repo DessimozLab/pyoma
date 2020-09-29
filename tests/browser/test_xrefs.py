@@ -23,10 +23,15 @@ from pyoma.browser import convert as pyoma
 )
 class XRefParsingTest(unittest.TestCase):
     def _create_genome_info(self):
-        gs = numpy.zeros(3, dtype=tables.dtype_from_descr(pyoma.tablefmt.GenomeTable))
-        gs["EntryOff"] = [0, 2, 3]
-        gs["TotEntries"] = [2, 1, 1]
-        gs["Release"] = [b"Ensembl", b"madeup", b"Ensembl Metazoa 22; CB4; 13-MAR-2014"]
+        gs = numpy.zeros(4, dtype=tables.dtype_from_descr(pyoma.tablefmt.GenomeTable))
+        gs["EntryOff"] = [0, 2, 3, 4]
+        gs["TotEntries"] = [2, 1, 1, 1]
+        gs["Release"] = [
+            b"Ensembl",
+            b"madeup",
+            b"Ensembl Metazoa 22; CB4; 13-MAR-2014",
+            b"Ensembl Metazoa 27; GCA_000002325.2; 2-JUN-2015",
+        ]
         return gs
 
     def setUp(self):
@@ -34,7 +39,8 @@ class XRefParsingTest(unittest.TestCase):
             """<E><ID>ENSG00000204640</ID><AC>ENSP00000366061; ENST00000376865</AC><DE>hypotetical protein</DE><GI>125233342</GI><UniProt/TrEMBL>P21522</UniProt/TrEMBL></E>
             <E><ID>BLA22; BLABLA22.Rep22</ID><AC>BLA22.1</AC><EC>3.2.2.-; 4.2.99.18</EC><EntrezGene>32244</EntrezGene><SMR>P21122; Q24S32</SMR><GO>GO:0006270@[[IDA,{'PMID:2167836'}],[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]; GO:0006275@[[IEA,{'GO_REF:002','GO_REF:020','OMA_Fun:001'}]]</GO></E>
             <E><UniProt/TrEMBL>L8ECQ9_BACSU</UniProt/TrEMBL><SwissProt_AC>Q6CI62</SwissProt_AC><SwissProt>ASF1_YARLI</SwissProt><ID>FBgn0218776</ID><AC>FBpp0245919; FBtr0247427</AC><DE>β-hemoglobin</DE><GO></GO></E>
-            <E><OS>CAEBR</OS><NR>1</NR><OG>0</OG><AC>CBG23988</AC><CHR>chrI</CHR><ID>CBG23988</ID><LOC>join(80..1057,2068..2664)</LOC><UniProt/TrEMBL>A8WJQ9_CAEBR</UniProt/TrEMBL><GO>GO:0016020@[[IEA,{'GO_REF:038'}]]; GO:0016021@[[IEA,{'GO_REF:038'}]]</GO><SEQ>A</SEQ></E>"""
+            <E><OS>CAEBR</OS><NR>1</NR><OG>0</OG><AC>CBG23988</AC><CHR>chrI</CHR><ID>CBG23988</ID><LOC>join(80..1057,2068..2664)</LOC><UniProt/TrEMBL>A8WJQ9_CAEBR</UniProt/TrEMBL><GO>GO:0016020@[[IEA,{'GO_REF:038'}]]; GO:0016021@[[IEA,{'GO_REF:038'}]]</GO><SEQ>A</SEQ></E>
+            <E><OS>NASVI</OS><NR>11661</NR><OG>0</OG><AC>NV21158-PA; NV21158-RA</AC><CHR>GL340889</CHR><ID>NV21158</ID><LOC>join(113393..113590,114511..114696,114865..114916,115242..115474)</LOC><UniProt/TrEMBL>K7JG62_NASVI</UniProt/TrEMBL><ProtName>Uncharacterized protein</ProtName><SEQ>A</SEQ></E>"""
         )
         self.db_parser = pyoma.DarwinDbEntryParser()
         self.desc_manager = mock.Mock()
@@ -42,12 +48,13 @@ class XRefParsingTest(unittest.TestCase):
         self.approx_adder = pyoma.ApproximateXRefImporter()
         self.up_extra_adder = pyoma.UniProtAdditionalXRefImporter()
         self.xref_tab = mock.Mock()
+        self.ec_tab = mock.Mock()
         self.gs = self._create_genome_info()
         self.importer = pyoma.XRefImporter(
             self.db_parser,
             self.gs,
             self.xref_tab,
-            None,
+            self.ec_tab,
             self.go_manager,
             self.desc_manager,
             self.approx_adder,
@@ -84,7 +91,7 @@ class XRefParsingTest(unittest.TestCase):
         callback = mock.MagicMock(name="potential_flush")
         self.db_parser.add_post_entry_handler(callback)
         self.db_parser.parse_entrytags(self.data)
-        self.assertEqual(callback.call_count, 4)
+        self.assertEqual(callback.call_count, 5)
 
     def test_ensembgenomes_ids(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
@@ -104,7 +111,7 @@ class XRefParsingTest(unittest.TestCase):
         self.assertIn(
             (3, enum["UniProtKB/TrEMBL"], b"Q6CI62", verif.exact), self.importer.xrefs
         )
-        mock_up.assert_called_with(self.up_extra_adder, "A8WJQ9", 4)
+        mock_up.assert_called_with(self.up_extra_adder, "K7JG62", 5)
 
     def test_go(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
@@ -114,6 +121,24 @@ class XRefParsingTest(unittest.TestCase):
         self.db_parser.parse_entrytags(self.data)
         self.assertIn((2, "3.2.2.-"), self.importer.ec)
         self.assertIn((2, "4.2.99.18"), self.importer.ec)
+
+    def test_nasvi_missing_ac(self, mock_up):
+        self.db_parser.parse_entrytags(self.data)
+        self.importer.flush_buffers()
+        enum = pyoma.tablefmt.XRefTable.columns.get("XRefSource").enum
+        verif = pyoma.tablefmt.XRefTable.columns.get("Verification").enum
+        self.assertIn(
+            (5, enum.SourceAC, b"NV21158-PA", verif.exact),
+            self.importer.xref_tab.append.call_args.args[0],
+        )
+        self.assertIn(
+            (5, enum.SourceAC, b"NV21158-RA", verif.exact),
+            self.importer.xref_tab.append.call_args.args[0],
+        )
+        self.assertIn(
+            (5, enum.EnsemblGenomes, b"NV21158-RA", verif.exact),
+            self.importer.xref_tab.append.call_args.args[0],
+        )
 
     def test_disambiguate(self, mock_up):
         self.db_parser.parse_entrytags(self.data)

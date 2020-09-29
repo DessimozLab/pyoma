@@ -2248,7 +2248,7 @@ class XRefImporter(object):
     def flush_buffers(self):
         common.package_logger.info("flushing xrefs and ec buffers")
         if len(self.xrefs) > 0:
-            self.xref_tab.append(sorted(uniq(self.xrefs, transform=lambda x: x[:2])))
+            self.xref_tab.append(sorted(uniq(self.xrefs, transform=lambda x: x[:3])))
             self.xrefs = []
         if len(self.ec) > 0:
             self.ec_tab.append(sorted(uniq(self.ec)))
@@ -2431,7 +2431,7 @@ class UniProtAdditionalXRefImporter(object):
         if confidence is None:
             confidence = self.verify_enum["unchecked"]
         for xref in self._lookup[accession]:
-            yield enr, xref[1], xref[2].encode("utf-8"), confidence
+            yield enr, xref[0], xref[1].encode("utf-8"), confidence
 
 
 class ApproximateXRefImporter(object):

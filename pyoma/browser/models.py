@@ -54,7 +54,7 @@ class LazyProperty(object):
 
 class KeyWrapper(object):
     """
-        Enables the use of functions, e.g. bisect, with a key function.
+    Enables the use of functions, e.g. bisect, with a key function.
     """
 
     def __init__(self, it, key):
@@ -414,6 +414,13 @@ class HOG(object):
     @property
     def completeness_score(self):
         return float(self._hog["CompletenessScore"])
+
+    def __len__(self):
+        return self.nr_member_genes
+
+    @LazyProperty
+    def keyword(self):
+        return self._db.get_roothog_keywords(self.fam)
 
     @LazyProperty
     def members(self):

@@ -88,6 +88,10 @@ class HOGModelTest(TestDbBase):
         self.assertEqual(2, hog.fam)
         self.assertEqual(hog.nr_member_genes, len(hog.members))
 
+    def test_keyword_of_hog(self):
+        hog = models.HOG(self.db, 2)
+        self.assertEqual("", hog.keyword)
+
 
 class ExonStructureTest(unittest.TestCase):
     def get_exons(self):

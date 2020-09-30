@@ -899,6 +899,32 @@ class Database(object):
                 )
             )
 
+    def get_roothog_keywords(self, fam) -> str:
+        """Retrieve the keywords for a given toplevel HOG.
+
+        :param int fam: numeric id of requested toplevel HOG
+        :returns str: keyword of requested toplevel HOG
+        """
+        try:
+            metadata = self.db.get_node("/RootHOG/MetaData")
+            buffer = self.db.get_node("/RootHOG/KeywordBuffer")
+            fam_data = metadata[fam - 1]
+            if fam_data["Fam"] != fam:
+                logger.warning("/RootHOG/MetaData is not ordered")
+                fam_data = metadata.read_where("Fam == {:d}".format(fam))
+            keyword = (
+                buffer[
+                    fam_data["KeywordOffet"] : fam_data["KeywordOffset"]
+                    + fam_data["KeywordLength"]
+                ]
+                .tobytes()
+                .decode()
+            )
+        except tables.NoSuchNodeError:
+            logger.warning("Database has no RootHOG keywords data stored")
+            keyword = ""
+        return keyword
+
     def count_hog_members(self, hog_id, level=None):
         """Count the number of members in a (sub)hog.
 

@@ -127,17 +127,16 @@ class XRefParsingTest(unittest.TestCase):
         self.importer.flush_buffers()
         enum = pyoma.tablefmt.XRefTable.columns.get("XRefSource").enum
         verif = pyoma.tablefmt.XRefTable.columns.get("Verification").enum
+        args, kwargs = self.importer.xref_tab.append.call_args_list[0]
+        buffer = args[0]
         self.assertIn(
-            (5, enum.SourceAC, b"NV21158-PA", verif.exact),
-            self.importer.xref_tab.append.call_args.args[0],
+            (5, enum.SourceAC, b"NV21158-PA", verif.exact), buffer,
         )
         self.assertIn(
-            (5, enum.SourceAC, b"NV21158-RA", verif.exact),
-            self.importer.xref_tab.append.call_args.args[0],
+            (5, enum.SourceAC, b"NV21158-RA", verif.exact), buffer,
         )
         self.assertIn(
-            (5, enum.EnsemblGenomes, b"NV21158-RA", verif.exact),
-            self.importer.xref_tab.append.call_args.args[0],
+            (5, enum.EnsemblGenomes, b"NV21158-RA", verif.exact), buffer,
         )
 
     def test_disambiguate(self, mock_up):

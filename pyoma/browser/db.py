@@ -909,12 +909,12 @@ class Database(object):
             metadata = self.db.get_node("/RootHOG/MetaData")
             buffer = self.db.get_node("/RootHOG/KeywordBuffer")
             fam_data = metadata[fam - 1]
-            if fam_data["Fam"] != fam:
+            if fam_data["FamNr"] != fam:
                 logger.warning("/RootHOG/MetaData is not ordered")
-                fam_data = metadata.read_where("Fam == {:d}".format(fam))
+                fam_data = metadata.read_where("FamNr == {:d}".format(fam))
             keyword = (
                 buffer[
-                    fam_data["KeywordOffet"] : fam_data["KeywordOffset"]
+                    fam_data["KeywordOffset"] : fam_data["KeywordOffset"]
                     + fam_data["KeywordLength"]
                 ]
                 .tobytes()

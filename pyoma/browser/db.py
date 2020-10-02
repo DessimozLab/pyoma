@@ -1,39 +1,39 @@
 from __future__ import division, print_function, unicode_literals
-from builtins import chr, range, object, zip, bytes, str
 
 import collections
+import functools
 import io
 import itertools
 import json
 import logging
 import os
-
-import networkx as nx
-import pyopa
 import re
 import threading
 import time
-from tqdm import tqdm
-import functools
 from bisect import bisect_left
+from builtins import chr, range, object, zip, bytes, str
 from xml.etree import ElementTree as et
-from datasketch import MinHash
-import fuzzyset
+
 import dateutil
+import fuzzyset
+import networkx as nx
 import numpy
 import numpy.lib.recfunctions
 import pandas as pd
+import pyopa
 import tables
 import tables.file as _tables_file
 from Bio.UniProt import GOA
+from datasketch import MinHash
+from tqdm import tqdm
 
-from .. import version
-from .hogprofile import Profiler
-from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .KmerEncoder import KmerEncoder
-from .geneontology import GeneOntology, OntologyParser, GOAspect
-from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
 from .decorators import timethis
+from .geneontology import GeneOntology, OntologyParser, GOAspect
+from .hogprofile import Profiler
+from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
+from .suffixsearch import SuffixSearcher, SuffixIndexError
+from .. import version
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,10 @@ _tables_file._open_files = ThreadsafeFileRegistry()
 
 # end monkey patch pytables
 ####
+
+
+class DBOutdatedError(Exception):
+    pass
 
 
 class Database(object):
@@ -908,6 +912,12 @@ class Database(object):
         try:
             metadata = self.db.get_node("/RootHOG/MetaData")
             buffer = self.db.get_node("/RootHOG/KeywordBuffer")
+        except tables.NoSuchNodeError:
+            logger.warning("Database has no RootHOG keywords data stored")
+            keyword = ""
+        else:
+            if fam <= 0 or fam > len(metadata):
+                raise KeyError("family {} does not exist".format(fam))
             fam_data = metadata[fam - 1]
             if fam_data["FamNr"] != fam:
                 logger.warning("/RootHOG/MetaData is not ordered")
@@ -920,9 +930,6 @@ class Database(object):
                 .tobytes()
                 .decode()
             )
-        except tables.NoSuchNodeError:
-            logger.warning("Database has no RootHOG keywords data stored")
-            keyword = ""
         return keyword
 
     def count_hog_members(self, hog_id, level=None):
@@ -958,6 +965,37 @@ class Database(object):
                 idx["HogBufferOffset"], idx["HogBufferOffset"] + idx["HogBufferLength"]
             )
         return buf[rng].tostring()
+
+    def get_cached_family_json(self, fam) -> str:
+        """returns a json encoded list for protein infos of a family
+
+        This is data contains the protein attributes needed for iHam
+        visualization. For older databases that function might raise
+        a DBOutdatedError.
+
+        :param fam: numeric id of requested toplevel HOG
+        :returns str: json encoded string
+        """
+        try:
+            metadata = self.db.get_node("/RootHOG/MetaData")
+            json_buffer = self.db.get_node("/RootHOG/JsonBuffer")
+        except tables.NoSuchNodeError as e:
+            raise DBOutdatedError(str(e))
+        if fam < 0 or fam > len(metadata):
+            raise KeyError("family {} does not exist".format(fam))
+        fam_data = metadata[fam - 1]
+        if fam_data["FamNr"] != fam:
+            logger.warning("/RootHOG/MetaData is not ordered")
+            fam_data = metadata.read_where("FamNr == {:d}".format(fam))
+        json_str = (
+            json_buffer[
+                fam_data["FamDataJsonOffset"] : fam_data["FamDataJsonOffset"]
+                + fam_data["FamDataJsonLength"]
+            ]
+            .tobytes()
+            .decode()
+        )
+        return json_str
 
     def _hog_lex_range(self, hog):
         """return the lexographic range of a hog.

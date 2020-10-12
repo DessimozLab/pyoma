@@ -99,3 +99,27 @@ class DatabaseChecks(unittest.TestCase):
             self.assertLess(
                 0, len(computed_pairs[0]), "No synteny values computed for {}".format(g)
             )
+
+    def test_cached_orthologs_count(self):
+        SAMPLES = 80
+        nr_entries = self.db.id_resolver.max_entry_nr
+        for entry_nr in random.sample(range(nr_entries + 1), SAMPLES):
+            with self.subTest(entry_nr=entry_nr):
+                cached_ortholog_cnts = self.db.nr_ortholog_relations(entry_nr)
+                vps = self.db.get_vpairs(entry_nr)
+                self.assertEqual(len(vps), cached_ortholog_cnts["NrPairwiseOrthologs"])
+
+                entry = self.db.entry_by_entry_nr(entry_nr)
+                if entry["OmaGroup"] > 0:
+                    oma_grp_memb = self.db.oma_group_members(entry["OmaGroup"])
+                    self.assertEqual(
+                        len(oma_grp_memb) - 1,
+                        cached_ortholog_cnts["NrOMAGroupOrthologs"],
+                    )
+
+                if entry["OmaHOG"] != b"":
+                    hog_ind_orth = self.db.get_hog_induced_pairwise_orthologs(entry)
+                    self.assertEqual(
+                        len(hog_ind_orth),
+                        cached_ortholog_cnts["NrHogInducedPWOrthologs"],
+                    )

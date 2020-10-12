@@ -964,7 +964,7 @@ class Database(object):
             rng = slice(
                 idx["HogBufferOffset"], idx["HogBufferOffset"] + idx["HogBufferLength"]
             )
-        return buf[rng].tostring()
+        return buf[rng].tobytes()
 
     def get_cached_family_json(self, fam) -> str:
         """returns a json encoded list for protein infos of a family
@@ -1158,7 +1158,7 @@ class Database(object):
                 "keywords": kw_buf[
                     e["KeywordOffset"] : e["KeywordOffset"] + e["KeywordLength"]
                 ]
-                .tostring()
+                .tobytes()
                 .decode(),
                 "size": int(e["NrMembers"]) if "NrMembers" in e else -1,
             }
@@ -1215,7 +1215,7 @@ class Database(object):
             + entry["SeqBufferLength"]
             - 1
         ]
-        return seq.tostring()
+        return seq.tobytes()
 
     def get_cdna(self, entry):
         """get the protein sequence of a given entry as a string"""
@@ -1226,7 +1226,7 @@ class Database(object):
             + entry["CDNABufferLength"]
             - 1
         ]
-        return seq.tostring()
+        return seq.tobytes()
 
     def get_description(self, entry):
         entry = self.ensure_entry(entry)
@@ -1235,7 +1235,7 @@ class Database(object):
             entry["DescriptionOffset"] : entry["DescriptionOffset"]
             + entry["DescriptionLength"]
         ]
-        return desc.tostring()
+        return desc.tobytes()
 
     def get_ec_annotations(self, entry_nr):
         ec_tab = self.db.get_node("/Annotations/EC")

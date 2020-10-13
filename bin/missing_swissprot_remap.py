@@ -1,8 +1,10 @@
 import pyoma.browser.db
+from pyoma.hpc import detect_hpc_jobarray
 import gzip
 import Bio.SeqIO
 import logging
-import concurrent.futures
+import os
+import csv
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +27,10 @@ def identity_w_gaps_ignored(al1, al2):
     return match / n
 
 
-def open_db(filename):
-    global h5db
-    h5db = pyoma.browser.db.Database(filename)
-
-
-def search_rec(rec):
-    g = h5db.id_mapper["OMA"].genome_from_taxid(int(rec.annotations["ncbi_taxid"][0]))
+def search_rec(db, rec):
+    g = db.id_mapper["OMA"].genome_from_taxid(int(rec.annotations["ncbi_taxid"][0]))
     rng = g["EntryOff"] + 1, g["EntryOff"] + g["TotEntries"]
-    match = h5db.seq_search.approx_search(
+    match = db.seq_search.approx_search(
         str(rec.seq), compute_distance=True, entrynr_range=rng
     )
     if match is None:
@@ -60,34 +57,42 @@ def search_rec(rec):
         return best
 
 
-def map_missing(db, missing):
+def map_missing(db, missing, nr_procs=1):
     tab_ext = []
     src_enum, verif_enum = (
         db.id_mapper["XRef"].xref_tab.get_enum(k)
         for k in ("XRefSource", "Verification")
     )
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=32, initializer=open_db, initargs=(db.db.filename,)
-    ) as executor:
-        for rec, best in zip(missing, executor.map(search_rec, missing)):
-            if best is not None:
-                tab_ext.extend(
-                    [
-                        (
-                            best,
-                            src_enum["UniProtKB/TrEMBL"],
-                            rec.id.encode("utf-8"),
-                            verif_enum["modified"],
-                        ),
-                        (
-                            best,
-                            src_enum["UniProtKB/SwissProt"],
-                            rec.name.encode("utf-8"),
-                            verif_enum["modified"],
-                        ),
-                    ]
-                )
+    pInf = detect_hpc_jobarray(nr_procs)
+    for rec in missing:
+        if not pInf.is_my_job(rec.id):
+            continue
+        best = search_rec(db, rec)
+        if best is not None:
+            tab_ext.extend(
+                [
+                    (
+                        best,
+                        src_enum["UniProtKB/TrEMBL"],
+                        rec.id.encode("utf-8"),
+                        verif_enum["modified"],
+                    ),
+                    (
+                        best,
+                        src_enum["UniProtKB/SwissProt"],
+                        rec.name.encode("utf-8"),
+                        verif_enum["modified"],
+                    ),
+                ]
+            )
+    write_matches(pInf.modify_filename("extra-xrefs.tsv"), tab_ext)
     return tab_ext
+
+
+def write_matches(fn, matches):
+    with open(fn, "w", newline="") as fout:
+        writer = csv.writer(fout, delimiter="\t")
+        writer.writerows(matches)
 
 
 if __name__ == "__main__":
@@ -99,15 +104,21 @@ if __name__ == "__main__":
         "--seqs", required=True, help="path to a file with sequences to be mapped"
     )
     parser.add_argument("--format", default="swiss", help="format of seqs file")
+    parser.add_argument("--phase", choices=("filter", "map"), required=True)
+    parser.add_argument("--nr-procs", "-n", default=1, type=int)
     conf = parser.parse_args()
+    logging.basicConfig(level=logging.INFO)
 
+    nr_procs = conf.nr_procs
+    if nr_procs is None:
+        nr_procs = int(os.getenv("NR_PROCESSES", "1"))
     db = pyoma.browser.db.Database(conf.db)
-    missing = get_missing_recs(db, conf.seqs, conf.format)
-    tab_ext = map_missing(db, missing)
+    if conf.phase == "filter":
+        missing = get_missing_recs(db, conf.seqs, conf.format)
+        with open(conf.seqs + ".missings", "wt") as fh:
+            Bio.SeqIO.write(missing, fh, format=conf.format)
+    elif conf.phase == "map":
+        with open(conf.seqs + ".missings", "rt") as fh:
+            missing = list(Bio.SeqIO.parse(fh, format=conf.format))
+        tab_ext = map_missing(db, missing, nr_procs=nr_procs)
     db.close()
-
-    import csv
-
-    with open("extra_xrefs.tsv", "w", newline="") as fout:
-        writer = csv.writer(fout, delimiter="\t")
-        writer.writerows(tab_ext)

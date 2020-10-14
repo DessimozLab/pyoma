@@ -104,7 +104,6 @@ if __name__ == "__main__":
         "--seqs", required=True, help="path to a file with sequences to be mapped"
     )
     parser.add_argument("--format", default="swiss", help="format of seqs file")
-    parser.add_argument("--phase", choices=("filter", "map"), required=True)
     parser.add_argument("--nr-procs", "-n", default=1, type=int)
     conf = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
@@ -113,12 +112,6 @@ if __name__ == "__main__":
     if nr_procs is None:
         nr_procs = int(os.getenv("NR_PROCESSES", "1"))
     db = pyoma.browser.db.Database(conf.db)
-    if conf.phase == "filter":
-        missing = get_missing_recs(db, conf.seqs, conf.format)
-        with open(conf.seqs + ".missings", "wt") as fh:
-            Bio.SeqIO.write(missing, fh, format=conf.format)
-    elif conf.phase == "map":
-        with open(conf.seqs + ".missings", "rt") as fh:
-            missing = list(Bio.SeqIO.parse(fh, format=conf.format))
-        tab_ext = map_missing(db, missing, nr_procs=nr_procs)
+    missing = get_missing_recs(db, conf.seqs, conf.format)
+    tab_ext = map_missing(db, missing, nr_procs=nr_procs)
     db.close()

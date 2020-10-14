@@ -33,7 +33,7 @@ def search_rec(db, rec):
     match = db.seq_search.approx_search(
         str(rec.seq), compute_distance=True, entrynr_range=rng
     )
-    if match is None:
+    if not match:
         return None
 
     best, stats = match[0]

@@ -123,6 +123,24 @@ class DatabaseTests(unittest.TestCase):
                 "test of tes_hogids_at_level failed for {}: {}".format(args, levels),
             )
 
+    def test_get_hog_without_level(self):
+        for case in ("HOG:0000002.2b", "HOG:0000001"):
+            with self.subTest(case=case):
+                hog = self.db.get_hog(case)
+                self.assertTrue(hog["IsRoot"])
+                self.assertEqual(case, hog["ID"].decode())
+
+    def test_get_hog_with_level(self):
+        for hog_id, level in (
+            ("HOG:0000002.2b", "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"),
+            ("HOG:0000005.1b", "Saccharomycetaceae"),
+            ("HOG:0000005", "Fungi"),
+        ):
+            with self.subTest(hog_id=hog_id, level=level):
+                hog = self.db.get_hog(hog_id, level=level)
+                self.assertEqual(hog_id, hog["ID"].decode())
+                self.assertEqual(level, hog["Level"].decode())
+
     def test_member_of_hog_id(self):
         cases = [
             [("HOG:0000082.1b", None), 2],

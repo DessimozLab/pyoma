@@ -886,8 +886,8 @@ class Database(object):
                 query_fam, hog_id
             )
         else:
-            query = "(Fam == {:d}) & (Level == {!r})".format(
-                query_fam, level.encode("ascii")
+            query = "(Fam == {:d}) & (ID == {!r}) & (Level == {!r})".format(
+                query_fam, hog_id, level.encode("ascii")
             )
         try:
             row = next(self.db.root.HogLevel.where(query))
@@ -2598,7 +2598,7 @@ class XrefIdMapper(object):
         :returns: list of dicts with 'source' and 'xref' keys."""
         res = [
             {
-                "source": self.xrefEnum._values[row["XRefSource"]],
+                "source": self.xrefEnum(row["XRefSource"]),
                 "xref": row["XRefId"].decode(),
             }
             for row in self.xref_tab.where(

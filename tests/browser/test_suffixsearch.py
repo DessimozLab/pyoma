@@ -167,9 +167,15 @@ class SuffixArraySearchTests(unittest.TestCase):
             tab, "CharCol50", "/test", ignore_case=True
         )()
         search = suffixsearch.SuffixSearcher.from_tablecolumn(tab, "CharCol50")
-        query = tab[5]["CharCol50"].decode()
+        for trial in range(100):
+            row_nr = random.randint(0, len(tab))
+            query = tab[row_nr]["CharCol50"].decode()
+            if len(query) > 3:
+                break
+        else:
+            self.assertTrue(False, "table has no valid row to search")
         res = search.find(query[2:])
-        self.assertIn(5, res)
+        self.assertIn(row_nr, res)
 
     def test_raises_on_non_char_column(self):
         tab = self.h5.get_node("/test/table")

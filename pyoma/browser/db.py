@@ -2594,7 +2594,7 @@ class XrefIdMapper(object):
         self.xrefEnum = self.xref_tab.get_enum("XRefSource")
         self.idtype = frozenset(list(self.xrefEnum._values.keys()))
         self.verif_enum = self.xref_tab.get_enum("Verification")
-        self._max_verif_for_mapping_entrynrs = self.verif_enum["unchecked"]
+        self._max_verif_for_mapping_entrynrs = self.verif_enum["modified"]
         try:
             self.xref_index = SuffixSearcher.from_tablecolumn(self.xref_tab, "XRefId")
         except SuffixIndexError:
@@ -2616,6 +2616,7 @@ class XrefIdMapper(object):
             {
                 "source": self.xrefEnum(row["XRefSource"]),
                 "xref": row["XRefId"].decode(),
+                "seq_match": self.verif_enum(row["Verification"]),
             }
             for row in self.xref_tab.where(
                 "(EntryNr=={:d}) & (Verification <= {:d})".format(
@@ -2779,6 +2780,12 @@ class XrefIdMapper(object):
             if typ not in xrefdict[row["EntryNr"]]:
                 xrefdict[row["EntryNr"]][typ] = {"id": row["XRefId"]}
         return xrefdict
+
+
+class XRefNoApproximateIdMapper(XrefIdMapper):
+    def __init__(self, db):
+        super(XRefNoApproximateIdMapper, self).__init__(db)
+        self._max_verif_for_mapping_entrynrs = self.verif_enum["unchecked"]
 
 
 class UniProtIdMapper(XrefIdMapper):

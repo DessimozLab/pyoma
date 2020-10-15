@@ -317,7 +317,7 @@ class XRefDatabaseMock(Database):
         xref["EntryNr"] = numpy.arange(1, 6, 0.5).astype(numpy.int32)
         xref["XRefSource"] = numpy.tile([0, 20], 5)
         xref["XRefId"] = ["XA{:03}g1.4".format(i) for i in range(10)]
-        xref["Verification"] = tuple(itertools.islice(itertools.cycle([1, 2, 4]), 10))
+        xref["Verification"] = tuple(itertools.islice(itertools.cycle([0, 2, 4]), 10))
         f.create_table("/", "XRef", tablefmt.XRefTable, obj=xref)
         f.create_group("/", "XRef_Index")
         for n in ("suffix", "buffer", "offset"):
@@ -340,7 +340,10 @@ class XRefIdMapperTest(unittest.TestCase):
 
     def test_map_many_entries(self):
         all_mapped = self.xrefmapper.map_many_entry_nrs(numpy.arange(1, 4))
-        self.assertEqual((4,), all_mapped.shape)
+        expected_len = (
+            4 if isinstance(self.xrefmapper, XRefNoApproximateIdMapper) else 6
+        )
+        self.assertEqual((expected_len,), all_mapped.shape)
         self.assertEqual(self.xrefmapper.xref_tab.dtype, all_mapped.dtype)
 
     def test_map_entry_iterator(self):
@@ -354,6 +357,20 @@ class XRefIdMapperTest(unittest.TestCase):
         xref = "XA002g1.4"
         res = self.xrefmapper.search_xref(xref)
         self.assertEqual(2, res["EntryNr"])
+
+    def test_verification_is_returned(self):
+        res = self.xrefmapper.map_entry_nr(2)
+        if isinstance(self.xrefmapper, XRefNoApproximateIdMapper):
+            expected = ["exact"]
+        else:
+            expected = ["modified", "exact"]
+        self.assertEqual(expected, [z["seq_match"] for z in res])
+
+
+class XRefNoApproxIdMapperTest(XRefIdMapperTest):
+    def setUp(self):
+        patch_db = XRefDatabaseMock()
+        self.xrefmapper = XRefNoApproximateIdMapper(patch_db)
 
     def test_modified_xref_not_returned_in_map(self):
         res = self.xrefmapper.map_entry_nr(2)

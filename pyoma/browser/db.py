@@ -2022,7 +2022,14 @@ class OmaIdMapper(object):
 
 
 class FuzzyMatcher(object):
-    def __init__(self, values, maps_to=None, rel_sim_cutoff=0.8):
+    def __init__(
+        self,
+        values,
+        maps_to=None,
+        rel_sim_cutoff=0.8,
+        gram_size_lower=3,
+        gram_size_upper=5,
+    ):
         """FuzzyMatcher allows to search for approximate matches of a list of values.
         It is a thin wrapper to the :class:`fuzzyset.FuzzySet datastructure.
 
@@ -2035,13 +2042,22 @@ class FuzzyMatcher(object):
         :param values: an iterable/mapping
         """
         if maps_to is not None:
-            self.fuzzySet = fuzzyset.FuzzySet(rel_sim_cutoff=rel_sim_cutoff)
+            self.fuzzySet = fuzzyset.FuzzySet(
+                rel_sim_cutoff=rel_sim_cutoff,
+                gram_size_lower=gram_size_lower,
+                gram_size_upper=gram_size_upper,
+            )
             self.mapping = collections.defaultdict(list)
             for val, map_source in zip(values, maps_to):
                 self.fuzzySet.add(val)
                 self.mapping[val].append(map_source)
         else:
-            self.fuzzySet = fuzzyset.FuzzySet(values, rel_sim_cutoff=rel_sim_cutoff)
+            self.fuzzySet = fuzzyset.FuzzySet(
+                values,
+                rel_sim_cutoff=rel_sim_cutoff,
+                gram_size_lower=gram_size_lower,
+                gram_size_upper=gram_size_upper,
+            )
             self.mapping = None
 
     def search_approx(self, key):

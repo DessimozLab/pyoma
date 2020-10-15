@@ -2773,12 +2773,15 @@ class XrefIdMapper(object):
         xrefdict = collections.defaultdict(dict)
         for row in tab:
             try:
-                typ = self.xrefEnum._values[row["XRefSource"]]
+                typ = self.xrefEnum(row["XRefSource"])
             except IndexError:
                 logger.warning("invalid XRefSource value in {}".format(row))
                 continue
             if typ not in xrefdict[row["EntryNr"]]:
-                xrefdict[row["EntryNr"]][typ] = {"id": row["XRefId"]}
+                xrefdict[row["EntryNr"]][typ] = {
+                    "id": row["XRefId"],
+                    "seq_match": self.verif_enum(row["Verification"]),
+                }
         return xrefdict
 
 

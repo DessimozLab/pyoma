@@ -741,6 +741,38 @@ class Database(object):
             "(Fam=={}) & (Level=={!r})".format(fam_nr, lev)
         )["ID"]
 
+    def get_parent_hogs(self, hog_id, level=None):
+        """return an array of parent (deeper) HOGs.
+
+        The returned array is sorted from deepest to shallowest parent
+        HOG of the query HOG. The query HOG can be either defined just
+        by its ID, in which case the deepest level of that (sub)hog is
+        assumed, or a valid hog_id/level combination.
+
+        At the last index, the query HOG will be present, so unless
+        an invalid HOG is selected, at least one HOG will be returned.
+
+        The method returns a list of :class:`models.HOG` instances
+
+        :param (str,bytes) hog_id: a valid hog_id
+        :param str level: optional level of reference HOG"""
+        if isinstance(hog_id, str):
+            hog_id = hog_id.encode("ascii")
+        ref_hog = self.get_hog(hog_id, level=level)
+        taxnode_of_level = self.tax.get_taxnode_from_name_or_taxid(ref_hog["Level"])
+        parent_taxnodes = self.tax.get_parent_taxa(taxnode_of_level[0]["NCBITaxonId"])
+        parent_pos = {lev: pos for pos, lev in enumerate(parent_taxnodes["Name"][::-1])}
+        query = "(Fam == {}) & (ID <= {!r})".format(ref_hog["Fam"], hog_id)
+        parent_hogs = [] * len(parent_pos)
+        for row in self.db.root.HogLevel.where(query):
+            hog = row.fetch_all_fields()
+            if not hog_id.startswith(hog["ID"]):
+                continue
+            if hog["Level"] in parent_pos:
+                parent_hogs.append(HOG(self, hog))
+        parent_hogs.sort(key=lambda x: parent_pos[x._hog["Level"]])
+        return parent_hogs
+
     def member_of_hog_id(self, hog_id, level=None):
         """return an array of protein entries which belong to a given hog_id.
 

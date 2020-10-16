@@ -418,6 +418,9 @@ class HOG(object):
     def __len__(self):
         return self.nr_member_genes
 
+    def __repr__(self):
+        return "<{}({}, {})>".format(self.__class__.__name__, self.hog_id, self.level)
+
     @LazyProperty
     def keyword(self):
         return self._db.get_roothog_keywords(self.fam)
@@ -428,6 +431,10 @@ class HOG(object):
             ProteinEntry(self._db, pe)
             for pe in self._db.hog_members_from_hog_id(self.hog_id, self.level)
         ]
+
+    @LazyProperty
+    def parent_hogs(self):
+        return self._db.get_parent_hogs(self.hog_id, self.level)
 
 
 class PairwiseRelation(object):

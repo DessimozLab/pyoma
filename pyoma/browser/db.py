@@ -701,7 +701,7 @@ class Database(object):
         )
         return levels
 
-    def get_subhogs(self, hog_id):
+    def get_subhogs(self, hog_id, level=None):
         """Get all the (sub)hogs for a given hog_id
 
         This method returns all the levels for which a certain exact hog_id
@@ -2214,6 +2214,7 @@ class Taxonomy(object):
         self.taxid_key = self.tax_table.argsort(order=("NCBITaxonId"))
         self.parent_key = self.tax_table.argsort(order=("ParentTaxonId"))
         self.all_hog_levels = _valid_levels
+        self._approx_matcher = None
         if _valid_levels is None:
             self._load_valid_taxlevels()
 
@@ -2278,6 +2279,13 @@ class Taxonomy(object):
             idx.append(self.parent_key[i])
             i += 1
         return self.tax_table.take(idx)
+
+    def approx_search(self, pattern):
+        if self._approx_matcher is None:
+            valid_levels_as_str = (l.decode() for l in self.all_hog_levels)
+            self._approx_matcher = FuzzyMatcher(values=valid_levels_as_str)
+        candidates = self._approx_matcher.search_approx(pattern)
+        return candidates
 
     def get_parent_taxa(self, query):
         """Get array of taxonomy entries leading towards the

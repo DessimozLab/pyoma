@@ -701,23 +701,54 @@ class Database(object):
         )
         return levels
 
-    def get_subhogs(self, hog_id, level=None):
+    def get_subhogs(self, hog_id, level=None, include_subids=False):
         """Get all the (sub)hogs for a given hog_id
 
-        This method returns all the levels for which a certain exact hog_id
-        applies, i.e. a set of taxonomic ranges for which no duplication
-        occurred in between.
+        This method returns an array of :class:`models.HOG` instances,
+        that have a certain (sub)hog id. If `include_subids` is set to
+        False (default), only the (sub)HOGs with exactly the query
+        hog_id will be returned, i.e. a set of taxonomic ranges for
+        which no duplication occurred in between for this HOG.
 
         The method returns an array of :class:`models.HOG` instances.
 
-        :param hog_id: the hog_id of interest
+        :param (bytes, str) hog_id: the hog_id of interest
+
+        :param str level: the root level, defaults to the root of the subhog
+
+        :param bool include_subids: whether or not to include suhogs
+                                    that originated after a duplication
+                                    in the query (sub)HOG. defaults to False
+
+        :returns list of HOG instances
+        :rtype :class:`models.HOG`
 
         :see_also: :meth:`get_hog` that returns a single HOG instance
             for a specific level or the root level one for a specific HOG id.
         """
-        hog_id_ascii = hog_id if isinstance(hog_id, bytes) else hog_id.encode("ascii")
-        arr = self.db.root.HogLevel.read_where("ID == {!r}".format(hog_id_ascii))
-        hogs = [HOG(self, hog_row) for hog_row in arr]
+        if level is not None:
+            try:
+                subtax = self.tax.get_subtaxonomy_rooted_at(level, collapse=False)
+                children = set(n["Name"] for n in subtax.tax_table)
+                children.remove(
+                    level.encode("utf-8") if isinstance(level, str) else level
+                )
+            except KeyError as e:
+                raise ValueError("invalid level: {}".format(level))
+
+        if include_subids:
+            query = "(ID >= {!r}) & (ID < {!r})".format(*self._hog_lex_range(hog_id))
+        else:
+            hog_id_ascii = (
+                hog_id if isinstance(hog_id, bytes) else hog_id.encode("ascii")
+            )
+            query = "ID == {!r}".format(hog_id_ascii)
+
+        hogs = []
+        for row in self.db.root.HogLevel.where(query):
+            hog = row.fetch_all_fields()
+            if level is None or hog["Level"] in children:
+                hogs.append(HOG(self, hog))
         return hogs
 
     def get_subhogids_at_level(self, fam_nr, level):
@@ -2331,7 +2362,7 @@ class Taxonomy(object):
             res = it
         return res
 
-    def get_subtaxonomy_rooted_at(self, root):
+    def get_subtaxonomy_rooted_at(self, root, collapse=True):
         rid = self._get_taxids_from_any([root])
         subtree = [rid]
 
@@ -2344,7 +2375,7 @@ class Taxonomy(object):
                     get_children(child_id)
 
         get_children(rid)
-        return self.get_induced_taxonomy(subtree)
+        return self.get_induced_taxonomy(subtree, collapse=collapse)
 
     def get_taxnode_from_name_or_taxid(self, query):
         if isinstance(query, (bytes, str, int)):

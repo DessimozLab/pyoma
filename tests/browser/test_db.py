@@ -130,6 +130,43 @@ class DatabaseTests(unittest.TestCase):
                 self.assertTrue(hog["IsRoot"])
                 self.assertEqual(case, hog["ID"].decode())
 
+    def test_get_parent_hogs(self):
+        for hog_id, level in (
+            ("HOG:0000474.1d", "Ascomycota"),
+            ("HOG:0000165", "Fungi"),
+        ):
+            with self.subTest(hog_id=hog_id, level=level):
+                hogs = self.db.get_parent_hogs(hog_id, level)
+                try:
+                    k = hog_id.index(".")
+                    base_id = hog_id[:k]
+                except ValueError:
+                    base_id = hog_id
+                self.assertEqual(base_id, hogs[0].hog_id)
+                self.assertTrue(hogs[0].is_root)
+                self.assertEqual(hog_id, hogs[-1].hog_id)
+                self.assertEqual(level, hogs[-1].level)
+
+    def test_get_subhogs(self):
+        for hog_id, level in (
+            ("HOG:0000474.1d", "Ascomycota"),
+            ("HOG:0000165", "Fungi"),
+        ):
+            with self.subTest(hog_id=hog_id, level=level):
+                hogs = self.db.get_subhogs(hog_id, level)
+                self.assertEqual(hogs[0].hog_id, hog_id)
+                self.assertNotIn(level, [h.level for h in hogs])
+
+    def test_get_subhogs_with_subids(self):
+        for hog_id, level, exp_subhogid in (
+            ("HOG:0000474", "Eukaryota", "HOG:0000474.1d.2c"),
+            ("HOG:0000165", "Fungi", "HOG:0000165.1a"),
+        ):
+            with self.subTest(hog_id=hog_id, level=level):
+                hogs = self.db.get_subhogs(hog_id, level=level, include_subids=True)
+                self.assertIn(exp_subhogid, [h.hog_id for h in hogs])
+                self.assertNotIn(level, [h.level for h in hogs])
+
     def test_get_hog_with_level(self):
         for hog_id, level in (
             ("HOG:0000002.2b", "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)"),

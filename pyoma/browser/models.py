@@ -429,7 +429,7 @@ class HOG(object):
     def members(self):
         return [
             ProteinEntry(self._db, pe)
-            for pe in self._db.hog_members_from_hog_id(self.hog_id, self.level)
+            for pe in self._db.member_of_hog_id(self.hog_id, level=self.level)
         ]
 
     @LazyProperty

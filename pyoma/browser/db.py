@@ -704,13 +704,13 @@ class Database(object):
     def get_subhogs(self, hog_id, level=None, include_subids=False):
         """Get all the (sub)hogs for a given hog_id
 
-        This method returns an array of :class:`models.HOG` instances,
+        This method returns an generator of :class:`models.HOG` instances,
         that have a certain (sub)hog id. If `include_subids` is set to
         False (default), only the (sub)HOGs with exactly the query
         hog_id will be returned, i.e. a set of taxonomic ranges for
         which no duplication occurred in between for this HOG.
 
-        The method returns an array of :class:`models.HOG` instances.
+        The method returns an generator of :class:`models.HOG` instances.
 
         :param (bytes, str) hog_id: the hog_id of interest
 
@@ -720,7 +720,7 @@ class Database(object):
                                     that originated after a duplication
                                     in the query (sub)HOG. defaults to False
 
-        :returns list of HOG instances
+        :returns generator of HOG instances
         :rtype :class:`models.HOG`
 
         :see_also: :meth:`get_hog` that returns a single HOG instance
@@ -744,12 +744,10 @@ class Database(object):
             )
             query = "ID == {!r}".format(hog_id_ascii)
 
-        hogs = []
         for row in self.db.root.HogLevel.where(query):
             hog = row.fetch_all_fields()
             if level is None or hog["Level"] in children:
-                hogs.append(HOG(self, hog))
-        return hogs
+                yield HOG(self, hog)
 
     def get_subhogids_at_level(self, fam_nr, level):
         """get all the hog ids within a given family at a given taxonomic

@@ -153,7 +153,7 @@ class DatabaseTests(unittest.TestCase):
             ("HOG:0000165", "Fungi"),
         ):
             with self.subTest(hog_id=hog_id, level=level):
-                hogs = self.db.get_subhogs(hog_id, level)
+                hogs = list(self.db.get_subhogs(hog_id, level))
                 self.assertEqual(hogs[0].hog_id, hog_id)
                 self.assertNotIn(level, [h.level for h in hogs])
 
@@ -163,7 +163,9 @@ class DatabaseTests(unittest.TestCase):
             ("HOG:0000165", "Fungi", "HOG:0000165.1a"),
         ):
             with self.subTest(hog_id=hog_id, level=level):
-                hogs = self.db.get_subhogs(hog_id, level=level, include_subids=True)
+                hogs = list(
+                    self.db.get_subhogs(hog_id, level=level, include_subids=True)
+                )
                 self.assertIn(exp_subhogid, [h.hog_id for h in hogs])
                 self.assertNotIn(level, [h.level for h in hogs])
 

@@ -701,7 +701,9 @@ class Database(object):
         )
         return levels
 
-    def get_subhogs(self, hog_id, level=None, include_subids=False):
+    def get_subhogs(
+        self, hog_id, level=None, include_subids=False, include_leaf_levels=True
+    ):
         """Get all the (sub)hogs for a given hog_id
 
         This method returns an generator of :class:`models.HOG` instances,
@@ -720,6 +722,12 @@ class Database(object):
                                     that originated after a duplication
                                     in the query (sub)HOG. defaults to False
 
+        :param bool include_leaf_levels: whether or not to include the level
+                                    of the extant species. defaults to True.
+                                    Leaf levels have by definition only one
+                                    member and are thus not of limited interest
+                                    in most situations
+
         :returns generator of HOG instances
         :rtype :class:`models.HOG`
 
@@ -729,12 +737,19 @@ class Database(object):
         if level is not None:
             try:
                 subtax = self.tax.get_subtaxonomy_rooted_at(level, collapse=False)
+                if not include_leaf_levels:
+                    internal_node_idx = subtax.tax_table["NCBITaxonId"].searchsorted(
+                        subtax.tax_table["ParentTaxonId"], sorter=subtax.taxid_key
+                    )
+                    subtax.tax_table = subtax.tax_table[internal_node_idx]
                 children = set(n["Name"] for n in subtax.tax_table)
                 children.remove(
                     level.encode("utf-8") if isinstance(level, str) else level
                 )
             except KeyError as e:
                 raise ValueError("invalid level: {}".format(level))
+        elif not include_leaf_levels:
+            children = self.tax.all_hog_levels
 
         if include_subids:
             query = "(ID >= {!r}) & (ID < {!r})".format(*self._hog_lex_range(hog_id))
@@ -746,7 +761,7 @@ class Database(object):
 
         for row in self.db.root.HogLevel.where(query):
             hog = row.fetch_all_fields()
-            if level is None or hog["Level"] in children:
+            if (level is None and include_leaf_levels) or hog["Level"] in children:
                 yield HOG(self, hog)
 
     def get_subhogids_at_level(self, fam_nr, level):

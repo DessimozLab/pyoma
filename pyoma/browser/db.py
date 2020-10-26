@@ -734,7 +734,7 @@ class Database(object):
         :see_also: :meth:`get_hog` that returns a single HOG instance
             for a specific level or the root level one for a specific HOG id.
         """
-        if level is not None:
+        if level is not None and level not in ("LUCA", b"LUCA"):
             try:
                 subtax = self.tax.get_subtaxonomy_rooted_at(level, collapse=False)
                 if not include_leaf_levels:

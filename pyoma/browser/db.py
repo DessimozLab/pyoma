@@ -803,7 +803,7 @@ class Database(object):
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
         ref_hog = self.get_hog(hog_id, level=level)
-        parent_pos = {"LUCA": -1}
+        parent_pos = {b"LUCA": -1}
         if ref_hog["Level"] != b"LUCA":
             taxnode_of_level = self.tax.get_taxnode_from_name_or_taxid(ref_hog["Level"])
             parent_taxnodes = self.tax.get_parent_taxa(

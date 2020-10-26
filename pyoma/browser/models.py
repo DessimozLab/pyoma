@@ -360,8 +360,17 @@ class Genome(object):
 
 class OmaGroup(object):
     def __init__(self, db, og):
-        self._group = og
+        self._stored_group = og
         self._db = db
+
+    @LazyProperty
+    def _group(self):
+        if isinstance(self._stored_group, dict) and "group_nr" in self._stored_group:
+            return self._stored_group
+        else:
+            return self._db.oma_group_metadata(
+                self._db.resolve_oma_group(self._stored_group)
+            )
 
     @property
     def group_nbr(self):
@@ -370,6 +379,33 @@ class OmaGroup(object):
     @property
     def fingerprint(self):
         return self._group["fingerprint"]
+
+    @property
+    def keyword(self):
+        return self._group["keywords"]
+
+    @LazyProperty
+    def members(self):
+        return [
+            ProteinEntry(self._db, pe)
+            for pe in self._db.oma_group_members(self.group_nbr)
+        ]
+
+    @property
+    def nr_member_genes(self):
+        size = self._group["size"]
+        if size < 0:
+            # fallback in case it is not yet stored in db
+            size = len(self.members)
+        return size
+
+    def __len__(self):
+        return self.nr_member_genes
+
+    def __repr__(self):
+        return "<{}({}, {})>".format(
+            self.__class__.__name__, self.group_nbr, self.fingerprint
+        )
 
 
 class HOG(object):

@@ -93,6 +93,31 @@ class HOGModelTest(TestDbBase):
         self.assertEqual("", hog.keyword)
 
 
+class OmaGroupModelTest(TestDbBase):
+    def test_instant_with_grpnr(self):
+        grp = models.OmaGroup(self.db, 1384)
+        self.assertEqual(grp.group_nbr, 1384)
+
+    def test_raises_invalid_id_for_invalid_group_nrs(self):
+        for invalid_grp_nr in (-1, 0, 5421):
+            with self.assertRaises(db.InvalidId):
+                grp = models.OmaGroup(self.db, invalid_grp_nr)
+                grp.group_nbr
+
+    def test_instant_with_fingerprint(self):
+        grp = models.OmaGroup(self.db, "SDNEIRR")
+        self.assertEqual("SDNEIRR", grp.fingerprint)
+
+    def test_grp_size(self):
+        for grpnr in (521, 4125, 532, 12):
+            grp = models.OmaGroup(self.db, grpnr)
+            self.assertEqual(len(grp), len(grp.members))
+
+    def test_keyword(self):
+        grp = models.OmaGroup(self.db, 521)
+        self.assertEqual("methylenetetrahydrofolate reductase", grp.keyword)
+
+
 class ExonStructureTest(unittest.TestCase):
     def get_exons(self):
         loc_dtype = tablefmt.tables.dtype_from_descr(tablefmt.LocusTable)

@@ -803,9 +803,15 @@ class Database(object):
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
         ref_hog = self.get_hog(hog_id, level=level)
-        taxnode_of_level = self.tax.get_taxnode_from_name_or_taxid(ref_hog["Level"])
-        parent_taxnodes = self.tax.get_parent_taxa(taxnode_of_level[0]["NCBITaxonId"])
-        parent_pos = {lev: pos for pos, lev in enumerate(parent_taxnodes["Name"][::-1])}
+        parent_pos = {"LUCA": -1}
+        if ref_hog.level != "LUCA":
+            taxnode_of_level = self.tax.get_taxnode_from_name_or_taxid(ref_hog["Level"])
+            parent_taxnodes = self.tax.get_parent_taxa(
+                taxnode_of_level[0]["NCBITaxonId"]
+            )
+            parent_pos.update(
+                {lev: pos for pos, lev in enumerate(parent_taxnodes["Name"][::-1])}
+            )
         query = "(Fam == {}) & (ID <= {!r})".format(ref_hog["Fam"], hog_id)
         parent_hogs = [] * len(parent_pos)
         for row in self.db.root.HogLevel.where(query):

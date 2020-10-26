@@ -761,7 +761,9 @@ class Database(object):
 
         for row in self.db.root.HogLevel.where(query):
             hog = row.fetch_all_fields()
-            if (level is None and include_leaf_levels) or hog["Level"] in children:
+            if (
+                (level is None or level in ("LUCA", b"LUCA")) and include_leaf_levels
+            ) or hog["Level"] in children:
                 yield HOG(self, hog)
 
     def get_subhogids_at_level(self, fam_nr, level):

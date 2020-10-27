@@ -155,7 +155,7 @@ class ProteinResource(Resource):
         return self.text_elemement("Query", "{}[accn]".format(acc))
 
     def rule_url(self, acc):
-        return etree.Entity("lo.pacc"), "/vis/"
+        return etree.Entity("lo.pacc"), "/"
 
     def database(self):
         return "Protein"
@@ -170,10 +170,19 @@ class TaxonomyResource(Resource):
         return "taxonomy"
 
     def base_url(self):
-        return "https://omabrowser.org/cgi-bin/gateway.pl/"
+        return "https://omabrowser.org/oma/genome/"
 
     def rule_url(self, acc):
-        return ("?f=DisplayOS&p1=" + next(iter(acc.values())),)
+        return (next(iter(acc.values())) + "/info/",)
+
+
+class AncestralTaxonomyResource(TaxonomyResource):
+    def base_url(self):
+        return "https://omabrowser.org/oma/ancestralgenome/"
+
+    @classmethod
+    def set_link_offset(cls, off):
+        cls.link_id = off
 
 
 class LinkoutBuffer(object):
@@ -309,11 +318,19 @@ def prepare_linkout_files(outdir="/tmp", infile="../pyomabrowser/OmaServer.h5"):
     protein_buffer.flush()
     genes_buffer.flush()
 
-    with open(os.path.join(outdir, "resource_taxonomy.xml"), "wb") as fh:
+    with open(os.path.join(outdir, "resource_taxonomy_00.xml"), "wb") as fh:
         taxs = TaxonomyResource()
         for row in db.id_mapper["OMA"].genome_table:
             taxs.add_link({str(row["NCBITaxonId"]): row["UniProtSpeciesCode"].decode()})
         taxs.write(fh)
+    # add Ancestral genomes links
+    with open(os.path.join(outdir, "resource_taxonomy_01.xml"), "wb") as fh:
+        anctaxs = AncestralTaxonomyResource()
+        anctaxs.set_link_offset(taxs.link_id)
+        for row in db.tax.tax_table:
+            if row["Name"] in db.tax.all_hog_levels:
+                anctaxs.add_link({str(row["NCBITaxonId"]): str(row["NCBITaxonId"])})
+        anctaxs.write(fh)
 
 
 def copy_to_ncbi(dir, password, host="ftp-private.ncbi.nlm.nih.gov", user="omabrow"):

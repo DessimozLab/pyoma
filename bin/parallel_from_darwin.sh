@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --account=cdessim2_oma
-#SBATCH --array=1-25
-#SBATCH --partition=ax-normal
+#SBATCH --array=1-40
+#SBATCH --partition=axiom
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -15,7 +15,7 @@
 module load oma-conv
 
 
-NProc=${1:-25}
+NProc=${1:-40}
 doVPS="${2:-false}"
 overwrite="${3:-true}"
 echo "Running with $NProc procs, doVPS=$doVPS"
@@ -43,23 +43,21 @@ darwin -E -q << EOF
         if IsMyJob(pInf, g) then
             outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/prots/'.g.'.json';
             if $overwrite or length(FileStat(outfn))=0 then
-                GetProteinsForGenome(g); 
+                GetProteinsForGenome(g);
             fi:
-            
+
             outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/cps/'.g.'.json';
             if $overwrite or length(FileStat(outfn))=0 then
-                GetSameSpeciesRelations(g); 
+                GetSameSpeciesRelations(g);
             fi:
-            
-            if $doVPS=true then 
+
+            if $doVPS=true then
                 outfn := getenv('DARWIN_NETWORK_SCRATCH_PATH').'/pyoma/vps/'.g.'.json';
                 if $overwrite or length(FileStat(outfn))=0 then
-                     GetVPsForGenome(g); 
+                     GetVPsForGenome(g);
                 fi:
             fi:
         fi:
     od:
     done
 EOF
-
-

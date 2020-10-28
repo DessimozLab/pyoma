@@ -1,4 +1,4 @@
-__author__ = 'adriaal'
+__author__ = "adriaal"
 
 
 class StdDiff(object):

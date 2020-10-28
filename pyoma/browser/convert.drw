@@ -18,25 +18,25 @@ SpeciesTreeR := proc( l, lev, parent )
 #    print('',l);
 #    lprint(lev,parent, length(l), min( seq(length(r[1]), r=l )));
     if length(l)=0 then error('null tree')
-    elif length(l)=1 then 
+    elif length(l)=1 then
         tax := parse(GS[l[1,2],TAXONID]);
         _parents := append(_parents, [tax, parent, GS[l[1,2],'SCINAME']]);
         #Leaf(l[1,2],length(l[1,1])+1)
     elif lev > min( seq(length(r[1]), r=l )) then
         tax := parse(GS[l[1,2], TAXONID]);
         if tax<>parent then
-            _parents := append(_parents, 
+            _parents := append(_parents,
                 [tax, parent, TaxonomyEntry(tax)['SciName']]);
         else
             warning('tax '.string(tax).' is already recorded.');
         fi:
         procname(l[2..-1], lev, parent);
         #Tree( Leaf(l[1,2],length(l[1,1])+1), lev, procname( l[2..-1], lev ))
-    else 
+    else
         card := { seq( r[1,lev], r=l ) };
         tax := getTaxid(l[1,1,lev]);
         _parents := append(_parents, [tax, parent, l[1,1,lev]]);
-        if length(card)=1 then 
+        if length(card)=1 then
             return( procname(l, lev+1, tax) );
         fi;
         for hi from 2 while l[1,1,lev] = l[hi,1,lev] do od;
@@ -58,18 +58,18 @@ end:
 GetGenomeData := proc()
     global _parents, _next_new_taxid;
     gs := [];
-    for gNr to NS do 
+    for gNr to NS do
         g := genomes[gNr];
-        gs := append(gs, [parse(GS[g,TAXONID]), g, GS[g,TotEntries], 
+        gs := append(gs, [parse(GS[g,TAXONID]), g, GS[g,TotEntries],
             GS[g,TotAA], Goff[gNr],
             GS[g,SCINAME], GS[g,COMMONNAME], GS[g, SYNNAME],
             GS[g,DBRELEASE], GS[g,URL], GS[g,SOURCE], GS[g,DATE], SubGenome[g]<>0]);
     od:
-    
+
     _parents := []: _next_new_taxid := -1:
     linData := sort([seq([GS[g,Lineage], g], g=genomes)]):
     SpeciesTreeR(linData, 1, 0);
-    
+
     tab := table():
     tab['GS'] := gs:
     tab['Tax'] := _parents:
@@ -97,11 +97,13 @@ GetVPsForGenome := proc(g)
     ReadDb(ddir.'/ServerVPs.db');
     gNr := SearchArray(g,genomes);
     vps := [seq(table(), NS)];
+    nr_orthologs := CreateArray(1..NS):
     for i from Goff[gNr]+1 to Goff[gNr+1] do
         for vp in parse(SearchTag('VP',Entry(i))) do
             gNr2 := SearchOrderedArray(vp-1, Goff);
             vps[gNr2, [i-Goff[gNr], vp-Goff[gNr2]]] := [i,vp,'n/a', -1, -1, -1];
             #vptab := append(vptab, [i, vp, 'n/a', -1, -1, -1])
+            nr_orthologs[gNr2] := nr_orthologs[gNr2] + 1;
         od:
     od:
     for gNr2 to NS do
@@ -115,7 +117,11 @@ GetVPsForGenome := proc(g)
             t := g1; g1 := g2; g2 := t:
             __reverse := true;
         fi:
-        ReadProgram(aadir.'/'.g1.'/'.g2);
+        err := traperror(ReadProgram(aadir.'/'.g1.'/'.g2));
+        if err=lasterror then
+            warning('could not load '.aadir.'/'.g1.'/'.g2);
+            if nr_orthologs[gNr2]>0 then  exit(1); fi:
+        fi:
     od:
     vptab := []:
     for gNr2 to NS do for key in Indices(vps[gNr2]) do
@@ -166,28 +172,28 @@ GetProteinsForGenome := proc(g)
     fi:
     sp := Splicings[g]:
     alt := CreateArray(1..GS[g,TotEntries]):
-    if sp<>0 then 
+    if sp<>0 then
         VPsDB := ReadDb(ddir.'/ServerVPs.db');
         hasO := [seq(evalb(SearchTag('VP',Entry(Goff[gNr]+i))<>'[]'),
                      i=1..GS[g,TotEntries])]:
-        for i to GS[g,TotEntries] do 
-            if alt[i]=0 and length(sp[i])>0 then 
+        for i to GS[g,TotEntries] do
+            if alt[i]=0 and length(sp[i])>0 then
                 vari := [op({op(sp[i]),i})];
                 varHasO := [seq(hasO[i],i=vari)];
                 main := SearchAllArray(true, varHasO);
                 if length(main)=0 then
                     main := vari[1]+Goff[gNr];
                 else
-                    if length(main)>1 then 
+                    if length(main)>1 then
                         warning('more than one main variant for '.g.string(vari));
                     fi:
                     main := vari[main[1]]+Goff[gNr];
                 fi;
-                for k to length(vari) do 
+                for k to length(vari) do
                     alt[vari[k]] := main;
                 od:
             fi:
-        od: 
+        od:
     fi:
 
     tab['alts'] := alt;
@@ -208,10 +214,21 @@ GetGroupData := proc()
     StoreResults(json(tab));
 end:
 
+GetRootHOGData := proc()
+    global KeywordT, GroupIDs:
+    KeywordT := []:
+    ReadProgram(ddir.'/RootHOG_Keywords.drw');
+    if KeywordT = [] then
+        error('cannot load RootHOGData');
+    fi:
+    tab := table():
+    tab['Keywords'] := KeywordT:
+    StoreResults(json(tab));
+end:
+
 
 StoreResults := proc(res)
     OpenWriting(outfn);
     prints(res);
     OpenWriting(previous);
 end:
-

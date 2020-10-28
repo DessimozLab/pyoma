@@ -4,7 +4,7 @@ numexpr>=2.4
 tables>=3.5.1,!=3.6.0
 cython
 PySAIS
-biopython
+biopython<1.78
 tqdm
 pandas>=0.22
 matplotlib
@@ -13,6 +13,8 @@ scikit-fuzzy
 lark-parser
 pyopa>=0.8
 fuzzyset>=0.0.17
+datasketch
+pyham
 
 -e git+ssh://gitolite@lab.dessimoz.org:2222/family-analyzer@master#egg=familyanalyzer
 -e .

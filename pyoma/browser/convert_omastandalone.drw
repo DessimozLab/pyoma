@@ -44,7 +44,9 @@ SpeciesTreeR := proc( l, lev, parent )
     if length(l)=0 then error('null tree')
     elif length(l)=1 then
         tax := parse(GS[l[1,2],TAXONID]);
-        _parents := append(_parents, [tax, parent, GS[l[1,2],'SCINAME']]);
+        sciname := GS[l[1,2],'SCINAME'];
+        if sciname = '' then sciname := l[1,2] fi:
+        _parents := append(_parents, [tax, parent, sciname]);
         #Leaf(l[1,2],length(l[1,1])+1)
     elif lev > min( seq(length(r[1]), r=l )) then
         tax := parse(GS[l[1,2], TAXONID]);
@@ -185,12 +187,12 @@ TransformDataToCache := proc(cache_dir)
 
     milestone_file := root_dir.'/Cache/ortholog_milestone.drw.gz':
     milestone_sha2 := sha2(ReadRawFile(milestone_file)):
-    if FileExists(cache_dir.'/transform_done') and 
-       trim(ReadRawFile(cache_dir.'/transform_done'))=milestone_sha2 then 
+    if FileExists(cache_dir.'/transform_done') and
+       trim(ReadRawFile(cache_dir.'/transform_done'))=milestone_sha2 then
         StoreResults(json('success')):
         return();
     fi:
-    
+
     ReadProgram(root_dir.'/Cache/ortholog_milestone.drw.gz');
     Prot2Grp := CreateArray(1..Goff[NS+1]):
     for og to length(Ort) do for gNr to NS do if Ort[og,gNr]<>0 then
@@ -217,7 +219,7 @@ TransformDataToCache := proc(cache_dir)
     OpenWriting(previous):
 
     StoreResults(json('success'));
-    
+
 end:
 
 NumberOfAlignments := proc(name1:string,name2:string)
@@ -372,4 +374,3 @@ StoreResults := proc(res, fname)
     prints(res);
     OpenWriting(previous);
 end:
-

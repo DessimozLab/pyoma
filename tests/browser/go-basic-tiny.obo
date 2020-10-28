@@ -153,4 +153,3 @@ namespace: external
 xref: RO:0002211
 is_transitive: true
 transitive_over: part_of ! part of
-

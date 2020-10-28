@@ -6,13 +6,26 @@ import time
 
 
 def format_sciname(sci, short=False):
-    p = set([sci.find(x) for x in ['(', 'serogroup', 'serotype', 'serovar',
-                                   'biotype', 'subsp', 'pv.', 'bv.']])
-    if sci.startswith('Escherichia coli'):
-        p.add(sci.find('O'))
+    p = set(
+        [
+            sci.find(x)
+            for x in [
+                "(",
+                "serogroup",
+                "serotype",
+                "serovar",
+                "biotype",
+                "subsp",
+                "pv.",
+                "bv.",
+            ]
+        ]
+    )
+    if sci.startswith("Escherichia coli"):
+        p.add(sci.find("O"))
     p.discard(-1)
     p = min(p) if len(p) > 0 else len(sci)
-    return {'species': sci[0:p], 'strain': sci[p:]}
+    return {"species": sci[0:p], "strain": sci[p:]}
 
 
 class LazyProperty(object):
@@ -40,9 +53,10 @@ class LazyProperty(object):
 
 
 class KeyWrapper(object):
-    '''
-        Enables the use of functions, e.g. bisect, with a key function.
-    '''
+    """
+    Enables the use of functions, e.g. bisect, with a key function.
+    """
+
     def __init__(self, it, key):
         self.it = it
         self.key = key
@@ -66,6 +80,7 @@ class Singleton(type):
             def __init__(self):
                 pass  #This part is executed only once
     """
+
     def __init__(self, *args, **kwargs):
         self.__instance = None
         super(Singleton, self).__init__(*args, **kwargs)
@@ -86,15 +101,18 @@ class ProteinEntry(object):
     property or method is accessed. Properties that need to access
     additional data or loaded lazily and are cached in the object
     (but not kept after deletion of object)."""
+
     def __init__(self, db, e):
         self._stored_entry = e
         self._db = db
 
     @LazyProperty
     def _entry(self):
-        return (self._db.entry_by_entry_nr(self._stored_entry)
-                if isinstance(self._stored_entry, (int, numpy.integer))
-                else self._stored_entry)
+        return (
+            self._db.entry_by_entry_nr(self._stored_entry)
+            if isinstance(self._stored_entry, (int, numpy.integer))
+            else self._stored_entry
+        )
 
     @classmethod
     def from_entry_nr(cls, db, eNr):
@@ -103,56 +121,60 @@ class ProteinEntry(object):
 
     @property
     def entry_nr(self):
-        return int(self._entry['EntryNr'])
+        return int(self._entry["EntryNr"])
 
     @property
     def locus_start(self):
-        return int(self._entry['LocusStart'])
+        return int(self._entry["LocusStart"])
 
     @property
     def locus_end(self):
-        return int(self._entry['LocusEnd'])
+        return int(self._entry["LocusEnd"])
 
     @property
     def strand(self):
-        return int(self._entry['LocusStrand'])
+        return int(self._entry["LocusStrand"])
 
     @LazyProperty
     def exons(self):
         return ExonStructure.from_entry_nr(self._db, self.entry_nr)
 
     @property
+    def nr_exons(self):
+        return int(len(self.exons))
+
+    @property
     def oma_group(self):
-        return int(self._entry['OmaGroup'])
+        return int(self._entry["OmaGroup"])
 
     @property
     def oma_hog(self):
-        return self._entry['OmaHOG'].decode()
+        return self._entry["OmaHOG"].decode()
 
     @property
     def chromosome(self):
-        return self._entry['Chromosome'].decode()
+        return self._entry["Chromosome"].decode()
 
     @property
     def canonicalid(self):
-        return self._entry['CanonicalId'].decode()
+        return self._entry["CanonicalId"].decode()
 
     @LazyProperty
     def xrefs(self):
-        return self._db.id_mapper['Xref'].map_entry_nr(self._entry['EntryNr'])
+        return self._db.id_mapper["Xref"].map_entry_nr(self._entry["EntryNr"])
 
     @property
     def sequence_md5(self):
-        return self._entry['MD5ProteinHash'].decode()
+        return self._entry["MD5ProteinHash"].decode()
 
     @LazyProperty
     def genome(self):
-        g = self._db.id_mapper['OMA'].genome_of_entry_nr(self._entry['EntryNr'])
+        g = self._db.id_mapper["OMA"].genome_of_entry_nr(self._entry["EntryNr"])
         return Genome(self._db, g)
 
     @LazyProperty
     def omaid(self):
-        return self._db.id_mapper['OMA'].map_entry_nr(self._entry['EntryNr'])
+        return self._db.id_mapper["OMA"].map_entry_nr(self._entry["EntryNr"])
 
     @LazyProperty
     def cdna(self):
@@ -161,9 +183,9 @@ class ProteinEntry(object):
     @property
     def gc_content(self):
         cdna = self.cdna
-        cnts = list(map(cdna.count, 'GCAT'))
+        cnts = list(map(cdna.count, "GCAT"))
         try:
-            return sum(cnts[0:2])/sum(cnts)
+            return sum(cnts[0:2]) / sum(cnts)
         except ZeroDivisionError:
             return 0
 
@@ -173,7 +195,7 @@ class ProteinEntry(object):
 
     @property
     def sequence_length(self):
-        return int(self._entry['SeqBufferLength']) - 1
+        return int(self._entry["SeqBufferLength"]) - 1
 
     @LazyProperty
     def description(self):
@@ -185,11 +207,12 @@ class ProteinEntry(object):
 
     @property
     def subgenome(self):
-        return self._entry['SubGenome'].decode()
+        return self._entry["SubGenome"].decode()
 
     @LazyProperty
     def hog_family_nr(self):
         from .db import Singleton as HOGSingleton
+
         try:
             fam = self._db.hog_family(self._entry)
         except HOGSingleton:
@@ -198,20 +221,24 @@ class ProteinEntry(object):
 
     @property
     def is_main_isoform(self):
-        return (self._entry['AltSpliceVariant'] == 0 or
-                self._entry['AltSpliceVariant'] == self._entry['EntryNr'])
+        return bool(
+            self._entry["AltSpliceVariant"] == 0
+            or self._entry["AltSpliceVariant"] == self._entry["EntryNr"]
+        )
 
     @LazyProperty
     def alternative_isoforms(self):
-        return [ProteinEntry(self._db, e)
-                for e in self._db.get_splicing_variants(self._entry)
-                if e['EntryNr'] != self.entry_nr]
+        return [
+            ProteinEntry(self._db, e)
+            for e in self._db.get_splicing_variants(self._entry)
+            if e["EntryNr"] != self.entry_nr
+        ]
 
     def get_main_isoform(self):
         if self.is_main_isoform:
             return self
         else:
-            return ProteinEntry(self._db, self._entry['AltSpliceVariant'])
+            return ProteinEntry(self._db, self._entry["AltSpliceVariant"])
 
     def __repr__(self):
         return "<{}({}, {})>".format(self.__class__.__name__, self.entry_nr, self.omaid)
@@ -227,52 +254,52 @@ class Genome(object):
 
     @property
     def ncbi_taxon_id(self):
-        return int(self._genome['NCBITaxonId'])
+        return int(self._genome["NCBITaxonId"])
 
     @property
     def uniprot_species_code(self):
-        return self._genome['UniProtSpeciesCode'].decode()
+        return self._genome["UniProtSpeciesCode"].decode()
 
     @property
     def sciname(self):
-        return self._genome['SciName'].decode()
+        return self._genome["SciName"].decode()
 
     @property
     def common_name(self):
         try:
-            return self._genome['CommonName'].decode()
+            return self._genome["CommonName"].decode()
         except ValueError:
             return ""
 
     @property
     def synonym_name(self):
-        return self._genome['SynName'].decode()
+        return self._genome["SynName"].decode()
 
     @LazyProperty
     def species_and_strain_as_dict(self):
         return format_sciname(self.sciname)
 
     def species(self):
-        return self.species_and_strain_as_dict['species']
+        return self.species_and_strain_as_dict["species"]
 
     def strain(self):
-        return self.species_and_strain_as_dict['strain']
+        return self.species_and_strain_as_dict["strain"]
 
     @property
     def url(self):
-        return self._genome['Url'].decode()
+        return self._genome["Url"].decode()
 
     @property
     def source(self):
-        return self._genome['Source'].decode()
+        return self._genome["Source"].decode()
 
     @property
     def release(self):
-        return self._genome['Release'].decode()
+        return self._genome["Release"].decode()
 
     @property
     def last_modfied_timestamp(self):
-        return self._genome['Date']
+        return self._genome["Date"]
 
     @property
     def last_modified(self):
@@ -282,42 +309,50 @@ class Genome(object):
         if self._db.db_schema_version >= (3, 2):
             return time.strftime(fmt, time.localtime(self.last_modfied_timestamp))
         else:
-            return 'n/a'
+            return "n/a"
 
     @property
     def nr_entries(self):
-        return int(self._genome['TotEntries'])
+        return int(self._genome["TotEntries"])
 
     @property
     def entry_nr_offset(self):
-        return int(self._genome['EntryOff'])
+        return int(self._genome["EntryOff"])
 
     @LazyProperty
     def kingdom(self):
         # TODO: store directly in db
-        return self._db.tax.get_parent_taxa(self._genome['NCBITaxonId'])[-1]['Name'].decode()
+        return self._db.tax.get_parent_taxa(self._genome["NCBITaxonId"])[-1][
+            "Name"
+        ].decode()
 
     @property
     def is_polyploid(self):
-        return self._genome['IsPolyploid']
+        return self._genome["IsPolyploid"]
 
     @LazyProperty
     def lineage(self):
-        return [lev['Name'].decode() for lev in self._db.tax.get_parent_taxa(
-            self._genome['NCBITaxonId'])]
+        return [
+            lev["Name"].decode()
+            for lev in self._db.tax.get_parent_taxa(self._genome["NCBITaxonId"])
+        ]
 
     @LazyProperty
     def chromosomes(self):
         chrs = collections.defaultdict(list)
-        entry_tab = self._db.get_hdf5_handle().get_node('/Protein/Entries')
-        for row in entry_tab.where('(EntryNr > {}) & (EntryNr <= {})'
-                .format(self.entry_nr_offset, self.entry_nr_offset+self.nr_entries)):
-            chrs[row['Chromosome'].decode()].append(row['EntryNr'])
+        entry_tab = self._db.get_hdf5_handle().get_node("/Protein/Entries")
+        for row in entry_tab.where(
+            "(EntryNr > {}) & (EntryNr <= {})".format(
+                self.entry_nr_offset, self.entry_nr_offset + self.nr_entries
+            )
+        ):
+            chrs[row["Chromosome"].decode()].append(row["EntryNr"])
         return chrs
 
     def __repr__(self):
-        return "<{}({}, {})>".format(self.__class__.__name__, self.uniprot_species_code,
-                                     self.ncbi_taxon_id)
+        return "<{}({}, {})>".format(
+            self.__class__.__name__, self.uniprot_species_code, self.ncbi_taxon_id
+        )
 
     def __len__(self):
         return self.nr_entries
@@ -325,42 +360,117 @@ class Genome(object):
 
 class OmaGroup(object):
     def __init__(self, db, og):
-        self._group = og
+        self._stored_group = og
         self._db = db
+
+    @LazyProperty
+    def _group(self):
+        if isinstance(self._stored_group, dict) and "group_nr" in self._stored_group:
+            return self._stored_group
+        else:
+            return self._db.oma_group_metadata(
+                self._db.resolve_oma_group(self._stored_group)
+            )
 
     @property
     def group_nbr(self):
-        return int(self._group['group_nr'])
+        return int(self._group["group_nr"])
 
     @property
     def fingerprint(self):
-        return self._group['fingerprint']
+        return self._group["fingerprint"]
+
+    @property
+    def keyword(self):
+        return self._group["keywords"]
+
+    @LazyProperty
+    def members(self):
+        return [
+            ProteinEntry(self._db, pe)
+            for pe in self._db.oma_group_members(self.group_nbr)
+        ]
+
+    @property
+    def nr_member_genes(self):
+        size = self._group["size"]
+        if size < 0:
+            # fallback in case it is not yet stored in db
+            size = len(self.members)
+        return size
+
+    def __len__(self):
+        return self.nr_member_genes
+
+    def __repr__(self):
+        return "<{}({}, {})>".format(
+            self.__class__.__name__, self.group_nbr, self.fingerprint
+        )
 
 
 class HOG(object):
-    def __init__(self, db, hog):
-        self._hog = hog
+    def __init__(self, db, hog, level=None):
+        self._stored_hog = hog
+        self._stored_level = level
         self._db = db
+
+    @LazyProperty
+    def _hog(self):
+        if isinstance(self._stored_hog, (int, numpy.integer)):
+            # load hog at root
+            return self._db.get_hog(
+                self._db.format_hogid(self._stored_hog), level=self._stored_level
+            )
+        elif isinstance(self._stored_hog, (str, bytes)):
+            # load hog using ID
+            return self._db.get_hog(self._stored_hog, self._stored_level)
+        else:
+            return self._stored_hog
 
     @property
     def fam(self):
-        return int(self._hog['fam'])
+        return int(self._hog["Fam"])
 
     @property
     def hog_id(self):
-        return str(self._hog['hog_id'])
+        return self._hog["ID"].decode()
 
     @property
     def level(self):
-        return str(self._hog['level'])
+        return self._hog["Level"].decode()
 
     @property
-    def NrMemberGenes(self):
-        return int(self._hog['NrMemberGenes'])
+    def nr_member_genes(self):
+        return int(self._hog["NrMemberGenes"])
 
     @property
-    def IsRoot(self):
-        return self._hog['IsRoot']
+    def is_root(self):
+        return bool(self._hog["IsRoot"])
+
+    @property
+    def completeness_score(self):
+        return float(self._hog["CompletenessScore"])
+
+    def __len__(self):
+        return self.nr_member_genes
+
+    def __repr__(self):
+        return "<{}({}, {})>".format(self.__class__.__name__, self.hog_id, self.level)
+
+    @LazyProperty
+    def keyword(self):
+        return self._db.get_roothog_keywords(self.fam)
+
+    @LazyProperty
+    def members(self):
+        return [
+            ProteinEntry(self._db, pe)
+            for pe in self._db.member_of_hog_id(self.hog_id, level=self.level)
+        ]
+
+    @LazyProperty
+    def parent_hogs(self):
+        return self._db.get_parent_hogs(self.hog_id, self.level)
 
 
 class PairwiseRelation(object):
@@ -370,39 +480,45 @@ class PairwiseRelation(object):
 
     @property
     def distance(self):
-        return float(self._relation['Distance'])
+        return float(self._relation["Distance"])
 
     @property
     def score(self):
-        return float(self._relation['Score'])
+        return float(self._relation["Score"])
 
     @property
     def alignment_overlap(self):
-        return float(self._relation['AlignmentOverlap'])
+        return float(self._relation["AlignmentOverlap"])
 
     @property
     def synteny_conservation_local(self):
-        return float(self._relation['SyntenyConservationLocal'])
+        return float(self._relation["SyntenyConservationLocal"])
 
     @property
     def confidence(self):
-        return float(self._relation['Confidence'])
+        return float(self._relation["Confidence"])
 
     @LazyProperty
     def rel_type(self):
-        if not isinstance(self._relation['RelType'], str):
-            type_map = self._db._get_pw_tab(self._relation['EntryNr1'], 'VPairs').get_enum("RelType")
-            return type_map(self._relation['RelType'])
+        if not isinstance(self._relation["RelType"], str):
+            type_map = self._db._get_pw_tab(
+                self._relation["EntryNr1"], "VPairs"
+            ).get_enum("RelType")
+            return type_map(self._relation["RelType"])
         else:
-            return self._relation['RelType']
+            return self._relation["RelType"]
 
     @LazyProperty
     def entry_1(self):
-        return ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation['EntryNr1']))
+        return ProteinEntry(
+            self._db, self._db.entry_by_entry_nr(self._relation["EntryNr1"])
+        )
 
     @LazyProperty
     def entry_2(self):
-        return ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation['EntryNr2']))
+        return ProteinEntry(
+            self._db, self._db.entry_by_entry_nr(self._relation["EntryNr2"])
+        )
 
 
 class GeneOntologyAnnotation(object):
@@ -412,23 +528,24 @@ class GeneOntologyAnnotation(object):
 
     @LazyProperty
     def term(self):
-        return self.db.gene_ontology.term_by_id(self.anno['TermNr'])
+        return self.db.gene_ontology.term_by_id(self.anno["TermNr"])
 
     @property
     def evidence(self):
-        return self.anno['Evidence'].decode()
+        return self.anno["Evidence"].decode()
 
     @property
     def reference(self):
-        return self.anno['Reference'].decode()
+        return self.anno["Reference"].decode()
 
     @property
     def entry_nr(self):
-        return int(self.anno['EntryNr'])
+        return int(self.anno["EntryNr"])
 
     @LazyProperty
     def aspect(self):
         from .geneontology import GOAspect
+
         return GOAspect.to_string(self.term.aspect)
 
 
@@ -439,19 +556,21 @@ class ExonStructure(object):
 
     @LazyProperty
     def _exons(self):
-        return (self._db.get_exons(self._stored)
-                if isinstance(self._stored, int)
-                else self._stored)
+        return (
+            self._db.get_exons(self._stored)
+            if isinstance(self._stored, int)
+            else self._stored
+        )
 
     @classmethod
     def from_entry_nr(cls, db, eNr):
         return cls(db, int(eNr))
 
     def _iter_exons(self):
-        if len(self._exons)>0 and self._exons['Strand'][0] < 0:
-            self._exons[::-1].sort(order='Start')
+        if len(self._exons) > 0 and self._exons["Strand"][0] < 0:
+            self._exons[::-1].sort(order="Start")
         else:
-            self._exons.sort(order='Start')
+            self._exons.sort(order="Start")
         for exon in self._exons:
             yield Exon(exon)
 
@@ -459,9 +578,9 @@ class ExonStructure(object):
         return len(self._exons)
 
     def __repr__(self):
-        return "<{}(entry_nr={}, nr_exons={})>"\
-            .format(self.__class__.__name__,
-                    self._exons[0]['EntryNr'], len(self))
+        return "<{}(entry_nr={}, nr_exons={})>".format(
+            self.__class__.__name__, self._exons[0]["EntryNr"], len(self)
+        )
 
     def __str__(self):
         exs = list(str(e) for e in self._iter_exons())
@@ -472,14 +591,32 @@ class ExonStructure(object):
         else:
             return "n/a"
 
+    def as_list_of_dict(self):
+        return [
+            {"start": e.start, "end": e.end, "strand": e.strand}
+            for e in self._iter_exons()
+        ]
+
 
 class Exon(object):
     def __init__(self, exon):
         self.exon = exon
 
+    @property
+    def start(self):
+        return int(self.exon["Start"])
+
+    @property
+    def end(self):
+        return int(self.exon["End"])
+
+    @property
+    def strand(self):
+        return "+" if self.exon["Strand"] > 0 else "-"
+
     def __str__(self):
-        if self.exon['Strand'] < 0:
+        if self.exon["Strand"] < 0:
             template = "complement({}..{})"
         else:
             template = "{}..{}"
-        return template.format(self.exon['Start'], self.exon['End'])
+        return template.format(self.exon["Start"], self.exon["End"])

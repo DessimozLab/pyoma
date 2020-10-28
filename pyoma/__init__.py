@@ -1,5 +1,5 @@
-__author__ = 'Adrian Altenhoff'
-__version__ = "0.8.0"
+__author__ = "Adrian Altenhoff"
+__version__ = "0.9.0"
 
 
 def version():

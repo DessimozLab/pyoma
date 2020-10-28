@@ -12,22 +12,22 @@ logger = logging.getLogger(__name__)
 and create a numpy recarray out of it. """
 
 
-Exon = collections.namedtuple('Exon', ['start', 'end', 'strand'])
+Exon = collections.namedtuple("Exon", ["start", "end", "strand"])
 
-grammar = '''?locus : join | complement | complement_join | location
+grammar = """?locus : join | complement | complement_join | location
              join  : "join" "(" (complement | location ) ("," (complement | location ))+ ")"
              complement : "complement(" location ")"
              complement_join : "complement" "(" "join" "(" location ("," location)+ ")" ")"
-             location : pos [ _RNG pos ] | "FromElsewhere" "('" _SEQID "'," pos [ _RNG pos ] ")" 
+             location : pos [ _RNG pos ] | "FromElsewhere" "('" _SEQID "'," pos [ _RNG pos ] ")"
              ?pos : num | "Before" "(" num ")" | "After" "(" num ")"
              ?num : /[0-9]+/             -> number
              _SEQID: /[A-Za-z0-9._-]+/
              _RNG: ".."
-             
-             
+
+
              %import common.NUMBER
              %import common.WS
-             %ignore WS'''
+             %ignore WS"""
 
 
 class LocusTransformer(Transformer):
@@ -38,7 +38,7 @@ class LocusTransformer(Transformer):
         return Exon(value[0], value[1] if len(value) > 1 else value[0], 1)
 
     def complement(self, value):
-        rev = [e._replace(strand=-1*e.strand) for e in value]
+        rev = [e._replace(strand=-1 * e.strand) for e in value]
         if len(rev) == 1:
             return rev[0]
         else:
@@ -53,7 +53,7 @@ class LocusTransformer(Transformer):
 
 class LocusParser(object):
     def __init__(self):
-        self.parser = Lark(grammar, start='locus')
+        self.parser = Lark(grammar, start="locus")
         self.locus_transformer = LocusTransformer()
         self.dtype = dtype_from_descr(LocusTable)
 
@@ -65,6 +65,6 @@ class LocusParser(object):
         data = self.locus_transformer.transform(tree)
         nr_exons = 1 if isinstance(data, Exon) else len(data)
         locus_data = numpy.empty(nr_exons, dtype=self.dtype)
-        locus_data[['Start', 'End', 'Strand']] = data
-        locus_data['EntryNr'] = entry_nr
+        locus_data[["Start", "End", "Strand"]] = data
+        locus_data["EntryNr"] = entry_nr
         return locus_data

@@ -6,6 +6,7 @@ import math
 import re
 import numpy
 
+
 """
 IMPORTANT NOTE:
 ---------------
@@ -27,8 +28,8 @@ annotations.
 
 NUM_ONT = 3
 NUM_GO_ID_DIGITS = 7
-UP_RELS = frozenset(['is_a', 'part_of'])
-_REV_RELS = {'is_a': 'can_be', 'part_of': 'has_part'}
+UP_RELS = frozenset(["is_a", "part_of"])
+_REV_RELS = {"is_a": "can_be", "part_of": "has_part"}
 
 
 def reverse_name_of_rels(rels):
@@ -41,7 +42,7 @@ def validate_go_id(term):
         return int(term)
 
     term = term.strip()
-    if term.startswith('GO:'):
+    if term.startswith("GO:"):
         digits = term[3:]
     else:
         digits = term
@@ -52,7 +53,7 @@ def validate_go_id(term):
 
 class GOAspect(object):
     aspects = dict(molecular_function=0, biological_process=1, cellular_component=2)
-    aspect2char = {0: 'F', 1: 'P', 2: 'C'}
+    aspect2char = {0: "F", 1: "P", 2: "C"}
 
     @classmethod
     def from_string(cls, aspect):
@@ -63,7 +64,7 @@ class GOAspect(object):
         for o, i in cls.aspects.items():
             if i == aspectnr:
                 return o
-        raise KeyError('aspect number not found: ' + str(aspectnr))
+        raise KeyError("aspect number not found: " + str(aspectnr))
 
     @classmethod
     def to_char(cls, aspectnr):
@@ -78,19 +79,19 @@ class GOterm(object):
     pass it as a factory on 'Term'. """
 
     def __init__(self, stanza):
-        self.id = validate_go_id(stanza['id'][0])
-        self.name = ' '.join(stanza['name'])
-        self.definition = ' '.join(stanza['def'])
-        self.aspect = GOAspect.from_string(' '.join(stanza['namespace']))
-        self.is_a = [validate_go_id(parent) for parent in stanza['is_a']]
-        for rel in stanza['relationship']:
+        self.id = validate_go_id(stanza["id"][0])
+        self.name = " ".join(stanza["name"])
+        self.definition = " ".join(stanza["def"])
+        self.aspect = GOAspect.from_string(" ".join(stanza["namespace"]))
+        self.is_a = [validate_go_id(parent) for parent in stanza["is_a"]]
+        for rel in stanza["relationship"]:
             reltype, partner = rel.strip().split()
             if not reltype in self.__dict__.keys():
                 self.__dict__[reltype] = list()
             self.__dict__[reltype].append(validate_go_id(partner))
 
     def replace_parentnames_by_refs(self, ont):
-        for rel in [('is_a', 'can_be'), ('part_of', 'has_part')]:
+        for rel in [("is_a", "can_be"), ("part_of", "has_part")]:
             if rel[0] in self.__dict__.keys():
                 for i, parent_id in enumerate(self.__dict__[rel[0]]):
                     parent_obj = ont[parent_id]
@@ -127,11 +128,12 @@ class AbstractParser(object):
     def __init__(self, fp):
         self.close_fp = False
         if isinstance(fp, str):
-            if fp.endswith('.gz'):
+            if fp.endswith(".gz"):
                 from gzip import GzipFile
-                fp = GzipFile(fp, 'rb')
+
+                fp = GzipFile(fp, "rb")
             else:
-                fp = open(fp, 'r')
+                fp = open(fp, "r")
             self.close_fp = True
         self.fp = fp
         self._read_headers()
@@ -150,6 +152,7 @@ class OntologyParser(AbstractParser):
     Any ontology in the OBO format can be parsed with this object. The
     stanzas are converted to objects using the factories passed in the
     initializer."""
+
     def __init__(self, fp, factories=None):
         """creates an ontology parser
 
@@ -166,13 +169,13 @@ class OntologyParser(AbstractParser):
         self.stanza_name_re = re.compile(r"\[(?P<name>[^]]*)\]")
 
     def stanzas(self):
-        """iterates over the stanzas in the ontology yielding 
-        objects according to the factory parameter provided 
+        """iterates over the stanzas in the ontology yielding
+        objects according to the factory parameter provided
         in the constructor."""
         curStanza = None
         for line in self.fp:
             line = line.strip()
-            if not line or line[0] == '!':
+            if not line or line[0] == "!":
                 continue
 
             # check whether a new stanza starts
@@ -182,11 +185,11 @@ class OntologyParser(AbstractParser):
                 if obj is not None:
                     yield obj
                 curStanza = collections.defaultdict(list)
-                curStanza['_name'] = match.group("name")
+                curStanza["_name"] = match.group("name")
             elif curStanza is not None:
                 # it has to be value-pair line. add it to the stanza
                 match = self.tag_value_pair_re.match(line)
-                curStanza[match.group('tag')].append(match.group('value'))
+                curStanza[match.group("tag")].append(match.group("value"))
         obj = self._create_obj_from_stanza(curStanza)
         if obj is not None:
             yield obj
@@ -199,13 +202,14 @@ class OntologyParser(AbstractParser):
         res = None
         if stanza is not None:
             try:
-                factory = self.factories[stanza['_name']]
+                factory = self.factories[stanza["_name"]]
             except KeyError:
                 # no factory for this stanza type. ignore
                 pass
             else:
-                if ((not "is_obsolete" in stanza) or
-                        (not 'true' in stanza['is_obsolete'])):
+                if (not "is_obsolete" in stanza) or (
+                    not "true" in stanza["is_obsolete"]
+                ):
                     res = factory(stanza)
         return res
 
@@ -216,11 +220,12 @@ class OntologyParser(AbstractParser):
 class GeneOntology(object):
     """The GeneOntology object contains the whole ontology in an internal
     format and allows to traverse it efficiently."""
+
     def __init__(self, parser, rels=None):
         if rels is None:
             rels = UP_RELS
         if not isinstance(parser, OntologyParser):
-            raise Exception('requires an OntologyParser instance')
+            raise Exception("requires an OntologyParser instance")
         self.parser = parser
         self.up_rels = UP_RELS.intersection(rels)
         self.down_rels = reverse_name_of_rels(self.up_rels)
@@ -257,7 +262,7 @@ class GeneOntology(object):
             term = self.terms[validate_go_id(term_id)]
             return term
         except KeyError:
-            raise ValueError(str(term_id) + ' is an invalid GO term.')
+            raise ValueError(str(term_id) + " is an invalid GO term.")
 
     def get_superterms_incl_queryterm(self, term, max_steps=-1):
         """returns a set with all the superterms of a query term.
@@ -292,11 +297,11 @@ class GeneOntology(object):
 
 
 class FreqAwareGeneOntology(GeneOntology):
-    """GO hierarchy represents the Gene Ontology vocabulary. 
-    
-    It gets loaded from the xml file and, in conjunction with 
+    """GO hierarchy represents the Gene Ontology vocabulary.
+
+    It gets loaded from the xml file and, in conjunction with
     an annotation file (GOA) the relative frequencies per term get
-    estimated. this estimation respects the hierarchy of the 
+    estimated. this estimation respects the hierarchy of the
     vocabulary.
     Further, this class provides methods to traverse the hierarchy
     in an easy way."""
@@ -312,10 +317,11 @@ class FreqAwareGeneOntology(GeneOntology):
     def estimate_freqs(self, annotations):
         for anno in annotations:
             try:
-                self._update_counts(self.term_by_id(anno['TermNr']))
+                self._update_counts(self.term_by_id(anno["TermNr"]))
             except ValueError:
-                logging.info("invalid annotation term_id in freq estim:" +
-                             str(anno.term_id))
+                logging.info(
+                    "invalid annotation term_id in freq estim:" + str(anno.term_id)
+                )
 
     def _update_counts(self, term):
         for cur_term in self.get_superterms_incl_queryterm(term):
@@ -341,31 +347,46 @@ class FreqAwareGeneOntology(GeneOntology):
         term1 = self.ensure_term(term1)
         term2 = self.ensure_term(term2)
         if term1.aspect != term2.aspect:
-            # early abort, since the two terms will be by 
+            # early abort, since the two terms will be by
             # definition not similar
             sim = 0
         else:
             lca = self.last_common_ancestor(term1, term2)
-            sim = (2 * math.log(self.get_term_frequency(lca)) /
-                   (math.log(self.get_term_frequency(term1)) +
-                    math.log(self.get_term_frequency(term2))))
+            sim = (
+                2
+                * math.log(self.get_term_frequency(lca))
+                / (
+                    math.log(self.get_term_frequency(term1))
+                    + math.log(self.get_term_frequency(term2))
+                )
+            )
         return sim
 
 
 class AnnotationFilter(object):
-    EXP_CODES = frozenset(['EXP', 'IDA', 'IPI', 'IMP', 'IGI', 'IEP'])
-    TRUST_IEA_REFS = frozenset([
-        'GO_REF:0000002', 'GOA:interpro', 'GOA:interpro|GO_REF:0000002',  # InterPro
-        'GO_REF:0000003', 'GOA:spec', 'GOA:spec|GO_REF:0000003'  # EC number
-        'GO_REF:0000004', 'GOA:spkw', 'GOA:spkw|GO_REF:0000004',
-        'GO_REF:0000037', 'GO_REF:0000038'  # SwissProt Keywords
-        'GO_REF:0000023', 'GOA:spsl', 'GOA:spsl|GO_REF:0000023',
-        'GO_REF:0000039', 'GO_REF:0000040',  # UniProtKB Subcellular Location
-    ])
+    EXP_CODES = frozenset(["EXP", "IDA", "IPI", "IMP", "IGI", "IEP"])
+    TRUST_IEA_REFS = frozenset(
+        [
+            "GO_REF:0000002",
+            "GOA:interpro",
+            "GOA:interpro|GO_REF:0000002",  # InterPro
+            "GO_REF:0000003",
+            "GOA:spec",
+            "GOA:spec|GO_REF:0000003" "GO_REF:0000004",  # EC number
+            "GOA:spkw",
+            "GOA:spkw|GO_REF:0000004",
+            "GO_REF:0000037",
+            "GO_REF:0000038" "GO_REF:0000023",  # SwissProt Keywords
+            "GOA:spsl",
+            "GOA:spsl|GO_REF:0000023",
+            "GO_REF:0000039",
+            "GO_REF:0000040",  # UniProtKB Subcellular Location
+        ]
+    )
 
     @staticmethod
     def is_negated(a):
-        return a.qualifier.find('NOT') >= 0
+        return a.qualifier.find("NOT") >= 0
 
     @classmethod
     def is_exp_annotation(cls, a):
@@ -373,32 +394,54 @@ class AnnotationFilter(object):
 
     @classmethod
     def is_trusted_electronic(cls, a):
-        return a.evidence == 'IEA' and a.db_ref in cls.TRUST_IEA_REFS and not cls.is_negated(a)
+        return (
+            a.evidence == "IEA"
+            and a.db_ref in cls.TRUST_IEA_REFS
+            and not cls.is_negated(a)
+        )
 
     @classmethod
     def is_exp_or_trusted_electronic(cls, a):
         return cls.is_exp_annotation(a) or cls.is_trusted_electronic(a)
 
 
-# definition of the GOA Annotations. for performance reasons, we 
-# keep this as a namedtuple collection. 
-GOA_Annotation = collections.namedtuple('GOA_Annotation',
-         ['db', 'db_obj_id', 'db_obj_sym', 'qualifier', 'term_id',
-          'db_ref', 'evidence', 'with_from', 'aspect', 'db_obj_name',
-          'db_obj_syn', 'db_obj_typ', 'taxon', 'date', 'assigned_by',
-          'ext', 'gene_product_from_id'])
+# definition of the GOA Annotations. for performance reasons, we
+# keep this as a namedtuple collection.
+GOA_Annotation = collections.namedtuple(
+    "GOA_Annotation",
+    [
+        "db",
+        "db_obj_id",
+        "db_obj_sym",
+        "qualifier",
+        "term_id",
+        "db_ref",
+        "evidence",
+        "with_from",
+        "aspect",
+        "db_obj_name",
+        "db_obj_syn",
+        "db_obj_typ",
+        "taxon",
+        "date",
+        "assigned_by",
+        "ext",
+        "gene_product_from_id",
+    ],
+)
 
 
 class AnnotationParser(object):
     def __init__(self, fp, factory=GOA_Annotation._make):
         self._needs_close = False
         if isinstance(fp, str):
-            if fp.endswith('.gz'):
+            if fp.endswith(".gz"):
                 from gzip import GzipFile
-                fp = GzipFile(fp, 'rb')
+
+                fp = GzipFile(fp, "rb")
                 self._needs_close = True
             else:
-                fp = open(fp, 'rb')
+                fp = open(fp, "rb")
         self.fp = fp
         self.factory = factory
 
@@ -411,8 +454,9 @@ class AnnotationParser(object):
         """Iterates over the annotations in the file yielding objects
         constructed by the factory argument passed to the constructor
         of this class for each annotation."""
-        csv_reader = csv.reader((l for l in self.fp if not l.startswith('!')),
-                                delimiter='\t')
+        csv_reader = csv.reader(
+            (l for l in self.fp if not l.startswith("!")), delimiter="\t"
+        )
         for row in csv_reader:
             yield self.factory(row)
         if self._needs_close:
@@ -420,5 +464,3 @@ class AnnotationParser(object):
 
     def __iter__(self):
         return self.annotations()
-
-

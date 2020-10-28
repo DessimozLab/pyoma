@@ -21,18 +21,17 @@ Now, clone the zoo library and then install it into your current python environm
 .. code-block:: sh
 
     git clone ssh://gitolite@lab.dessimoz.org:2222/pyoma
-    
+
     # install with resolved dependencies
     pip install -r requirements
     # otherwise, you might also use
     pip install -e .
-    
+
 
 Afterwards, you can use the functions by importing them into your python session, e.g.
 
 .. code-block:: python
-    
+
     import pyoma.browser.db
 
 which contains the code to query the hdf5 files of an OMA Browser instance
-

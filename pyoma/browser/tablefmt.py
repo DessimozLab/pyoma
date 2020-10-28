@@ -25,8 +25,16 @@ class HOGsTable(tables.IsDescription):
 
 class OrthoXmlHogTable(tables.IsDescription):
     Fam = tables.UInt32Col(pos=0)
-    HogBufferOffset = tables.UInt32Col(pos=1)
+    HogBufferOffset = tables.Int64Col(pos=1)
     HogBufferLength = tables.UInt32Col(pos=2)
+    HogAugmentedBufferOffset = tables.Int64Col(pos=3)
+    HogAugmentedBufferLength = tables.UInt32Col(pos=4)
+
+
+class AncestralSyntenyRels(tables.IsDescription):
+    HogRow1 = tables.UInt32Col(pos=0)
+    HogRow2 = tables.UInt32Col(pos=1)
+    Weight = tables.Float16Col(pos=2)
 
 
 class ProteinTable(tables.IsDescription):
@@ -51,6 +59,15 @@ class ProteinTable(tables.IsDescription):
     RootHogDownStream = tables.Int32Col(pos=19, dflt=-1)
 
 
+class ProteinCacheInfo(tables.IsDescription):
+    EntryNr = tables.UInt32Col(pos=0)
+    NrPairwiseOrthologs = tables.UInt32Col(pos=1)
+    NrHogInducedPWOrthologs = tables.UInt32Col(pos=2)
+    NrHogInducedPWParalogs = tables.UInt32Col(pos=3)
+    NrOMAGroupOrthologs = tables.UInt32Col(pos=4)
+    NrAnyOrthologs = tables.UInt32Col(pos=5)
+
+
 class LocusTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     Start = tables.UInt32Col(pos=2)
@@ -62,9 +79,21 @@ class PairwiseRelationTable(tables.IsDescription):
     EntryNr1 = tables.UInt32Col(pos=0)
     EntryNr2 = tables.UInt32Col(pos=1)
     RelType = tables.EnumCol(
-        tables.Enum({'1:1': 0, '1:n': 1, 'm:1': 2, 'm:n': 3,
-                     'close paralog': 4, 'homeolog': 5, 'n/a': 6}),
-        'n/a', base='uint8', pos=2)
+        tables.Enum(
+            {
+                "1:1": 0,
+                "1:n": 1,
+                "m:1": 2,
+                "m:n": 3,
+                "close paralog": 4,
+                "homeolog": 5,
+                "n/a": 6,
+            }
+        ),
+        "n/a",
+        base="uint8",
+        pos=2,
+    )
     Score = tables.Float32Col(pos=3, dflt=-1)
     Distance = tables.Float32Col(pos=4, dflt=-1)
     AlignmentOverlap = tables.Float16Col(pos=5, dflt=-1)
@@ -75,20 +104,55 @@ class PairwiseRelationTable(tables.IsDescription):
 class XRefTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     XRefSource = tables.EnumCol(
-        tables.Enum({'UniProtKB/SwissProt': 0, 'UniProtKB/TrEMBL': 10,
-                     'Ensembl Protein': 20, 'Ensembl Gene': 25,  'Ensembl Transcript': 30,
-                     'RefSeq': 40, 'EntrezGene': 50, 'FlyBase': 60, 'WormBase': 65,
-                     'EnsemblGenomes': 70, 'NCBI': 75, 'EMBL': 80,
-                     'SourceID': 95, 'SourceAC': 100,
-                     'HGNC': 105, 'Gene Name': 110, 'Synonym': 115, 'Protein Name': 120,
-                     'ORF Name': 125, 'Ordered Locus Name': 130,
-                     'PMP': 150, 'PDB': 155, 'WikiGene': 160,
-                     'IPI': 240, 'GI': 241, 'n/a': 255}),  # last line: deprecated systems
-        'n/a', base='uint8', pos=2)
+        tables.Enum(
+            {
+                "UniProtKB/SwissProt": 0,
+                "UniProtKB/TrEMBL": 10,
+                "Ensembl Protein": 20,
+                "Ensembl Gene": 25,
+                "Ensembl Transcript": 30,
+                "RefSeq": 40,
+                "EntrezGene": 50,
+                "FlyBase": 60,
+                "WormBase": 65,
+                "EnsemblGenomes": 70,
+                "NCBI": 75,
+                "EMBL": 80,
+                "SourceID": 95,
+                "SourceAC": 100,
+                "HGNC": 105,
+                "Gene Name": 110,
+                "Synonym": 115,
+                "Protein Name": 120,
+                "ORF Name": 125,
+                "Ordered Locus Name": 130,
+                "PDB": 148,
+                "Swiss Model": 150,
+                "STRING": 151,
+                "neXtProt": 152,
+                "Bgee": 153,
+                "EPD": 154,
+                "ChEMBL": 156,
+                "GlyConnect": 157,
+                "SwissPalm": 158,
+                "DisGeNET": 159,
+                "WikiGene": 160,
+                "IPI": 240,
+                "GI": 241,
+                "n/a": 255,
+            }
+        ),  # last line: deprecated systems
+        "n/a",
+        base="uint8",
+        pos=2,
+    )
     XRefId = tables.StringCol(50, pos=3)
     Verification = tables.EnumCol(
-        tables.Enum({'exact': 0, 'unchecked': 2, 'modified': 4}),
-        'unchecked', base='uint8', pos=4)
+        tables.Enum({"exact": 0, "unchecked": 2, "modified": 4}),
+        "unchecked",
+        base="uint8",
+        pos=4,
+    )
 
 
 class GeneOntologyTable(tables.IsDescription):
@@ -104,7 +168,7 @@ class ECTable(tables.IsDescription):
 
 
 class GenomeTable(tables.IsDescription):
-    NCBITaxonId = tables.UInt32Col(pos=0)
+    NCBITaxonId = tables.Int32Col(pos=0)
     UniProtSpeciesCode = tables.StringCol(5, pos=1)
     TotEntries = tables.UInt32Col(pos=2)
     TotAA = tables.UInt32Col(pos=3)
@@ -120,8 +184,8 @@ class GenomeTable(tables.IsDescription):
 
 
 class TaxonomyTable(tables.IsDescription):
-    NCBITaxonId = tables.UInt32Col(pos=0)
-    ParentTaxonId = tables.UInt32Col(pos=1)
+    NCBITaxonId = tables.Int32Col(pos=0)
+    ParentTaxonId = tables.Int32Col(pos=1)
     Name = tables.StringCol(255, pos=2)
 
 
@@ -162,3 +226,11 @@ class OmaGroupTable(tables.IsDescription):
     KeywordOffset = tables.UInt32Col(pos=2)
     KeywordLength = tables.UInt16Col(pos=3)
     NrMembers = tables.UInt16Col(pos=4)
+
+
+class RootHOGMetaTable(tables.IsDescription):
+    FamNr = tables.UInt32Col(pos=0)
+    KeywordOffset = tables.UInt32Col(pos=1)
+    KeywordLength = tables.UInt32Col(pos=2)
+    FamDataJsonOffset = tables.UInt64Col(pos=3)
+    FamDataJsonLength = tables.UInt32Col(pos=4)

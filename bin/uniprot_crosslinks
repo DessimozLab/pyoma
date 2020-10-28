@@ -43,7 +43,7 @@ def iter_uniprot_omagrp_mapping(hdf5):
 
 
 def write_omagrp_xref_map(fh, hdf5):
-    csv_writer = csv.writer(fh, dialect="excel-tsv")
+    csv_writer = csv.writer(fh, dialect="excel-tab")
     csv_writer.writerows(iter_uniprot_omagrp_mapping(hdf5))
 
 

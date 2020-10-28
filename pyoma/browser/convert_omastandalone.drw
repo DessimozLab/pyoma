@@ -44,7 +44,9 @@ SpeciesTreeR := proc( l, lev, parent )
     if length(l)=0 then error('null tree')
     elif length(l)=1 then
         tax := parse(GS[l[1,2],TAXONID]);
-        _parents := append(_parents, [tax, parent, GS[l[1,2],'SCINAME']]);
+        sciname := GS[l[1,2],'SCINAME'];
+        if sciname = '' then sciname := l[1,2] fi:
+        _parents := append(_parents, [tax, parent, sciname]);
         #Leaf(l[1,2],length(l[1,1])+1)
     elif lev > min( seq(length(r[1]), r=l )) then
         tax := parse(GS[l[1,2], TAXONID]);

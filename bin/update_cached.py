@@ -29,7 +29,6 @@ if __name__ == "__main__":
 
     cache = pyoma.browser.compute_cache.compute_and_store_cached_data(
         conf.hdf5,
-        "/Protein/OrthologsCountCache",
         conf.nr_procs,
         force=conf.overwrite,
         tmp_cache=conf.cache_file,

@@ -1618,13 +1618,17 @@ class Database(object):
         n = total_members - len(go_annots_not_fetched)
         if n > 0:
             dist_matrix = numpy.zeros((n, n))
-            for p1 in range(n):
-                for p2 in range(p1 + 1, n):
-                    score = minhash_signatures[idx_map[p1]].jaccard(
-                        minhash_signatures[idx_map[p2]]
-                    )
-                    dist_matrix[p1][p2] = 1 - score
-                    dist_matrix[p2][p1] = 1 - score
+            for p1, p2 in tqdm(
+                itertools.combinations(range(n), 2),
+                disable=n < 50,
+                total=n * (n - 1) / 2,
+                desc="sim-matrix {}".format(hog_id)
+            ):
+                score = minhash_signatures[idx_map[p1]].jaccard(
+                    minhash_signatures[idx_map[p2]]
+                )
+                dist_matrix[p1][p2] = 1 - score
+                dist_matrix[p2][p1] = 1 - score
 
             if dist_matrix.max() == 0:
                 # all values the same

@@ -66,6 +66,7 @@ class CacheBuilderWorker(mp.Process):
                 for job in iter(timelimit_get_from_in_queue, None):
                     fun, params = job
                     res = getattr(self, fun)(*params)
+                    logger.debug('result for job ({}) ready'.format(job))
                     self.out_queue.put((job, res))
             except Empty:
                 logger.warning(
@@ -154,14 +155,19 @@ class CacheBuilderWorker(mp.Process):
         logger.debug("analysing family {}".format(fam))
         fam_members = self.load_fam_members(fam)
         logger.debug("family {} with {} members".format(fam, len(fam_members)))
-        try:
-            (
-                genes_null_similarity,
-                gene_similarity_vals,
-            ) = self.db.get_gene_similarities_hog(famhog_id)
-        except Exception as e:
-            print("gene_similarity failed for {}: {}".format(fam, e))
-            raise
+        if len(fam_members) > 50000:
+            # this will likely fail to compute the MDS for so many points
+            # let's skip it for now.
+            genes_null_similarity = set(p.entry_nr for p in fam_members)
+        else:
+            try:
+                (
+                    genes_null_similarity,
+                    gene_similarity_vals,
+                ) = self.db.get_gene_similarities_hog(famhog_id)
+            except Exception as e:
+                print("gene_similarity failed for {}: {}".format(fam, e))
+                raise
         final_json_output = []
         for p1 in fam_members:
             to_append = {}
@@ -365,6 +371,7 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
                     break
             else:
                 job, res = reply
+                logger.debug("received result for job {})".format(job))
                 result_handler.handle_result(job, res)
         result_handler.write_to_disk()
         logger.info("exit receiver loop. joining workers...")
@@ -393,16 +400,15 @@ def check_all_there(nr_prots, cache):
     return False
 
 
-def compute_and_store_cached_data(
-    db_fpath, cache_path, nr_procs=None, force=False, tmp_cache=None
-):
+def compute_and_store_cached_data(db_fpath, nr_procs=None, force=False, tmp_cache=None):
+    ortholog_cnts_cache_path = "/Protein/OrthologsCountCache"
     if tmp_cache is None:
         tmp_cache = "/tmp/compute_cache.h5"
     with tables.open_file(db_fpath, "a") as h5:
         try:
-            n = h5.get_node(cache_path)
+            n = h5.get_node(ortholog_cnts_cache_path)
             if force:
-                h5.remove_node(cache_path)
+                h5.remove_node(orthologs_cnts_cache_path)
             else:
                 return
         except tables.NoSuchNodeError:
@@ -411,17 +417,24 @@ def compute_and_store_cached_data(
     signal.signal(signal.SIGUSR2, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     cache = build_cache(db_fpath, nr_procs=nr_procs, from_cache=tmp_cache)
+    update_hdf5_from_cachefile(db_fpath, tmp_cache)
 
-    path, name = split(cache_path)
-    with tables.open_file(db_fpath, "a") as h5, tables.open_file(
-        tmp_cache, "r"
-    ) as cache_h5:
+
+def update_hdf5_from_cachefile(db_fpath, tmp_cache):
+    ortholog_cnts_cache_path = "/Protein/OrthologsCountCache"
+    path, name = split(ortholog_cnts_cache_path)
+
+    with tables.open_file(db_fpath, "a") as h5, \
+         tables.open_file(tmp_cache, "r") as cache_h5:
+        cached_cnts = cache_h5.get_node("/ortholog_counts").read()
+        cached_cnts.sort(order="EntryNr")
+
         tab = h5.create_table(
-            path, name, ProteinCacheInfo, createparents=True, obj=cache
+            path, name, ProteinCacheInfo, createparents=True, obj=cached_cnts
         )
         tab.colinstances["EntryNr"].create_csindex()
 
-        json_off = cache_h5.root.family_json.offset.read()
+        json_off = cache_h5.get_node("/family_json/offset").read()
         json_off.sort(order="Fam")
         tab = h5.root.RootHOG.MetaData.read()
         for fam, off, length in json_off:

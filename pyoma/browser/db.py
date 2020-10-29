@@ -809,7 +809,7 @@ class Database(object):
             will be returned."""
         lev = level if isinstance(level, bytes) else level.encode("ascii")
         return self.db.root.HogLevel.read_where(
-            "(Fam=={}) & (Level == {!r}".format(fam_nr, lev), field=field
+            "(Fam=={}) & (Level == {!r})".format(fam_nr, lev), field=field
         )
 
     def get_parent_hogs(self, hog_id, level=None):

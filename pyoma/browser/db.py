@@ -780,12 +780,37 @@ class Database(object):
         and for
         get_subhogids_at_level(1, 'Metazoa') --> ['HOG:0000001.1a', 'HOG:0000001.1b']
 
+        :note:
+        There is also the method :method:`get_subhogs_at_level` which returns all
+        information stored in the HogLevel table, not only the HOG id.
+
+        :see_also:
+        get_subhogs_at_level
+
         :param fam_nr: the numeric family id
         :param level: the taxonomic level of interest"""
+        return self.get_subhogs_at_level(fam_nr, level, field="ID")
+
+    def get_subhogs_at_level(self, fam_nr, level, field=None):
+        """get all the hogs within a given family at a given taxonomic
+        level of interest.
+
+        After a duplication in an ancestor lineage, there exists multiple
+        sub-hogs for any taxonomic level after the duplication. This method
+        allows to get the list of hogs at the requested taxonomic level.
+
+        :note:
+        There is also the method get_subhogids_at_level which returns only
+        the hogids for the chosen level, not all information on the HOGs.
+
+        :param fam_nr: the numeric family id
+        :param level: the taxonomic level of interest
+        :param field: name of the column to be returned. If not set, all columns
+            will be returned."""
         lev = level if isinstance(level, bytes) else level.encode("ascii")
         return self.db.root.HogLevel.read_where(
-            "(Fam=={}) & (Level=={!r})".format(fam_nr, lev)
-        )["ID"]
+            "(Fam=={}) & (Level == {!r}".format(fam_nr, lev), field=field
+        )
 
     def get_parent_hogs(self, hog_id, level=None):
         """return an array of parent (deeper) HOGs.
@@ -1622,7 +1647,7 @@ class Database(object):
                 itertools.combinations(range(n), 2),
                 disable=n < 50,
                 total=n * (n - 1) / 2,
-                desc="sim-matrix {}".format(hog_id)
+                desc="sim-matrix {}".format(hog_id),
             ):
                 score = minhash_signatures[idx_map[p1]].jaccard(
                     minhash_signatures[idx_map[p2]]

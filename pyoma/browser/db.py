@@ -2715,7 +2715,7 @@ class XrefIdMapper(object):
         self.xrefEnum = self.xref_tab.get_enum("XRefSource")
         self.idtype = frozenset(list(self.xrefEnum._values.keys()))
         self.verif_enum = self.xref_tab.get_enum("Verification")
-        self._max_verif_for_mapping_entrynrs = self.verif_enum["modified"]
+        self._max_verif_for_mapping_entrynrs = 1000  # allow all verification values
         try:
             self.xref_index = SuffixSearcher.from_tablecolumn(self.xref_tab, "XRefId")
         except SuffixIndexError:
@@ -2881,6 +2881,10 @@ class XrefIdMapper(object):
             return self.xrefEnum._values[source]
         except KeyError:
             raise ValueError("'{}' is not a valid xref source value".format(source))
+
+    def verification_as_string(self, verif):
+        """string representation of xref verifiction enum value"""
+        return self.verif_enum(verif)
 
     def xreftab_to_dict(self, tab):
         """convert a xreftable to a dictionary per entry_nr.

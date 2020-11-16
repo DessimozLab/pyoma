@@ -954,8 +954,12 @@ class Database(object):
             "(Fam == {:d}) & (Level == {!r})".format(query_fam, level.encode("ascii"))
         ):
             if hog_id.startswith(hog_candidate["ID"]):
-                hoglev = hog_candidate
-                break
+                if (
+                    hog_id == hog_candidate["ID"]
+                    or chr(hog_id[len(hog_candidate["ID"])]) == "."
+                ):
+                    hoglev = hog_candidate
+                    break
         if hoglev is None:
             raise ValueError('Level "{0:s}" undefined for query gene'.format(level))
         # get the entries which have this hogid (or a sub-hog)

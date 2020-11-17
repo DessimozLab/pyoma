@@ -30,11 +30,16 @@ def find_path_to_test_db(dbfn="TestDb.h5"):
     :returns: path to database
     :rtype: str
     :raises IOError: if db does not exist."""
+
+    def is_hdf5_file(fname):
+        with open(fname, "rb") as fh:
+            return fh.read(4) == b"\x89HDF"
+
     path1 = os.path.join(os.path.dirname(__file__), dbfn)
-    if os.path.isfile(path1):
+    if os.path.isfile(path1) and is_hdf5_file(path1):
         return path1
     path2 = os.path.abspath(os.path.join(os.getenv("PYOMA_DB_PATH", "./"), dbfn))
-    if os.path.isfile(path2):
+    if os.path.isfile(path2) and is_hdf5_file(path2):
         return path2
     else:
         raise IOError("cannot access {}. (Tried {} and {})".format(dbfn, path1, path2))

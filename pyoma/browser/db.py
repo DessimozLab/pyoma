@@ -946,44 +946,59 @@ class Database(object):
 
         :param bytes hog_id: the query hog id
         :param str level: the taxonomic level of interest"""
+        try:
+            hog = next(self.iter_hog_at_level(hog_id, level))
+        except StopIteration:
+            raise ValueError('Level "{0:s}" undefined for query gene'.format(level))
+        # get the entries which have this hogid (or a sub-hog)
+        members = self.member_of_hog_id(hog["ID"], level=level)
+        return members
+
+    def iter_hog_at_level(self, hog_id, level):
+        """yields the (sub- or parent-) hogs for a given level.
+
+        This method yields the hogs as numpy.array instances that
+        match the requested level exactly and match the hog_id as
+        closely as possible:
+
+        For a more general hog_id, the method returns all the subhogs
+        that exist at the requested level (similar to
+        :meth:`get_subhogs_at_level`, but here respecting a potential
+        subhog part).
+
+        For a hog_id which is more specific than the hog_id at the
+        requested level, only the parent hog as defined at the level
+        is returned.
+
+        :Note:
+        If the hog_id is known to match the level, the method
+        :meth:`get_hog` can be used as it is a bit faster.
+
+        :see_also: :meth:`get_subhogs_at_level`, :meth:`get_hog`
+        """
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
         query_fam = self.parse_hog_id(hog_id)
-        hoglev = None
-        for hog_candidate in self.db.root.HogLevel.where(
+        for hog in self.db.root.HogLevel.where(
             "(Fam == {:d}) & (Level == {!r})".format(query_fam, level.encode("ascii"))
         ):
-            if hog_id.startswith(hog_candidate["ID"]):
-                if (
-                    hog_id == hog_candidate["ID"]
-                    or chr(hog_id[len(hog_candidate["ID"])]) == "."
-                ):
-                    hoglev = hog_candidate
-                    break
-        if hoglev is None:
-            raise ValueError('Level "{0:s}" undefined for query gene'.format(level))
-        # get the entries which have this hogid (or a sub-hog)
-        members = self.member_of_hog_id(hoglev["ID"])
-        if level != "LUCA":
-            # last, we need to filter the proteins to the tax range of interest
-            keep = numpy.array(
-                [
-                    level.encode("ascii")
-                    in self.tax.get_parent_taxa(
-                        self.id_mapper["OMA"].genome_of_entry_nr(enr)["NCBITaxonId"]
-                    )["Name"]
-                    for enr in members["EntryNr"]
-                ],
-                dtype=numpy.bool,
-            )
-            members = members[keep]
-        return members
+            if hog_id.startswith(hog["ID"]):
+                if hog_id == hog["ID"] or chr(hog_id[len(hog["ID"])]) == ".":
+                    yield hog.fetch_all_fields()
+            elif hog["ID"].startswith(hog_id):
+                yield hog.fetch_all_fields()
 
     def get_hog(self, hog_id, level=None, field=None):
         """Retrieve the one relevant HOG for a certain hog-id.
 
         If a level is provided, returns the (sub)hog at this level, otherwise
-        it will return the deepest (sub)hog for that ID.
+        it will return the deepest (sub)hog for that ID. Note that for this
+        method the hog_id must match the expected subhog exactly. That means
+        the method does not try to identify the correct hog_id for the requested
+        level. In case the hog_id needs to be potentially adjusted given a level
+        of interest, you should use :meth:`iter_hogs_at_level`.
+
+        :see_also: :meth:`iter_hogs_at_level`, :meth:`get_subhogs_at_level`
 
         :param (bytes,str) hog_id: the query hog id
         :param str level: the taxonomic level of interest, defaults to None

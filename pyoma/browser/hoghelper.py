@@ -17,6 +17,14 @@ class HogLevelFilter(object):
         self.sub_level_distances = self._build_distance_to_query_level_lookup(
             tax_below_level
         )
+        # cache all the families nrs that are defined in the clade of interest
+        self.fams_in_clade = set(
+            int(roothog["Fam"])
+            for roothog in db.get_hdf5_handle().root.HogLevel.where(
+                '~contains(ID, b".") & (IsRoot == True)'
+            )
+            if roothog["Level"] in self.sub_level_distances
+        )
 
     def _build_distance_to_query_level_lookup(self, tax):
         nodes = {}
@@ -48,6 +56,8 @@ class HogLevelFilter(object):
 
     def analyse_families(self, it):
         for fam in it:
+            if fam not in self.fams_in_clade:
+                continue
             subhog_ids = self.db.get_subhogids_at_level(fam_nr=fam, level=self.level)
             if len(subhog_ids) == 0:
                 # let's check if we have any level in the family that is a sub clade

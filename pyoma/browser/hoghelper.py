@@ -17,6 +17,11 @@ class HogLevelFilter(object):
         self.sub_level_distances = self._build_distance_to_query_level_lookup(
             tax_below_level
         )
+        self.parent_levels = set(
+            db.tax.get_parent_taxa(
+                db.tax.get_taxnode_from_name_or_taxid(level)[0]["NCBITaxonId"]
+            )["Name"]
+        )
         # cache all the families nrs that are defined in the clade of interest
         self.fams_in_clade = set(
             int(roothog["Fam"])
@@ -24,6 +29,7 @@ class HogLevelFilter(object):
                 '~contains(ID, b".") & (IsRoot == True)'
             )
             if roothog["Level"] in self.sub_level_distances
+            or roothog["Level"] in self.parent_levels
         )
 
     def _build_distance_to_query_level_lookup(self, tax):

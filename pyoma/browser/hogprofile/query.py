@@ -82,7 +82,6 @@ class Profiler(object):
         :param int k: max number of similar root-level hogs being returned"""
         hashvalues = self.hashes[fam_nr].reshape(self.num_perm, 2)
         minhash = datasketch.WeightedMinHash(seed=1, hashvalues=hashvalues)
-        similar = self.forest.query(minhash, k=k)
 
         jaccard_distance = {}
         for sim in self.forest.query(minhash, k=k):
@@ -91,7 +90,6 @@ class Profiler(object):
             jaccard_distance[sim] = shash.jaccard(minhash)
 
         return ProfileSearchResult(self, fam_nr, similar, jaccard_distance)
-
 
 
 class ProfileSearchResult(object):

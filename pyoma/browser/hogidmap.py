@@ -42,7 +42,7 @@ class LSHBuilder(object):
             ),
         )
         h5.create_earray(
-            "/", "hashes", atom=tables.Int64Atom(), shape=(256,), expectedrows=1e6
+            "/", "hashes", atom=tables.Int64Atom(), shape=(0, 256), expectedrows=1e6
         )
         h5.create_vlarray("/", "lsh_obj", atom=tables.ObjectAtom())
         return h5
@@ -57,7 +57,7 @@ class LSHBuilder(object):
     def add_minhashes(self, it):
         for key, minhash in it:
             self.lsh.insert(key, minhash)
-            self.hashes.append(minhash)
+            self.hashes.append(minhash.digest())
             self.hogid2row[key] = self._row
             self._row += 1
 
@@ -66,5 +66,6 @@ class LSHBuilder(object):
         (query-key, target-key, jaccard)"""
         candidates = self.lsh.query(minhash)
         for c in candidates:
-            h = self.hashes[self.hogid2row[c]]
+            hashvals = self.hashes[self.hogid2row[c]]
+            h = MinHash(seed=1, hashvalues=hashvals)
             yield key, c, minhash.jaccard(h)

@@ -57,7 +57,7 @@ class LSHBuilder(object):
     def add_minhashes(self, it):
         for key, minhash in it:
             self.lsh.insert(key, minhash)
-            self.hashes.append(minhash.digest())
+            self.hashes.append([minhash.digest()])
             self.hogid2row[key] = self._row
             self._row += 1
 

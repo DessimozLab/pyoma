@@ -9,6 +9,7 @@ import hashlib
 import itertools
 import json
 import multiprocessing as mp
+import concurrent.futures
 import operator
 import os
 import re
@@ -222,6 +223,16 @@ def read_vps_from_tsv(gs, ref_genome, basedir=None):
     pool.close()
     common.package_logger.info("loaded vps for {}".format(ref_genome.decode()))
     return numpy.lib.recfunctions.stack_arrays(all_pairs, usemask=False)
+
+
+def load_hogs_at_level(fname, level):
+    with tables.open_file(fname, "r") as h5:
+        lev = level.encode("utf-8") if isinstance(level, str) else level
+        tab = h5.get_node("/HogLevel")
+        hog_it = (row.fetch_all_fields() for row in tab.where("Level == lev"))
+        hogs = numpy.fromiter(hog_it, dtype=tab.dtype)
+        hogs.sort(order="ID")
+        return hogs
 
 
 class DataImportError(Exception):
@@ -908,6 +919,51 @@ class DarwinExporter(object):
             row["HogAugmentedBufferOffset"] = offset["augmented"]
             row["HogAugmentedBufferLength"] = length["augmented"]
             row.append()
+
+    def add_cache_of_hogs_by_level(self):
+        self.logger.info("createing cached HogLevel table per level")
+        hl_tab = self.h5.get_node("/HogLevel")
+        temp_hoglevel_file = os.path.join(
+            os.getenv("DARWIN_NETWORK_SCRATCH_PATH"), "tmp-hoglevel.h5"
+        )
+        with tables.open_file(temp_hoglevel_file, "w") as hlfh:
+            hl_tab._f_copy(hlfh.root)
+            create_index_for_columns(hlfh.get_node("/HogLevel"), "Level")
+
+        rel_levels = set(hl_tab.read(field="Level"))
+        self.logger.info(
+            "found {} levels, start extracting hogs in parallel".format(len(rel_levels))
+        )
+        lev2tax = {
+            row["Name"]: int(row["NCBITaxonId"])
+            for row in self.h5.get_node("/Taxonomy").read()
+        }
+        with concurrent.futures.ProcessPoolExecutor() as pool:
+            future_to_level = {
+                pool.submit(
+                    load_hogs_at_level, fname=temp_hoglevel_file, level=level
+                ): level
+                for level in rel_levels
+            }
+            for future in concurrent.futures.as_completed(future_to_level):
+                level = future_to_level[future]
+                try:
+                    hogs = future.result()
+                    tab = self.h5.create_table(
+                        "/Hogs_per_Level",
+                        "tax{}".format(lev2tax[level]),
+                        title="cached HogLevel data for {}".format(level.decode()),
+                        obj=hogs,
+                        createparents=True,
+                        expectedrows=len(hogs),
+                    )
+                    create_index_for_columns(
+                        tab, "Fam", "IsRoot", "NrMemberGenes", "CompletenessScore"
+                    )
+                except Exception as exc:
+                    msg = "cannot store cached hogs for {}".format(level)
+                    self.logger.exception(msg)
+                    pass
 
     def xref_databases(self):
         return os.path.join(os.environ["DARWIN_BROWSERDATA_PATH"], "ServerIndexed.db")

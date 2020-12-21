@@ -1,4 +1,5 @@
 import logging
+import numpy
 
 logger = logging.getLogger(__name__)
 
@@ -74,3 +75,37 @@ class HogLevelFilter(object):
             else:
                 for subhog_id in subhog_ids:
                     yield (subhog_id, self.level)
+
+
+def compare_levels(parent_level_hogs: numpy.array, children_level_hogs: numpy.array):
+    """compares hogs at two levels and returns duplicated/lost/gained/identical states
+
+    The function requires that the hogs are sorted numpy arrays according to their HOGid"""
+    annotated = []
+    i = j = 0
+    while i < len(parent_level_hogs) and j < len(children_level_hogs):
+        if parent_level_hogs[i]["Fam"] < children_level_hogs[j]["Fam"]:
+            annotated.append((parent_level_hogs[i], "lost"))
+            i += 1
+        elif parent_level_hogs[i]["Fam"] > children_level_hogs[j]["Fam"]:
+            annotated.append((children_level_hogs[j], "gained"))
+            j += 1
+        else:
+            if parent_level_hogs[i]["ID"] == children_level_hogs[j]["ID"]:
+                annotated.append((children_level_hogs[j], "retained"))
+                i += 1
+                j += 1
+            else:
+                while j < len(children_level_hogs) and children_level_hogs[j][
+                    "ID"
+                ].startswith(parent_level_hogs[i]["ID"]):
+                    annotated.append((children_level_hogs[j], "duplicated"))
+                    j += 1
+                i += 1
+    while i < len(parent_level_hogs):
+        annotated.append((parent_level_hogs[i], "lost"))
+        i += 1
+    while j < len(children_level_hogs):
+        annotated.append((children_level_hogs[j], "gained"))
+        j += 1
+    return annotated

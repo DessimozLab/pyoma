@@ -938,6 +938,7 @@ class DarwinExporter(object):
             row["Name"]: int(row["NCBITaxonId"])
             for row in self.h5.get_node("/Taxonomy").read()
         }
+        lev2tax[b"LUCA"] = 0
         with concurrent.futures.ProcessPoolExecutor() as pool:
             future_to_level = {
                 pool.submit(
@@ -2546,8 +2547,7 @@ class ApproximateXRefImporter(object):
 
 class DarwinDbEntryParser:
     def __init__(self):
-        """Initializes a Parser for SGML formatted darwin database file
-        """
+        """Initializes a Parser for SGML formatted darwin database file"""
         self.tag_handlers = collections.defaultdict(list)
         self.end_of_entry_notifier = []
 

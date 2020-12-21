@@ -2701,14 +2701,7 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
     :param fpath: path to genomes.json file
     :param h5: hdf5 database handle."""
     common.package_logger.info("Augmenting genomes.json file with Nr of HOGs per level")
-    # load nr of ancestral genomes at each level
-    ancestral_hogs = collections.Counter()
-    step = 2 ** 15
-    hog_tab = h5.get_node("/HogLevel")
-    for start in range(0, len(hog_tab), step):
-        ancestral_hogs.update(
-            (l.decode() for l in hog_tab.read(start, stop=start + step, field="Level"))
-        )
+
     # load taxonomy and sorter by Name
     tax = h5.get_node("/Taxonomy").read()
     sorter = numpy.argsort(tax["Name"])
@@ -2719,11 +2712,6 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
     def traverse(node, parent_hogs=None):
         if "children" not in node:
             return
-        try:
-            node["nr_hogs"] = ancestral_hogs[node["name"]]
-        except KeyError as e:
-            common.package_logger.warning("no ancestral hog counts for " + node["name"])
-            node["nr_hogs"] = 0
 
         if parent_hogs is None:
             parent_hogs = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
@@ -2735,10 +2723,10 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
             elif n == b"LUCA":
                 taxid = 0
             else:
-                node["nr_hogs2"] = 0
+                node["nr_hogs"] = 0
                 raise ValueError("not in taxonomy: {}".format(n))
             hog_level = h5.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()
-            node["nr_hogs2"] = len(hog_level)
+            node["nr_hogs"] = len(hog_level)
             diff_parent = hoghelper.compare_levels(parent_hogs, hog_level)
             changes = collections.defaultdict(int)
             for x in diff_parent:

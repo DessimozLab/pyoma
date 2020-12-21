@@ -921,7 +921,7 @@ class DarwinExporter(object):
             row["HogAugmentedBufferLength"] = length["augmented"]
             row.append()
 
-    def add_cache_of_hogs_by_level(self):
+    def add_cache_of_hogs_by_level(self, nr_procs=None):
         self.logger.info("createing cached HogLevel table per level")
         hl_tab = self.h5.get_node("/HogLevel")
         temp_hoglevel_file = os.path.join(
@@ -940,7 +940,7 @@ class DarwinExporter(object):
             for row in self.h5.get_node("/Taxonomy").read()
         }
         lev2tax[b"LUCA"] = 0
-        with concurrent.futures.ProcessPoolExecutor() as pool:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=nr_procs) as pool:
             future_to_level = {
                 pool.submit(
                     load_hogs_at_level, fname=temp_hoglevel_file, level=level
@@ -2816,6 +2816,7 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level="INFO"
     x.add_sequence_suffix_array(k=k, fn=idx_name)
     x.update_summary_stats()
     x.add_per_species_aux_groupdata()
+    x.add_cache_of_hogs_by_level(min(os.cpu_count(), 32))
     genomes_json_fname = os.path.normpath(
         os.path.join(os.path.dirname(x.h5.filename), "..", "downloads", "genomes.json")
     )

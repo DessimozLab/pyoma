@@ -38,6 +38,7 @@ from .compute_cache import compute_and_store_cached_data
 from .geneontology import GeneOntology, OntologyParser
 from .homoeologs import HomeologsConfidenceCalculator
 from .synteny import SyntenyScorer
+from . import hoghelper
 from .. import common, version
 
 with hooks():
@@ -2715,26 +2716,41 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
         genomes = json.load(fh)
     os.rename(fpath, fpath + ".bak")
 
-    def traverse(node):
+    def traverse(node, parent_hogs=None):
         if "children" not in node:
             return
-        for child in node["children"]:
-            traverse(child)
         try:
             node["nr_hogs"] = ancestral_hogs[node["name"]]
         except KeyError as e:
             common.package_logger.warning("no ancestral hog counts for " + node["name"])
             node["nr_hogs"] = 0
 
+        if parent_hogs is None:
+            parent_hogs = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
         try:
             n = node["name"].encode("utf-8")
             idx = numpy.searchsorted(tax["Name"], n, sorter=sorter)
             if tax["Name"][sorter[idx]] == n:
-                node["taxid"] = int(tax["NCBITaxonId"][sorter[idx]])
+                node["taxid"] = taxid = int(tax["NCBITaxonId"][sorter[idx]])
+            elif n == b"LUCA":
+                taxid = 0
             else:
+                node["nr_hogs2"] = 0
                 raise ValueError("not in taxonomy: {}".format(n))
+            hog_level = h5.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()
+            node["nr_hogs2"] = len(hog_level)
+            diff_parent = hoghelper.compare_levels(parent_hogs, hog_level)
+            changes = collections.defaultdict(int)
+            for x in diff_parent:
+                changes[x[1]] += 1
+            node["gene_changes"] = changes
+
         except Exception:
             common.package_logger.exception("Cannot identify taxonomy id")
+            hog_level = parent_hogs.copy()
+
+        for child in node["children"]:
+            traverse(child, parent_hogs=hog_level)
 
     traverse(genomes)
     with open(fpath, "wt") as fh:

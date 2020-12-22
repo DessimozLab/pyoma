@@ -77,11 +77,16 @@ class HogLevelFilter(object):
                     yield (subhog_id, self.level)
 
 
-def compare_levels(parent_level_hogs: numpy.array, children_level_hogs: numpy.array):
+def compare_levels(
+    parent_level_hogs: numpy.array,
+    children_level_hogs: numpy.array,
+    return_duplication_events=False,
+):
     """compares hogs at two levels and returns duplicated/lost/gained/identical states
 
     The function requires that the hogs are sorted numpy arrays according to their HOGid"""
     annotated = []
+    dups = 0
     i = j = 0
     while i < len(parent_level_hogs) and j < len(children_level_hogs):
         if parent_level_hogs[i]["Fam"] < children_level_hogs[j]["Fam"]:
@@ -102,6 +107,7 @@ def compare_levels(parent_level_hogs: numpy.array, children_level_hogs: numpy.ar
                     annotated.append(tuple(children_level_hogs[j]) + (b"duplicated",))
                     j += 1
                 i += 1
+                dups += 1
     while i < len(parent_level_hogs):
         annotated.append(tuple(parent_level_hogs[i]) + (b"lost",))
         i += 1
@@ -109,4 +115,7 @@ def compare_levels(parent_level_hogs: numpy.array, children_level_hogs: numpy.ar
         annotated.append(tuple(children_level_hogs[j]) + (b"gained",))
         j += 1
     dt = children_level_hogs.dtype.descr + [("Event", "S10")]
-    return numpy.array(annotated, dtype=dt)
+    diff = numpy.array(annotated, dtype=dt)
+    if return_duplication_events:
+        return diff, dups
+    return diff

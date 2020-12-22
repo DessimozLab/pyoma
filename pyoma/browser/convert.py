@@ -2727,12 +2727,14 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
                 raise ValueError("not in taxonomy: {}".format(n))
             hog_level = h5.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()
             node["nr_hogs"] = len(hog_level)
-            diff_parent = hoghelper.compare_levels(parent_hogs, hog_level)
+            diff_parent, dupl_events = hoghelper.compare_levels(
+                parent_hogs, hog_level, return_duplication_events=True
+            )
             changes = collections.defaultdict(int)
             for x in diff_parent["Event"]:
                 changes[x.decode()] += 1
+            changes["duplications"] = dupl_events
             node["gene_changes"] = changes
-
         except Exception:
             common.package_logger.exception("Cannot identify taxonomy id")
             hog_level = parent_hogs.copy()

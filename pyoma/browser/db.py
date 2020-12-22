@@ -33,6 +33,7 @@ from .geneontology import GeneOntology, OntologyParser, GOAspect
 from .hogprofile import Profiler
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
 from .suffixsearch import SuffixSearcher, SuffixIndexError
+from .hoghelper import compare_levels
 from .. import version
 
 logger = logging.getLogger(__name__)
@@ -1049,6 +1050,23 @@ class Database(object):
                 )
             )
 
+    def get_all_hogs_at_level(self, level, compare_with=None):
+        """returns a :class:`numpy.array` instance with all hogs at the requested level
+        """
+        taxid = self.taxid_from_level(level)
+        try:
+            hog_data = self.db.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()
+        except tables.NoSuchNodeError:
+            logger.warning(
+                "Cannot load Hogs_per_Level. extracting from main table. SLOW!"
+            )
+            hog_data = self.db.get_node("/HogLevel").read_where("Level == level")
+        if compare_with is None:
+            return hog_data
+        compare_hog = self.get_all_hogs_at_level(compare_with)
+        diff = compare_levels(compare_hog, hog_data)
+        return diff
+
     def get_roothog_keywords(self, fam) -> str:
         """Retrieve the keywords for a given toplevel HOG.
 
@@ -1170,15 +1188,7 @@ class Database(object):
         """
         hl_tab = self.db.get_node("/HogLevel")
         hog_row = self.get_hog(hog_id, level, "_NROW")
-        try:
-            taxnodes = self.tax.get_taxnode_from_name_or_taxid(level)
-            taxid_of_level = int(taxnodes[0]["NCBITaxonId"])
-        except KeyError:
-            if level == "LUCA":
-                taxid_of_level = 0
-            else:
-                raise
-
+        taxid_of_level = self.taxid_from_level(level)
         try:
             edge_data = self.db.get_node(
                 "/AncestralSynteny/tax{}".format(taxid_of_level)
@@ -1197,6 +1207,17 @@ class Database(object):
         ]
         S = G.subgraph(neighbors)
         return nx.relabel_nodes(S, lambda x: hl_tab[x]["ID"].decode())
+
+    def taxid_from_level(self, level):
+        try:
+            taxnodes = self.tax.get_taxnode_from_name_or_taxid(level)
+            taxid_of_level = int(taxnodes[0]["NCBITaxonId"])
+        except KeyError:
+            if level == b"LUCA" or level == "LUCA":
+                taxid_of_level = 0
+            else:
+                raise
+        return taxid_of_level
 
     def get_neighbor_hogs(self, hog_id, level):
         """returns the direct neighbor hogs of a given ancestral hog

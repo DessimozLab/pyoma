@@ -3,6 +3,12 @@ import numpy
 from pyoma.browser.hoghelper import compare_levels
 
 
+def merge_array_with_col(data):
+    y = [tuple(x[0]) + (x[1],) for x in data]
+    dt = data[0][0].dtype.descr + [("Event", "S10")]
+    return numpy.array(y, dtype=dt)
+
+
 class CompareHogLevels(unittest.TestCase):
     def setUp(self) -> None:
         self.parent = numpy.array(
@@ -44,7 +50,8 @@ class CompareHogLevels(unittest.TestCase):
             (parent[5], "lost"),
             (child[6], "retained"),
         ]
-        self.assertEqual(exp_res, compare_levels(parent, child))
+        exp_res = merge_array_with_col(exp_res)
+        self.assertTrue((exp_res == compare_levels(parent, child)).all())
 
     def test_fam_1_to_5(self):
         child = self.child[self.child["Fam"] <= 5]
@@ -57,7 +64,8 @@ class CompareHogLevels(unittest.TestCase):
             (child[3], "duplicated"),
             (child[4], "gained"),
         ]
-        self.assertEqual(exp_res, compare_levels(parent, child))
+        exp_res = merge_array_with_col(exp_res)
+        self.assertTrue((exp_res == compare_levels(parent, child)).all())
 
     def test_fam_2_to_6(self):
         child = self.child[(1 < self.child["Fam"]) & (self.child["Fam"] <= 6)]
@@ -71,7 +79,8 @@ class CompareHogLevels(unittest.TestCase):
             (child[4], "retained"),
             (parent[4], "lost"),
         ]
-        self.assertEqual(exp_res, compare_levels(parent, child))
+        exp_res = merge_array_with_col(exp_res)
+        self.assertTrue((exp_res == compare_levels(parent, child)).all())
 
 
 if __name__ == "__main__":

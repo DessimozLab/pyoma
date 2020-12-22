@@ -2729,8 +2729,8 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
             node["nr_hogs"] = len(hog_level)
             diff_parent = hoghelper.compare_levels(parent_hogs, hog_level)
             changes = collections.defaultdict(int)
-            for x in diff_parent:
-                changes[x[1]] += 1
+            for x in diff_parent["Event"]:
+                changes[x.decode()] += 1
             node["gene_changes"] = changes
 
         except Exception:

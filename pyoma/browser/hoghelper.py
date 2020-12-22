@@ -85,27 +85,28 @@ def compare_levels(parent_level_hogs: numpy.array, children_level_hogs: numpy.ar
     i = j = 0
     while i < len(parent_level_hogs) and j < len(children_level_hogs):
         if parent_level_hogs[i]["Fam"] < children_level_hogs[j]["Fam"]:
-            annotated.append((parent_level_hogs[i], "lost"))
+            annotated.append(tuple(parent_level_hogs[i]) + (b"lost",))
             i += 1
         elif parent_level_hogs[i]["Fam"] > children_level_hogs[j]["Fam"]:
-            annotated.append((children_level_hogs[j], "gained"))
+            annotated.append(tuple(children_level_hogs[j]) + (b"gained",))
             j += 1
         else:
             if parent_level_hogs[i]["ID"] == children_level_hogs[j]["ID"]:
-                annotated.append((children_level_hogs[j], "retained"))
+                annotated.append(tuple(children_level_hogs[j]) + (b"retained",))
                 i += 1
                 j += 1
             else:
                 while j < len(children_level_hogs) and children_level_hogs[j][
                     "ID"
                 ].startswith(parent_level_hogs[i]["ID"]):
-                    annotated.append((children_level_hogs[j], "duplicated"))
+                    annotated.append(tuple(children_level_hogs[j]) + (b"duplicated",))
                     j += 1
                 i += 1
     while i < len(parent_level_hogs):
-        annotated.append((parent_level_hogs[i], "lost"))
+        annotated.append(tuple(parent_level_hogs[i]) + (b"lost",))
         i += 1
     while j < len(children_level_hogs):
-        annotated.append((children_level_hogs[j], "gained"))
+        annotated.append(tuple(children_level_hogs[j]) + (b"gained",))
         j += 1
-    return annotated
+    dt = children_level_hogs.dtype.descr + [("Event", "S10")]
+    return numpy.array(annotated, dtype=dt)

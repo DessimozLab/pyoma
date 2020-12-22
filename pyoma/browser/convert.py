@@ -2734,7 +2734,7 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
             for x in diff_parent["Event"]:
                 changes[x.decode()] += 1
             changes["duplications"] = dupl_events
-            node["gene_changes"] = changes
+            node["evolutionaryEvents"] = changes
         except Exception:
             common.package_logger.exception("Cannot identify taxonomy id")
             hog_level = parent_hogs.copy()

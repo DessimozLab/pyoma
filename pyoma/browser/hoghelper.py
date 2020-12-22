@@ -101,13 +101,21 @@ def compare_levels(
                 i += 1
                 j += 1
             else:
+                dupl_fnd = 0
                 while j < len(children_level_hogs) and children_level_hogs[j][
                     "ID"
                 ].startswith(parent_level_hogs[i]["ID"]):
                     annotated.append(tuple(children_level_hogs[j]) + (b"duplicated",))
                     j += 1
+                    dupl_fnd += 1
+                if dupl_fnd > 0:
+                    # parent duplicated into at least one subhog
+                    dups += 1
+                else:
+                    # parent subhog does not exist, it is lost
+                    annotated.append(tuple(parent_level_hogs[i]) + (b"lost",))
                 i += 1
-                dups += 1
+
     while i < len(parent_level_hogs):
         annotated.append(tuple(parent_level_hogs[i]) + (b"lost",))
         i += 1

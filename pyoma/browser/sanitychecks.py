@@ -52,7 +52,7 @@ class SanitySession(object):
         object that key: oma group id, value: number of genes in this oma group
         """
         omagroups = Counter(
-            [x["OmaGroup"] for x in self.entries_table.where("OmaGroup!=0")]
+            (x["OmaGroup"] for x in self.entries_table.where("OmaGroup!=0"))
         )
         return omagroups
 
@@ -64,10 +64,13 @@ class SanitySession(object):
         """get the number of genes in HOGs at all taxonomic clades and returns a dictionary/Counter
         object that key: HOG id, value: number of genes in this HOG at all taxonomic clades
         """
-        condition = ""
-        hogs = Counter(
-            [x["OmaHOG"] for x in self.entries_table.where("OmaHOG!=condition")]
-        )
+        hogs = Counter()
+        dot_pat = re.compile(b"\.")
+        for prot in self.entries_table.where("OmaHOG != b''"):
+            hogid = prot["OmaHOG"]
+            hogs[hogid] += 1
+            for m in dot_pat.finditer(hogid):
+                hogs[hogid[: m.start()]] += 1
         return hogs
 
     def get_all_hog_lvls(self):

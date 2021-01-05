@@ -2,6 +2,7 @@ import tables
 import pandas as pd
 import os
 import re
+from tqdm import tqdm
 from collections import Counter
 
 oma_browserdata_path = "{0}/{1}/data/OmaServer.h5"
@@ -32,6 +33,7 @@ class SanitySession(object):
         self.all_hogs = self.get_all_hogs()
         self.all_hog_lvls = self.get_all_hog_lvls()
         self.all_lvls = self.get_all_lvls()
+        self.xref_df = self.get_number_of_xrefs_per_species()
         print(self.release, "done")
 
     def read_oma_db(self):
@@ -108,3 +110,31 @@ class SanitySession(object):
             )
             result = re.sub(r"None", "", result)
         return result
+
+    def get_number_of_xrefs_per_species(self):
+        """load all the xrefs we have of each type and species"""
+        xreftab = self.h5_handle.root.XRef
+        enum = xreftab.get_enum("XRefSource")
+        genomes = self.h5_handle.root.Genome.read()
+        sorter = genomes.argsort(order=("EntryOff"))
+
+        def map_to_species(entry_nrs):
+            idx = genomes["EntryOff"].searchsorted(
+                entry_nrs - 1, side="right", sorter=sorter
+            )
+            return genomes[idx - 1]["UniProtSpeciesCode"]
+
+        cnts = Counter()
+        chunksize = xreftab.chunkshape[0]
+        for start in tqdm(
+            range(0, len(xreftab), chunksize), desc="processing xref-chunks"
+        ):
+            chunk = xreftab.read(start, start + chunksize)
+            orgs = map_to_species(chunk["EntryNr"])
+            for org, xref_instance in zip(orgs, chunk):
+                cnts[(org, enum(xref_instance["XRefSource"]))] += 1
+        df = pd.DataFrame(
+            [(org.decode(), source, counts) for (org, source), counts in cnts.items()],
+            columns=["Species", "Source", "Counts"],
+        )
+        return df

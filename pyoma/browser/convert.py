@@ -1742,7 +1742,7 @@ class RootHOGMetaDataLoader(object):
     by :attr:`meta_data_path`, which defaults to /RootHOG/MetaData.
     """
 
-    keyword_name = "Keywords.drw"
+    keyword_name = "RootHOG_Keywords.drw"
     expected_keys = ["Keywords"]
     tab_description = tablefmt.RootHOGMetaTable
     meta_data_path = "/RootHOG/MetaData"

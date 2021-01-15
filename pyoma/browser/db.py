@@ -565,8 +565,12 @@ class Database(object):
         lineage_sorter = numpy.argsort(lineage)
         try:
             fam = self.hog_family(entry)
+            start = time.time()
             hog_member = self.member_of_fam(fam)
+            logger.debug("DEBUG ---------- member_of_fam {} ".format(time.time() - start))
+            start = time.time()
             levels = self.filter_fam_from_hoglevel(fam)
+            logger.debug("DEBUG ---------- filter_fam_from_hoglevel tooks {} ".format(time.time() - start))
             # only keep the levels that are on the lineage to the query genome
             levels = levels[numpy.isin(levels["Level"], lineage)]
 
@@ -597,7 +601,9 @@ class Database(object):
                 return lineage[lin_idx[mask].min() - 1]
             return None
 
+        start = time.time()
         idx = list(is_paralogous(entry, hog_member[i]) for i in range(len(hog_member)))
+        logger.debug("DEBUG ---------- idx tooks {} ".format(time.time() - start))
         mask = numpy.asarray(idx, numpy.bool)
         paralogs = numpy.lib.recfunctions.append_fields(
             hog_member[mask],

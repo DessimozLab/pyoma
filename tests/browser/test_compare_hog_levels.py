@@ -51,7 +51,10 @@ class CompareHogLevels(unittest.TestCase):
             (child[6], "retained"),
         ]
         exp_res = merge_array_with_col(exp_res)
-        self.assertTrue((exp_res == compare_levels(parent, child)).all())
+        exp_nr_dupl = 2
+        diff, dupl = compare_levels(parent, child, return_duplication_events=True)
+        self.assertEqual(exp_nr_dupl, dupl)
+        self.assertTrue((exp_res == diff).all())
 
     def test_fam_1_to_5(self):
         child = self.child[self.child["Fam"] <= 5]
@@ -81,6 +84,33 @@ class CompareHogLevels(unittest.TestCase):
         ]
         exp_res = merge_array_with_col(exp_res)
         self.assertTrue((exp_res == compare_levels(parent, child)).all())
+
+
+class CompareLevelSpecialCases(unittest.TestCase):
+    def test_with_lost_subfamilies(self):
+        parent = numpy.array(
+            [
+                (1, b"HOG:0000001.1a", b"Parent"),
+                (1, b"HOG:0000001.1b", b"Parent"),
+                (1, b"HOG:0000001.1c", b"Parent"),
+            ],
+            dtype=[("Fam", "i4"), ("ID", "S255"), ("Level", "S255")],
+        )
+        child = numpy.array(
+            [(1, b"HOG:0000001.1a", b"Child"), (1, b"HOG:0000001.1c.4b", b"Child"),],
+            dtype=[("Fam", "i4"), ("ID", "S255"), ("Level", "S255")],
+        )
+        exp_res = [
+            (child[0], "retained"),
+            (parent[1], "lost"),
+            (child[1], "duplicated"),
+        ]
+        exp_res = merge_array_with_col(exp_res)
+
+        exp_dups = 1
+        diff, dupl = compare_levels(parent, child, return_duplication_events=True)
+        self.assertTrue((exp_res == diff).all())
+        self.assertEqual(exp_dups, dupl)
 
 
 if __name__ == "__main__":

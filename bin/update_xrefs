@@ -1,0 +1,63 @@
+#!/usr/bin/env python
+
+import time
+import pyoma.browser.convert
+from pyoma.browser import suffixsearch
+import logging
+
+logger = logging.getLogger("update-xrefs")
+
+
+def update_xrefs(filename):
+    exporter = pyoma.browser.convert.DarwinExporter(filename, mode="append")
+    nodes_to_remove = [
+        "/XRef",
+        "/_si_XRef",
+        "/Protein/DescriptionBuffer",
+        "/Protein/_si_Entries/",
+        "/Annotations/GeneOntology",
+        "/Annotations/EC",
+        "/Ontologies/GO",
+        "/RootHOG",
+        "/OmaGroups",
+    ]
+    for node in nodes_to_remove:
+        exporter.h5.remove_node(node, recursive=True)
+
+    exporter.add_xrefs()
+    exporter.add_group_metadata()
+    exporter.add_roothog_metadata()
+
+    logger.info("creating suffix index for Descriptions")
+    desc_buffer = exporter.h5.get_node("/Protein/DescriptionBuffer")
+    entryTab = exporter.h5.get_node("/Protein/Entries")
+    suffixsearch.create_suffix_index(entryTab, "DescriptionOffset", desc_buffer)
+
+    logger.info("creating index for xrefs (EntryNr and XRefId)")
+    xrefTab = exporter.h5.get_node("/XRef")
+    pyoma.browser.convert.create_index_for_columns(xrefTab, "EntryNr", "XRefId")
+    logger.info("creating suffix index for XRefId")
+    suffixsearch.create_suffix_index(xrefTab, "XRefId")
+
+    logger.info("creating index for go (EntryNr and TermNr)")
+    goTab = exporter.h5.get_node("/Annotations/GeneOntology")
+    pyoma.browser.convert.create_index_for_columns(goTab, "EntryNr", "TermNr")
+
+    logger.info("creating index for EC (EntryNr)")
+    ec_tab = exporter.h5.get_node("/Annotations/EC")
+    pyoma.browser.convert.create_index_for_columns(ec_tab, "EntryNr", "ECacc")
+
+    exporter.close()
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Update the type of pairwise orthology  in all genomes pairs"
+    )
+    parser.add_argument("hdf5", help="Path to the hdf5 database")
+    conf = parser.parse_args()
+    logging.basicConfig(level=logging.INFO)
+
+    update_xrefs(conf.hdf5)

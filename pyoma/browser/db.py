@@ -567,10 +567,16 @@ class Database(object):
             fam = self.hog_family(entry)
             start = time.time()
             hog_member = self.member_of_fam(fam)
-            logger.debug("DEBUG ---------- member_of_fam {} ".format(time.time() - start))
+            logger.debug(
+                "DEBUG ---------- member_of_fam {} ".format(time.time() - start)
+            )
             start = time.time()
             levels = self.filter_fam_from_hoglevel(fam)
-            logger.debug("DEBUG ---------- filter_fam_from_hoglevel tooks {} ".format(time.time() - start))
+            logger.debug(
+                "DEBUG ---------- filter_fam_from_hoglevel tooks {} ".format(
+                    time.time() - start
+                )
+            )
             # only keep the levels that are on the lineage to the query genome
             levels = levels[numpy.isin(levels["Level"], lineage)]
 
@@ -851,6 +857,8 @@ class Database(object):
         for row in self.db.root.HogLevel.where(query):
             hog = row.fetch_all_fields()
             if not hog_id.startswith(hog["ID"]):
+                continue
+            if len(hog_id) > len(hog["ID"]) and hog_id[len(hog["ID"])] != b".":
                 continue
             if hog["Level"] in parent_pos:
                 parent_hogs.append(HOG(self, hog))

@@ -858,7 +858,7 @@ class Database(object):
             hog = row.fetch_all_fields()
             if not hog_id.startswith(hog["ID"]):
                 continue
-            if len(hog_id) > len(hog["ID"]) and hog_id[len(hog["ID"])] != b".":
+            if len(hog_id) > len(hog["ID"]) and hog_id[len(hog["ID"])] != ord("."):
                 continue
             if hog["Level"] in parent_pos:
                 parent_hogs.append(HOG(self, hog))

@@ -605,7 +605,7 @@ class Database(object):
 
         ext_prot_dtype = numpy.dtype(entry.dtype.descr + [("DivergenceLevel", "S255")])
         paralogs = numpy.fromiter(
-            filter_candidates(entry, itertools.islice(hog_member, start, stop)),
+            itertools.islice(filter_candidates(entry, hog_member), start, stop),
             dtype=ext_prot_dtype,
         )
         return paralogs

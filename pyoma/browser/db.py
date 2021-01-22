@@ -550,7 +550,7 @@ class Database(object):
         )
         return induced_orthologs
 
-    def get_hog_induced_pairwise_paralogs(self, entry):
+    def get_hog_induced_pairwise_paralogs(self, entry, start=0, stop=None):
         """This method retrieves the hog induced pairwise paralogs
 
         The method returns a numpy array with the entries
@@ -565,24 +565,14 @@ class Database(object):
         lineage_sorter = numpy.argsort(lineage)
         try:
             fam = self.hog_family(entry)
-            start = time.time()
-            hog_member = self.member_of_fam(fam)
-            logger.debug(
-                "DEBUG ---------- member_of_fam {} ".format(time.time() - start)
-            )
-            start = time.time()
-            levels = self.filter_fam_from_hoglevel(fam)
-            logger.debug(
-                "DEBUG ---------- filter_fam_from_hoglevel tooks {} ".format(
-                    time.time() - start
-                )
-            )
-            # only keep the levels that are on the lineage to the query genome
-            levels = levels[numpy.isin(levels["Level"], lineage)]
-
         except Singleton:
             # an empty fetch
             hog_member = self.db.root.Protein.Entries[0:0]
+        else:
+            levels = self.filter_fam_from_hoglevel(fam)
+            # only keep the levels that are on the lineage to the query genome
+            levels = levels[numpy.isin(levels["Level"], lineage)]
+            hog_member = self._members_of_hog_id(self.format_hogid(fam))
 
         def is_paralogous(a, b):
             """genes are orthologs if their HOG id have a common prefix that is
@@ -607,15 +597,16 @@ class Database(object):
                 return lineage[lin_idx[mask].min() - 1]
             return None
 
-        start = time.time()
-        idx = list(is_paralogous(entry, hog_member[i]) for i in range(len(hog_member)))
-        logger.debug("DEBUG ---------- idx tooks {} ".format(time.time() - start))
-        mask = numpy.asarray(idx, numpy.bool)
-        paralogs = numpy.lib.recfunctions.append_fields(
-            hog_member[mask],
-            names="DivergenceLevel",
-            data=[z for z in idx if z],
-            usemask=False,
+        def filter_candidates(entry, candidates):
+            for cand in candidates:
+                lev = is_paralogous(entry, cand)
+                if lev:
+                    yield tuple(cand) + (lev,)
+
+        ext_prot_dtype = numpy.dtype(entry.dtype.descr + [("DivergenceLevel", "S255")])
+        paralogs = numpy.fromiter(
+            filter_candidates(entry, itertools.islice(hog_member, start, stop)),
+            dtype=ext_prot_dtype,
         )
         return paralogs
 
@@ -1065,8 +1056,7 @@ class Database(object):
             )
 
     def get_all_hogs_at_level(self, level, compare_with=None):
-        """returns a :class:`numpy.array` instance with all hogs at the requested level
-        """
+        """returns a :class:`numpy.array` instance with all hogs at the requested level"""
         taxid = self.taxid_from_level(level)
         try:
             hog_data = self.db.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()

@@ -1,4 +1,5 @@
 import logging
+import numpy
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,20 @@ class HogLevelFilter(object):
         tax_below_level = self.db.tax.get_subtaxonomy_rooted_at(level)
         self.sub_level_distances = self._build_distance_to_query_level_lookup(
             tax_below_level
+        )
+        self.parent_levels = set(
+            db.tax.get_parent_taxa(
+                db.tax.get_taxnode_from_name_or_taxid(level)[0]["NCBITaxonId"]
+            )["Name"]
+        )
+        # cache all the families nrs that are defined in the clade of interest
+        self.fams_in_clade = set(
+            int(roothog["Fam"])
+            for roothog in db.get_hdf5_handle().root.HogLevel.where(
+                '~contains(ID, b".") & (IsRoot == True)'
+            )
+            if roothog["Level"] in self.sub_level_distances
+            or roothog["Level"] in self.parent_levels
         )
 
     def _build_distance_to_query_level_lookup(self, tax):
@@ -48,6 +63,8 @@ class HogLevelFilter(object):
 
     def analyse_families(self, it):
         for fam in it:
+            if fam not in self.fams_in_clade:
+                continue
             subhog_ids = self.db.get_subhogids_at_level(fam_nr=fam, level=self.level)
             if len(subhog_ids) == 0:
                 # let's check if we have any level in the family that is a sub clade
@@ -58,3 +75,55 @@ class HogLevelFilter(object):
             else:
                 for subhog_id in subhog_ids:
                     yield (subhog_id, self.level)
+
+
+def compare_levels(
+    parent_level_hogs: numpy.array,
+    children_level_hogs: numpy.array,
+    return_duplication_events=False,
+):
+    """compares hogs at two levels and returns duplicated/lost/gained/identical states
+
+    The function requires that the hogs are sorted numpy arrays according to their HOGid"""
+    annotated = []
+    dups = 0
+    i = j = 0
+    while i < len(parent_level_hogs) and j < len(children_level_hogs):
+        if parent_level_hogs[i]["Fam"] < children_level_hogs[j]["Fam"]:
+            annotated.append(tuple(parent_level_hogs[i]) + (b"lost",))
+            i += 1
+        elif parent_level_hogs[i]["Fam"] > children_level_hogs[j]["Fam"]:
+            annotated.append(tuple(children_level_hogs[j]) + (b"gained",))
+            j += 1
+        else:
+            if parent_level_hogs[i]["ID"] == children_level_hogs[j]["ID"]:
+                annotated.append(tuple(children_level_hogs[j]) + (b"retained",))
+                i += 1
+                j += 1
+            else:
+                dupl_fnd = 0
+                while j < len(children_level_hogs) and children_level_hogs[j][
+                    "ID"
+                ].startswith(parent_level_hogs[i]["ID"]):
+                    annotated.append(tuple(children_level_hogs[j]) + (b"duplicated",))
+                    j += 1
+                    dupl_fnd += 1
+                if dupl_fnd > 0:
+                    # parent duplicated into at least one subhog
+                    dups += 1
+                else:
+                    # parent subhog does not exist, it is lost
+                    annotated.append(tuple(parent_level_hogs[i]) + (b"lost",))
+                i += 1
+
+    while i < len(parent_level_hogs):
+        annotated.append(tuple(parent_level_hogs[i]) + (b"lost",))
+        i += 1
+    while j < len(children_level_hogs):
+        annotated.append(tuple(children_level_hogs[j]) + (b"gained",))
+        j += 1
+    dt = children_level_hogs.dtype.descr + [("Event", "S10")]
+    diff = numpy.array(annotated, dtype=dt)
+    if return_duplication_events:
+        return diff, dups
+    return diff

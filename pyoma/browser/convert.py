@@ -9,6 +9,7 @@ import hashlib
 import itertools
 import json
 import multiprocessing as mp
+import concurrent.futures
 import operator
 import os
 import re
@@ -37,6 +38,7 @@ from .compute_cache import compute_and_store_cached_data
 from .geneontology import GeneOntology, OntologyParser
 from .homoeologs import HomeologsConfidenceCalculator
 from .synteny import SyntenyScorer
+from . import hoghelper
 from .. import common, version
 
 with hooks():
@@ -222,6 +224,16 @@ def read_vps_from_tsv(gs, ref_genome, basedir=None):
     pool.close()
     common.package_logger.info("loaded vps for {}".format(ref_genome.decode()))
     return numpy.lib.recfunctions.stack_arrays(all_pairs, usemask=False)
+
+
+def load_hogs_at_level(fname, level):
+    with tables.open_file(fname, "r") as h5:
+        lev = level.encode("utf-8") if isinstance(level, str) else level
+        tab = h5.get_node("/HogLevel")
+        hog_it = (row.fetch_all_fields() for row in tab.where("Level == lev"))
+        hogs = numpy.fromiter(hog_it, dtype=tab.dtype)
+        hogs.sort(order="ID")
+        return hogs
 
 
 class DataImportError(Exception):
@@ -909,6 +921,52 @@ class DarwinExporter(object):
             row["HogAugmentedBufferLength"] = length["augmented"]
             row.append()
 
+    def add_cache_of_hogs_by_level(self, nr_procs=None):
+        self.logger.info("createing cached HogLevel table per level")
+        hl_tab = self.h5.get_node("/HogLevel")
+        temp_hoglevel_file = os.path.join(
+            os.getenv("DARWIN_NETWORK_SCRATCH_PATH"), "tmp-hoglevel.h5"
+        )
+        with tables.open_file(temp_hoglevel_file, "w") as hlfh:
+            hl_tab._f_copy(hlfh.root)
+            create_index_for_columns(hlfh.get_node("/HogLevel"), "Level")
+
+        rel_levels = set(hl_tab.read(field="Level"))
+        self.logger.info(
+            "found {} levels, start extracting hogs in parallel".format(len(rel_levels))
+        )
+        lev2tax = {
+            row["Name"]: int(row["NCBITaxonId"])
+            for row in self.h5.get_node("/Taxonomy").read()
+        }
+        lev2tax[b"LUCA"] = 0
+        with concurrent.futures.ProcessPoolExecutor(max_workers=nr_procs) as pool:
+            future_to_level = {
+                pool.submit(
+                    load_hogs_at_level, fname=temp_hoglevel_file, level=level
+                ): level
+                for level in rel_levels
+            }
+            for future in concurrent.futures.as_completed(future_to_level):
+                level = future_to_level[future]
+                try:
+                    hogs = future.result()
+                    tab = self.h5.create_table(
+                        "/Hogs_per_Level",
+                        "tax{}".format(lev2tax[level]),
+                        title="cached HogLevel data for {}".format(level.decode()),
+                        obj=hogs,
+                        createparents=True,
+                        expectedrows=len(hogs),
+                    )
+                    create_index_for_columns(
+                        tab, "Fam", "IsRoot", "NrMemberGenes", "CompletenessScore"
+                    )
+                except Exception as exc:
+                    msg = "cannot store cached hogs for {}".format(level)
+                    self.logger.exception(msg)
+                    pass
+
     def xref_databases(self):
         return os.path.join(os.environ["DARWIN_BROWSERDATA_PATH"], "ServerIndexed.db")
 
@@ -1339,8 +1397,8 @@ class DarwinExporter(object):
 
     def add_sequence_suffix_array(self, k=6, fn=None, sa=None):
         """
-            Adds the sequence suffix array to the database. NOTE: this
-            (obviously) requires A LOT of memory for large DBs.
+        Adds the sequence suffix array to the database. NOTE: this
+        (obviously) requires A LOT of memory for large DBs.
         """
         # Ensure we're run in correct order...
         assert "Protein" in self.h5.root, "Add proteins before calc. SA!"
@@ -1451,8 +1509,11 @@ class DarwinExporter(object):
 
         # Used later
         hl_tab = self.h5.get_node("/HogLevel")
-        if not hl_tab.colindexed["Fam"]:
-            hl_tab.colinstances["Fam"].create_csindex()
+        create_index_for_columns(hl_tab, "Fam", "IsRoot")
+        fam_to_rootlevel = {
+            int(row["Fam"]): row["Level"].decode()
+            for row in hl_tab.where('~contains(ID, b".") & (IsRoot == True)')
+        }
 
         # Load the HOG -> Entry table to memory
         prot_tab = self.h5.root.Protein.Entries
@@ -1505,9 +1566,7 @@ class DarwinExporter(object):
                     # DA exists in more than one member.
                     cons_da = da[0][0]
                     repr_entry = da[0][1][0]
-                    tl = hl_tab.read_where("Fam == {}".format(hog_id))[0][
-                        "Level"
-                    ].decode("ascii")
+                    tl = fam_to_rootlevel[hog_id]
                     rep_len = hdf[hdf["EntryNr"] == repr_entry]["SeqBufferLength"]
                     rep_len = int(rep_len if len(rep_len) == 1 else list(rep_len)[0])
 
@@ -1684,7 +1743,7 @@ class RootHOGMetaDataLoader(object):
     by :attr:`meta_data_path`, which defaults to /RootHOG/MetaData.
     """
 
-    keyword_name = "Keywords.drw"
+    keyword_name = "RootHOG_Keywords.drw"
     expected_keys = ["Keywords"]
     tab_description = tablefmt.RootHOGMetaTable
     meta_data_path = "/RootHOG/MetaData"
@@ -2490,8 +2549,7 @@ class ApproximateXRefImporter(object):
 
 class DarwinDbEntryParser:
     def __init__(self):
-        """Initializes a Parser for SGML formatted darwin database file
-        """
+        """Initializes a Parser for SGML formatted darwin database file"""
         self.tag_handlers = collections.defaultdict(list)
         self.end_of_entry_notifier = []
 
@@ -2506,7 +2564,7 @@ class DarwinDbEntryParser:
         self.end_of_entry_notifier.append(handler)
 
     def parse_entrytags(self, fh):
-        """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,
+        """AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,
         ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ,
         SwissProt, SwissProt_AC, UniProt/TrEMBL, WikiGene, flybase_transcript_id
 
@@ -2590,12 +2648,19 @@ class PerGenomeOMAGroupAuxDataAdder(object):
             return Goff.searchsorted(entry_nr, side="left") - 1
 
         grp_members = self.get_group_members(etab)
-        for grp, memb in grp_members.items():
-            gnrs = list(map(enr_to_gnr, memb))
-            in_groups[gnrs] += 1
+        for grp, memb in tqdm(grp_members.items()):
+            t0 = time.time()
+            gnrs = collections.Counter(map(enr_to_gnr, memb))
+            for gn, cnts in gnrs.items():
+                in_groups[gn] += cnts
             for g1, g2 in itertools.combinations(gnrs, 2):
                 shared_ogs[g1, g2] += 1
                 shared_ogs[g2, g1] += 1
+            common.package_logger.info(
+                "grp {} with {} members took {:.1f}msec".format(
+                    grp, len(memb), 1000 * (time.time() - t0)
+                )
+            )
         self.shared_ogs = shared_ogs
         self.in_groups = in_groups
 
@@ -2644,14 +2709,7 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
     :param fpath: path to genomes.json file
     :param h5: hdf5 database handle."""
     common.package_logger.info("Augmenting genomes.json file with Nr of HOGs per level")
-    # load nr of ancestral genomes at each level
-    ancestral_hogs = collections.Counter()
-    step = 2 ** 15
-    hog_tab = h5.get_node("/HogLevel")
-    for start in range(0, len(hog_tab), step):
-        ancestral_hogs.update(
-            (l.decode() for l in hog_tab.read(start, stop=start + step, field="Level"))
-        )
+
     # load taxonomy and sorter by Name
     tax = h5.get_node("/Taxonomy").read()
     sorter = numpy.argsort(tax["Name"])
@@ -2659,26 +2717,38 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
         genomes = json.load(fh)
     os.rename(fpath, fpath + ".bak")
 
-    def traverse(node):
+    def traverse(node, parent_hogs=None):
         if "children" not in node:
             return
-        for child in node["children"]:
-            traverse(child)
-        try:
-            node["nr_hogs"] = ancestral_hogs[node["name"]]
-        except KeyError as e:
-            common.package_logger.warning("no ancestral hog counts for " + node["name"])
-            node["nr_hogs"] = 0
 
+        if parent_hogs is None:
+            parent_hogs = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
         try:
             n = node["name"].encode("utf-8")
             idx = numpy.searchsorted(tax["Name"], n, sorter=sorter)
             if tax["Name"][sorter[idx]] == n:
-                node["taxid"] = int(tax["NCBITaxonId"][sorter[idx]])
+                node["taxid"] = taxid = int(tax["NCBITaxonId"][sorter[idx]])
+            elif n == b"LUCA":
+                taxid = 0
             else:
+                node["nr_hogs"] = 0
                 raise ValueError("not in taxonomy: {}".format(n))
+            hog_level = h5.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()
+            node["nr_hogs"] = len(hog_level)
+            diff_parent, dupl_events = hoghelper.compare_levels(
+                parent_hogs, hog_level, return_duplication_events=True
+            )
+            changes = collections.defaultdict(int)
+            for x in diff_parent["Event"]:
+                changes[x.decode()] += 1
+            changes["duplications"] = dupl_events
+            node["evolutionaryEvents"] = changes
         except Exception:
             common.package_logger.exception("Cannot identify taxonomy id")
+            hog_level = parent_hogs.copy()
+
+        for child in node["children"]:
+            traverse(child, parent_hogs=hog_level)
 
     traverse(genomes)
     with open(fpath, "wt") as fh:
@@ -2756,6 +2826,7 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level="INFO"
     x.add_sequence_suffix_array(k=k, fn=idx_name)
     x.update_summary_stats()
     x.add_per_species_aux_groupdata()
+    x.add_cache_of_hogs_by_level(min(os.cpu_count(), 32))
     genomes_json_fname = os.path.normpath(
         os.path.join(os.path.dirname(x.h5.filename), "..", "downloads", "genomes.json")
     )

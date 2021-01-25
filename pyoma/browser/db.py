@@ -30,6 +30,7 @@ from tqdm import tqdm
 from .KmerEncoder import KmerEncoder
 from .decorators import timethis
 from .geneontology import GeneOntology, OntologyParser, GOAspect
+from .hoghelper import compare_levels
 from .hogprofile import Profiler
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
 from .suffixsearch import SuffixSearcher, SuffixIndexError
@@ -549,7 +550,7 @@ class Database(object):
         )
         return induced_orthologs
 
-    def get_hog_induced_pairwise_paralogs(self, entry):
+    def get_hog_induced_pairwise_paralogs(self, entry, start=0, stop=None):
         """This method retrieves the hog induced pairwise paralogs
 
         The method returns a numpy array with the entries
@@ -564,14 +565,14 @@ class Database(object):
         lineage_sorter = numpy.argsort(lineage)
         try:
             fam = self.hog_family(entry)
-            hog_member = self.member_of_fam(fam)
-            levels = self.filter_fam_from_hoglevel(fam)
-            # only keep the levels that are on the lineage to the query genome
-            levels = levels[numpy.isin(levels["Level"], lineage)]
-
         except Singleton:
             # an empty fetch
             hog_member = self.db.root.Protein.Entries[0:0]
+        else:
+            levels = self.filter_fam_from_hoglevel(fam)
+            # only keep the levels that are on the lineage to the query genome
+            levels = levels[numpy.isin(levels["Level"], lineage)]
+            hog_member = self._members_of_hog_id(self.format_hogid(fam))
 
         def is_paralogous(a, b):
             """genes are orthologs if their HOG id have a common prefix that is
@@ -596,13 +597,16 @@ class Database(object):
                 return lineage[lin_idx[mask].min() - 1]
             return None
 
-        idx = list(is_paralogous(entry, hog_member[i]) for i in range(len(hog_member)))
-        mask = numpy.asarray(idx, numpy.bool)
-        paralogs = numpy.lib.recfunctions.append_fields(
-            hog_member[mask],
-            names="DivergenceLevel",
-            data=[z for z in idx if z],
-            usemask=False,
+        def filter_candidates(entry, candidates):
+            for cand in candidates:
+                lev = is_paralogous(entry, cand)
+                if lev:
+                    yield tuple(cand) + (lev,)
+
+        ext_prot_dtype = numpy.dtype(entry.dtype.descr + [("DivergenceLevel", "S255")])
+        paralogs = numpy.fromiter(
+            itertools.islice(filter_candidates(entry, hog_member), start, stop),
+            dtype=ext_prot_dtype,
         )
         return paralogs
 
@@ -845,6 +849,8 @@ class Database(object):
             hog = row.fetch_all_fields()
             if not hog_id.startswith(hog["ID"]):
                 continue
+            if len(hog_id) > len(hog["ID"]) and hog_id[len(hog["ID"])] != ord("."):
+                continue
             if hog["Level"] in parent_pos:
                 parent_hogs.append(HOG(self, hog))
         parent_hogs.sort(key=lambda x: parent_pos[x._hog["Level"]])
@@ -1049,6 +1055,22 @@ class Database(object):
                 )
             )
 
+    def get_all_hogs_at_level(self, level, compare_with=None):
+        """returns a :class:`numpy.array` instance with all hogs at the requested level"""
+        taxid = self.taxid_from_level(level)
+        try:
+            hog_data = self.db.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()
+        except tables.NoSuchNodeError:
+            logger.warning(
+                "Cannot load Hogs_per_Level. extracting from main table. SLOW!"
+            )
+            hog_data = self.db.get_node("/HogLevel").read_where("Level == level")
+        if compare_with is None:
+            return hog_data
+        compare_hog = self.get_all_hogs_at_level(compare_with)
+        diff = compare_levels(compare_hog, hog_data)
+        return diff
+
     def get_roothog_keywords(self, fam) -> str:
         """Retrieve the keywords for a given toplevel HOG.
 
@@ -1170,15 +1192,7 @@ class Database(object):
         """
         hl_tab = self.db.get_node("/HogLevel")
         hog_row = self.get_hog(hog_id, level, "_NROW")
-        try:
-            taxnodes = self.tax.get_taxnode_from_name_or_taxid(level)
-            taxid_of_level = int(taxnodes[0]["NCBITaxonId"])
-        except KeyError:
-            if level == "LUCA":
-                taxid_of_level = 0
-            else:
-                raise
-
+        taxid_of_level = self.taxid_from_level(level)
         try:
             edge_data = self.db.get_node(
                 "/AncestralSynteny/tax{}".format(taxid_of_level)
@@ -1197,6 +1211,17 @@ class Database(object):
         ]
         S = G.subgraph(neighbors)
         return nx.relabel_nodes(S, lambda x: hl_tab[x]["ID"].decode())
+
+    def taxid_from_level(self, level):
+        try:
+            taxnodes = self.tax.get_taxnode_from_name_or_taxid(level)
+            taxid_of_level = int(taxnodes[0]["NCBITaxonId"])
+        except KeyError:
+            if level == b"LUCA" or level == "LUCA":
+                taxid_of_level = 0
+            else:
+                raise
+        return taxid_of_level
 
     def get_neighbor_hogs(self, hog_id, level):
         """returns the direct neighbor hogs of a given ancestral hog

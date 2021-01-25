@@ -85,13 +85,12 @@ class Profiler(object):
         similar = self.forest.query(minhash, k=k)
 
         jaccard_distance = {}
-        for sim in self.forest.query(minhash, k=k):
+        for sim in similar:
             sval = self.hashes[int(sim)].reshape(self.num_perm, 2)
             shash = datasketch.WeightedMinHash(seed=1, hashvalues=sval)
             jaccard_distance[sim] = shash.jaccard(minhash)
 
         return ProfileSearchResult(self, fam_nr, similar, jaccard_distance)
-
 
 
 class ProfileSearchResult(object):

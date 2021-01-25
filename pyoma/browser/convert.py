@@ -1397,8 +1397,8 @@ class DarwinExporter(object):
 
     def add_sequence_suffix_array(self, k=6, fn=None, sa=None):
         """
-            Adds the sequence suffix array to the database. NOTE: this
-            (obviously) requires A LOT of memory for large DBs.
+        Adds the sequence suffix array to the database. NOTE: this
+        (obviously) requires A LOT of memory for large DBs.
         """
         # Ensure we're run in correct order...
         assert "Protein" in self.h5.root, "Add proteins before calc. SA!"
@@ -1509,8 +1509,11 @@ class DarwinExporter(object):
 
         # Used later
         hl_tab = self.h5.get_node("/HogLevel")
-        if not hl_tab.colindexed["Fam"]:
-            hl_tab.colinstances["Fam"].create_csindex()
+        create_index_for_columns(hl_tab, "Fam", "IsRoot")
+        fam_to_rootlevel = {
+            int(row["Fam"]): row["Level"].decode()
+            for row in hl_tab.where('~contains(ID, b".") & (IsRoot == True)')
+        }
 
         # Load the HOG -> Entry table to memory
         prot_tab = self.h5.root.Protein.Entries
@@ -1563,9 +1566,7 @@ class DarwinExporter(object):
                     # DA exists in more than one member.
                     cons_da = da[0][0]
                     repr_entry = da[0][1][0]
-                    tl = hl_tab.read_where("Fam == {}".format(hog_id))[0][
-                        "Level"
-                    ].decode("ascii")
+                    tl = fam_to_rootlevel[hog_id]
                     rep_len = hdf[hdf["EntryNr"] == repr_entry]["SeqBufferLength"]
                     rep_len = int(rep_len if len(rep_len) == 1 else list(rep_len)[0])
 
@@ -2563,7 +2564,7 @@ class DarwinDbEntryParser:
         self.end_of_entry_notifier.append(handler)
 
     def parse_entrytags(self, fh):
-        """ AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,
+        """AC, CHR, DE, E, EMBL, EntrezGene, GI, GO, HGNC_Name, HGNC_Sym,
         ID, InterPro, LOC, NR , OG, OS, PMP, Refseq_AC, Refseq_ID, SEQ,
         SwissProt, SwissProt_AC, UniProt/TrEMBL, WikiGene, flybase_transcript_id
 
@@ -2647,12 +2648,19 @@ class PerGenomeOMAGroupAuxDataAdder(object):
             return Goff.searchsorted(entry_nr, side="left") - 1
 
         grp_members = self.get_group_members(etab)
-        for grp, memb in grp_members.items():
-            gnrs = list(map(enr_to_gnr, memb))
-            in_groups[gnrs] += 1
+        for grp, memb in tqdm(grp_members.items()):
+            t0 = time.time()
+            gnrs = collections.Counter(map(enr_to_gnr, memb))
+            for gn, cnts in gnrs.items():
+                in_groups[gn] += cnts
             for g1, g2 in itertools.combinations(gnrs, 2):
                 shared_ogs[g1, g2] += 1
                 shared_ogs[g2, g1] += 1
+            common.package_logger.info(
+                "grp {} with {} members took {:.1f}msec".format(
+                    grp, len(memb), 1000 * (time.time() - t0)
+                )
+            )
         self.shared_ogs = shared_ogs
         self.in_groups = in_groups
 

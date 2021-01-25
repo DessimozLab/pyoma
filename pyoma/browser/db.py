@@ -30,10 +30,10 @@ from tqdm import tqdm
 from .KmerEncoder import KmerEncoder
 from .decorators import timethis
 from .geneontology import GeneOntology, OntologyParser, GOAspect
+from .hoghelper import compare_levels
 from .hogprofile import Profiler
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
 from .suffixsearch import SuffixSearcher, SuffixIndexError
-from .hoghelper import compare_levels
 from .. import version
 
 logger = logging.getLogger(__name__)

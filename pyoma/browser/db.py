@@ -562,6 +562,9 @@ class Database(object):
         entry = self.ensure_entry(entry)
         genome = self.id_mapper["OMA"].genome_of_entry_nr(entry["EntryNr"])
         lineage = self.tax.get_parent_taxa(genome["NCBITaxonId"])["Name"]
+        lineage = numpy.fromiter(
+            filter(lambda x: x in self.tax.all_hog_levels, lineage), dtype=lineage.dtype
+        )
         lineage_sorter = numpy.argsort(lineage)
         try:
             fam = self.hog_family(entry)

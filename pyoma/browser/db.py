@@ -1209,9 +1209,23 @@ class Database(object):
             edge_data = []
         G = nx.Graph()
         G.add_weighted_edges_from(edge_data)
-        neighbors = [hog_row] + [
-            v for u, v in nx.bfs_edges(G, source=hog_row, depth_limit=steps)
-        ]
+        try:
+            neighbors = [hog_row] + [
+                v for u, v in nx.bfs_edges(G, source=hog_row, depth_limit=steps)
+            ]
+        except nx.exception.NetworkXError as e:
+            logger.error(
+                "Trying to access a non-stored HOG in the ancestral synteny graph: "
+                "HOG: {}, Level: {}, taxid: {}, hog_row: {}, Size of Graph: N={}, E={}".format(
+                    hog_id, level, taxid_of_level, hog_row, len(G), len(G.edges)
+                )
+            )
+            raise DBConsistencyError(
+                'Cannot find HOG "{}/{}" in Ancestral synteny graph'.format(
+                    hog_id, level
+                )
+            )
+
         S = G.subgraph(neighbors)
         return nx.relabel_nodes(S, lambda x: hl_tab[x]["ID"].decode())
 

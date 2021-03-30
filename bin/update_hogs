@@ -9,7 +9,9 @@ import tables
 logger = logging.getLogger("update-hog")
 
 
-def update_hogs(h5_filename, tree, orthoxml_file=None, orthoxml_dir=None):
+def update_hogs(
+    h5_filename, tree, orthoxml_file=None, orthoxml_dir=None, release_char=None
+):
     exporter = pyoma.browser.convert.DarwinExporter(h5_filename, mode="append")
     for node in ("/HogLevel", "/OrthoXML", "/HOGAnnotations"):
         try:
@@ -20,7 +22,12 @@ def update_hogs(h5_filename, tree, orthoxml_file=None, orthoxml_dir=None):
     os.environ["DARWIN_NETWORK_SCRATCH_PATH"] = os.path.join(
         os.getenv("TMPDIR", "/tmp"), "pyoma-update"
     )
-    exporter.add_hogs(hog_path=orthoxml_dir, hog_file=orthoxml_file, tree_filename=tree)
+    exporter.add_hogs(
+        hog_path=orthoxml_dir,
+        hog_file=orthoxml_file,
+        tree_filename=tree,
+        release=release_char,
+    )
     exporter.add_hog_domain_prevalence()
 
     hogTab = exporter.h5.get_node("/HogLevel")
@@ -57,8 +64,19 @@ if __name__ == "__main__":
         default=None,
         help="directory containing individual orthoxml files, one per hog",
     )
+    parser.add_argument(
+        "--release",
+        "-r",
+        help="A single character indicating the " "release in the HOG ids",
+    )
     parser.add_argument("taxonomy", help="Taxonomy file in newick format")
     conf = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
 
-    update_hogs(conf.hdf5, conf.taxonomy, conf.orthoxml_file, conf.orthoxml_dir)
+    update_hogs(
+        conf.hdf5,
+        conf.taxonomy,
+        conf.orthoxml_file,
+        conf.orthoxml_dir,
+        release_char=conf.release,
+    )

@@ -802,7 +802,9 @@ class DarwinExporter(object):
         :param str hog_file: File containing all HOGs. if hog_path does not
                              exist, this file is split and stored in hog_path.
 
-        :param str tree_filename: newick species tree file."""
+        :param str tree_filename: newick species tree file.
+
+        :param str release: a single character indicating the release in the HOG ids"""
         if hog_path is None:
             hog_path = os.path.normpath(
                 os.path.join(
@@ -822,7 +824,9 @@ class DarwinExporter(object):
                     "downloads",
                     "oma-hogs.orthoXML.gz",
                 )
-            splitter = OrthoXMLSplitter(hog_file, cache_dir=hog_path)
+            splitter = OrthoXMLSplitter(
+                hog_file, cache_dir=hog_path, release_char=release
+            )
             splitter()
         tax_tab = self.h5.get_node("/Taxonomy")
         tax_2_code = {
@@ -2785,7 +2789,14 @@ def getLogger(level="DEBUG"):
     return log
 
 
-def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level="INFO"):
+def main(
+    name="OmaServer.h5",
+    k=6,
+    idx_name=None,
+    domains=None,
+    log_level="INFO",
+    release=None,
+):
     idx_name = (name + ".idx") if idx_name is None else idx_name
 
     log = getLogger(log_level)
@@ -2795,7 +2806,7 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level="INFO"
     x.add_orthologs()
     x.add_same_species_relations()
     x.add_proteins()
-    x.add_hogs()
+    x.add_hogs(release=release)
     x.add_xrefs()
     x.add_synteny_scores()
     x.add_homoeology_confidence()

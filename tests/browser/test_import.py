@@ -342,3 +342,9 @@ class HogConverterTest(unittest.TestCase):
         conv = HogConverter(self.h5.root.Entries, release_char="B")
         levels = conv.convert_file(self.orthoxml_file)
         self.assertTrue(all(map(lambda row: row[1].startswith("HOG:B0"), levels)))
+
+    def test_invalid_release_char(self):
+        for release_char in ("a", "AB", " "):
+            with self.subTest(release_char=release_char):
+                with self.assertRaises(ValueError):
+                    conv = HogConverter(self.h5.root.Entries, release_char=release_char)

@@ -320,6 +320,9 @@ class HogConverterTest(unittest.TestCase):
             obj=numpy.zeros(6, tables.dtype_from_descr(tablefmt.ProteinTable)),
         )
 
+    def tearDown(self):
+        self.h5.close()
+
     def test_extract_levels(self):
         conv = HogConverter(self.h5.root.Entries)
         levels = conv.convert_file(self.orthoxml_file)

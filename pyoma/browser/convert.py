@@ -792,7 +792,7 @@ class DarwinExporter(object):
         else:
             self.logger.info("no data written for {}".format(tab._v_pathname))
 
-    def add_hogs(self, hog_path=None, hog_file=None, tree_filename=None):
+    def add_hogs(self, hog_path=None, hog_file=None, tree_filename=None, release=None):
         """adds the HOGs to the database
 
         :param str hog_path: optional, directory where the split HOG files are stored or
@@ -829,7 +829,7 @@ class DarwinExporter(object):
             int(row["NCBITaxonId"]): row["UniProtSpeciesCode"].decode()
             for row in self.h5.get_node("/Genome")
         }
-        hog_converter = HogConverter(entryTab, tax_tab, tax_2_code)
+        hog_converter = HogConverter(entryTab, release, tax_tab, tax_2_code)
         hog_converter.attach_newick_taxonomy(tree_filename)
         hogTab = self.h5.create_table(
             "/",
@@ -2083,8 +2083,8 @@ class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
 
 
 class HogConverter(object):
-    def __init__(self, entry_tab, tax_tab=None, tax_2_code=None):
-        self.fam_re = re.compile(r"HOG:(?P<fam_nr>\d+)")
+    def __init__(self, entry_tab, release_char=None, tax_tab=None, tax_2_code=None):
+        self.fam_re = re.compile(r"HOG:(?P<release>[A-Z]+)?(?P<fam_nr>\d+)")
         self.hogs = numpy.zeros(
             shape=(len(entry_tab) + 1,), dtype=entry_tab.cols.OmaHOG.dtype
         )
@@ -2093,6 +2093,16 @@ class HogConverter(object):
             self._extract_taxrange_2_taxid_map(tax_tab) if tax_tab else None
         )
         self.taxid_2_code = tax_2_code
+        if release_char is None:
+            self.release_char = ""
+        elif re.match(r"^[A-Z]?$", release_char):
+            self.release_char = release_char
+        else:
+            raise ValueError(
+                "invalid release_char value: {}. Expected is a single capital ascii character".format(
+                    release_char
+                )
+            )
 
     def _extract_taxrange_2_taxid_map(self, tax_tab):
         return {row["Name"].decode(): int(row["NCBITaxonId"]) for row in tax_tab}
@@ -2103,7 +2113,9 @@ class HogConverter(object):
     def _assert_hogid_has_correct_prefix(self, fa_parser):
         for grp in fa_parser.getToplevelGroups():
             if not grp.get("id").startswith("HOG:"):
-                grp.set("id", "HOG:{:07d}".format(int(grp.get("id"))))
+                grp.set(
+                    "id", "HOG:{:s}{:07d}".format(self.release_char, int(grp.get("id")))
+                )
 
     def convert_file(self, fn, store=None):
         p = familyanalyzer.OrthoXMLParser(fn)

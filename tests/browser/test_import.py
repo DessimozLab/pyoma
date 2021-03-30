@@ -337,3 +337,8 @@ class HogConverterTest(unittest.TestCase):
         self.assertEqual(
             [1, 0.5], [z[3] for z in rodents], "CompletenessScore does not match"
         )
+
+    def test_set_release_char(self):
+        conv = HogConverter(self.h5.root.Entries, release_char="B")
+        levels = conv.convert_file(self.orthoxml_file)
+        self.assertTrue(all(map(lambda row: row[1].startswith("HOG:B0"), levels)))

@@ -2116,7 +2116,7 @@ class HogConverter(object):
 
     def _assert_hogid_has_correct_prefix(self, fa_parser):
         for grp in fa_parser.getToplevelGroups():
-            if not grp.get("id").startswith("HOG:"):
+            if not grp.get("id").startswith("HOG:{:s}".format(self.release_char)):
                 grp.set(
                     "id", "HOG:{:s}{:07d}".format(self.release_char, int(grp.get("id")))
                 )

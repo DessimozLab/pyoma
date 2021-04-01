@@ -404,9 +404,19 @@ class DarwinExporter(object):
                         break
         raise DataImportError("No version information found")
 
-    def add_version(self):
+    def add_version(self, release_char=None):
+        if release_char is not None:
+            if not re.match(r"^[A-Z]*$", release_char):
+                raise ValueError(
+                    "Unexpected release_char argument: {}. Must be a capital ascii character".format(
+                        release_char
+                    )
+                )
+        else:
+            release_char = ""
         version = self.get_version()
         self.h5.set_node_attr("/", "oma_version", version)
+        self.h5.set_node_attr("/", "oma_release_char", release_char)
         self.h5.set_node_attr("/", "pytables", tables.get_pytables_version())
         self.h5.set_node_attr("/", "hdf5_version", tables.get_hdf5_version())
         self.h5.set_node_attr("/", "db_schema_version", self.DB_SCHEMA_VERSION)
@@ -792,7 +802,7 @@ class DarwinExporter(object):
         else:
             self.logger.info("no data written for {}".format(tab._v_pathname))
 
-    def add_hogs(self, hog_path=None, hog_file=None, tree_filename=None, release=None):
+    def add_hogs(self, hog_path=None, hog_file=None, tree_filename=None):
         """adds the HOGs to the database
 
         :param str hog_path: optional, directory where the split HOG files are stored or
@@ -802,9 +812,7 @@ class DarwinExporter(object):
         :param str hog_file: File containing all HOGs. if hog_path does not
                              exist, this file is split and stored in hog_path.
 
-        :param str tree_filename: newick species tree file.
-
-        :param str release: a single character indicating the release in the HOG ids"""
+        :param str tree_filename: newick species tree file."""
         if hog_path is None:
             hog_path = os.path.normpath(
                 os.path.join(
@@ -812,6 +820,10 @@ class DarwinExporter(object):
                 )
             )
         entryTab = self.h5.get_node("/Protein/Entries")
+        try:
+            release = self.h5.get_node_attr("/", "oma_release_char")
+        except AttributeError:
+            release = ""
         if tree_filename is None:
             tree_filename = os.path.join(
                 os.environ["DARWIN_BROWSERDATA_PATH"], "speciestree.nwk"
@@ -2801,12 +2813,12 @@ def main(
 
     log = getLogger(log_level)
     x = DarwinExporter(name, logger=log)
-    x.add_version()
+    x.add_version(release_char=release)
     x.add_species_data()
     x.add_orthologs()
     x.add_same_species_relations()
     x.add_proteins()
-    x.add_hogs(release=release)
+    x.add_hogs()
     x.add_xrefs()
     x.add_synteny_scores()
     x.add_homoeology_confidence()

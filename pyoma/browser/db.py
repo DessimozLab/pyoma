@@ -119,10 +119,6 @@ _tables_file._open_files = ThreadsafeFileRegistry()
 ####
 
 
-class DBOutdatedError(Exception):
-    pass
-
-
 class Database(object):
     """This is the main interface to the oma database. Queries
     will typically be issued by methods of this object. Typically
@@ -159,7 +155,7 @@ class Database(object):
         logger.info("database version: {}".format(db_version))
         logger.info(
             "release: {}; release_char in HOG-IDs: '{}'".format(
-                self.get_release_name(), self.get_release_char()
+                self.get_release_name(), self.release_char
             )
         )
         if db_version != self.EXPECTED_DB_SCHEMA:
@@ -315,15 +311,15 @@ class Database(object):
             if prefix is None:
                 prefix = ""
             rel = m.group("rel").decode() if m.group("rel") else ""
-            if rel != self.get_release_char():
+            if rel != self.release_char:
                 raise DBConsistencyError(
                     "release_char does not match HOG-ids: {} vs {}".format(
-                        self.get_release_char(), rel
+                        self.release_char, rel
                     )
                 )
             fmt = "{}{}{{:{}d}}".format(prefix, rel, "07" if is_padded else "")
             self._re_fam = re.compile(
-                "{}{}(?P<fam>\d+)".format(prefix, rel).encode("ascii")
+                r"{}(?P<rel>[A-Z]+)?(?P<fam>\d+)".format(prefix).encode("ascii")
             )
             self.format_hogid = lambda fam: fmt.format(fam)
             logger.info(
@@ -670,6 +666,8 @@ class Database(object):
         hog_id = hog_id if isinstance(hog_id, bytes) else hog_id.encode("ascii")
         m = self._re_fam.match(hog_id)
         if m is not None:
+            if m.group("rel").decode() != self.release_char:
+                raise OutdatedHogId(hog_id)
             return int(m.group("fam"))
         else:
             raise ValueError("invalid hog id format")
@@ -1449,7 +1447,8 @@ class Database(object):
     def get_release_name(self):
         return str(self.db.get_node_attr("/", "oma_version"))
 
-    def get_release_char(self):
+    @LazyProperty
+    def release_char(self):
         try:
             release = self.db.get_node_attr("/", "oma_release_char")
         except AttributeError:
@@ -2750,19 +2749,31 @@ class Taxonomy(object):
         return et.tostring(root, encoding="utf-8")
 
 
-class InvalidTaxonId(Exception):
+class PyOmaException(Exception):
     pass
 
 
-class DBVersionError(Exception):
+class IdException(PyOmaException):
     pass
 
 
-class DBConsistencyError(Exception):
+class InvalidTaxonId(IdException):
     pass
 
 
-class InvalidId(Exception):
+class DBVersionError(PyOmaException):
+    pass
+
+
+class DBConsistencyError(PyOmaException):
+    pass
+
+
+class DBOutdatedError(PyOmaException):
+    pass
+
+
+class InvalidId(IdException):
     pass
 
 
@@ -2770,12 +2781,18 @@ class InvalidOmaId(InvalidId):
     pass
 
 
-class UnknownIdType(Exception):
+class UnknownIdType(IdException):
     pass
 
 
-class UnknownSpecies(Exception):
+class UnknownSpecies(IdException):
     pass
+
+
+class OutdatedHogId(InvalidId):
+    def __init__(self, hog_id):
+        super().__init__("Outdated HOG ID: {}".format(hog_id), hog_id)
+        self.outdated_hog_id = hog_id
 
 
 class Singleton(Exception):

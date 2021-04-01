@@ -157,6 +157,11 @@ class Database(object):
             db_version = "1.0"
 
         logger.info("database version: {}".format(db_version))
+        logger.info(
+            "release: {}; release_char in HOG-IDs: '{}'".format(
+                self.get_release_name(), self.get_release_char()
+            )
+        )
         if db_version != self.EXPECTED_DB_SCHEMA:
             exp_tup = self.EXPECTED_DB_SCHEMA.split(".")
             db_tup = db_version.split(".")
@@ -297,7 +302,7 @@ class Database(object):
         or with the prefix, but without padding. This method checks
         which schema is used and sets the appropriate member vars
         """
-        re_id = re.compile(b"(?P<prefix>HOG:)(?P<nr>\d+)")
+        re_id = re.compile(rb"(?P<prefix>HOG:)(?P<rel>[A-Z]+)?(?P<nr>\d+)")
         for entry in self.db.root.Protein.Entries:
             m = re_id.match(entry["OmaHOG"])
             if m is None:
@@ -309,8 +314,17 @@ class Database(object):
             prefix = m.group("prefix").decode()
             if prefix is None:
                 prefix = ""
-            fmt = "{}{{:{}d}}".format(prefix, "07" if is_padded else "")
-            self._re_fam = re.compile("{}(?P<fam>\d+)".format(prefix).encode("ascii"))
+            rel = m.group("rel").decode() if m.group("rel") else ""
+            if rel != self.get_release_char():
+                raise DBConsistencyError(
+                    "release_char does not match HOG-ids: {} vs {}".format(
+                        self.get_release_char(), rel
+                    )
+                )
+            fmt = "{}{}{{:{}d}}".format(prefix, rel, "07" if is_padded else "")
+            self._re_fam = re.compile(
+                "{}{}(?P<fam>\d+)".format(prefix, rel).encode("ascii")
+            )
             self.format_hogid = lambda fam: fmt.format(fam)
             logger.info(
                 "setting HOG ID schema: re_fam: {}, hog_fmt: {}".format(
@@ -1434,6 +1448,13 @@ class Database(object):
 
     def get_release_name(self):
         return str(self.db.get_node_attr("/", "oma_version"))
+
+    def get_release_char(self):
+        try:
+            release = self.db.get_node_attr("/", "oma_release_char")
+        except AttributeError:
+            release = ""
+        return release
 
     def get_exons(self, entry_nr):
         genome = (

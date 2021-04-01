@@ -41,7 +41,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     licence="MPL 2.0",
-    packages=find_packages(),
+    packages=find_packages(exclude=("tests",)),
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",

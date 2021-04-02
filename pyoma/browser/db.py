@@ -666,7 +666,10 @@ class Database(object):
         hog_id = hog_id if isinstance(hog_id, bytes) else hog_id.encode("ascii")
         m = self._re_fam.match(hog_id)
         if m is not None:
-            if m.group("rel").decode() != self.release_char:
+            rel = m.group("rel")
+            if rel is None:
+                rel = b""
+            if rel.decode() != self.release_char:
                 raise OutdatedHogId(hog_id)
             return int(m.group("fam"))
         else:

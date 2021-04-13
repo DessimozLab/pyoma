@@ -1,4 +1,5 @@
 import collections
+import multiprocessing
 import re
 import os
 from functools import partial
@@ -7,6 +8,7 @@ import tables
 from datasketch import MinHash, MinHashLSH
 
 from .db import Database
+from .hogprofile.build import BaseProfileBuilderProcess, SourceProcess, Pipeline, Stage
 
 MinHash256 = partial(MinHash, num_perm=256)
 
@@ -93,3 +95,82 @@ class LSHBuilder(object):
             hashvals = self.hashes[self.hogid2row[c]]
             h = MinHash(seed=1, hashvalues=hashvals)
             yield key, c, minhash.jaccard(h)
+
+
+class FamGenerator(SourceProcess):
+    def __init__(self, db_path, **kwargs):
+        super().__init__(**kwargs)
+        self.db_path = db_path
+
+    def generate_data(self):
+        db = Database(self.db_path)
+        nr_hogs = db.get_nr_toplevel_hogs()
+        db.close()
+        for fam in range(1, nr_hogs + 1):
+            yield fam
+        print("all families put to queue")
+
+
+class HashWorker(BaseProfileBuilderProcess):
+    def __init__(self, db_path, **kwargs):
+        super().__init__(**kwargs)
+        self.db_path = db_path
+
+    def setup(self):
+        self.db = Database(self.db_path)
+        self.hasher = HogHasher(self.db)
+
+    def handle_input(self, fam):
+        return self.hasher.analyze_fam(fam)
+
+    def finalize(self):
+        self.db.close()
+
+
+class Collector(BaseProfileBuilderProcess):
+    def __init__(self, output_path, **kwargs):
+        super().__init__(**kwargs)
+        self.output_path = output_path
+
+    def setup(self):
+        self.lsh_builder = LSHBuilder(self.output_path, mode="w")
+
+    def handle_input(self, hashes):
+        self.lsh_builder.add_minhashes(hashes)
+
+    def finalize(self):
+        self.lsh_builder.close()
+
+
+def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
+    pipeline = Pipeline()
+    if nr_procs is None:
+        nr_procs = multiprocessing.cpu_count()
+
+    pipeline.add_stage(Stage(FamGenerator, nr_procs=1, db_path=db_path))
+    pipeline.add_stage(Stage(HashWorker, nr_procs=nr_procs, db_path=db_path))
+    pipeline.add_stage(Stage(Collector, nr_procs=1, output_path=output_path))
+    print("setup pipeline, about to start it.")
+    pipeline.run()
+    print("finished with computing the MinHashLSH for {}".format(db_path))
+
+
+def build_lookup(target_db, *old_dbs):
+    compute_minhashes_for_db(target_db, target_db + ".hog-lsh.h5")
+    for old in old_dbs:
+        compute_minhashes_for_db(old, old + "hog-lsh.h5")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="find related hogs in new version")
+    parser.add_argument("--target", required=True, help="Path to the target database")
+    parser.add_argument(
+        "--old", nargs="+", help="Path to databases that should be mapped"
+    )
+    conf = parser.parse_args()
+    print(conf)
+
+    build_lookup(conf.target, conf.old)
+    print("done... bye bye")

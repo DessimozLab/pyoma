@@ -25,7 +25,7 @@ class HogHasher(object):
             for p in re.finditer(br"\.", hog_id):
                 minhashes[hog_id[: p.start()]].update(e["CanonicalId"])
             minhashes[hog_id].update(e["CanonicalId"])
-        return minhashes.items()
+        return minhashes
 
 
 class LSHBuilder(object):
@@ -136,7 +136,7 @@ class Collector(BaseProfileBuilderProcess):
         self.lsh_builder = LSHBuilder(self.output_path, mode="w")
 
     def handle_input(self, hashes):
-        self.lsh_builder.add_minhashes(hashes)
+        self.lsh_builder.add_minhashes(hashes.items())
 
     def finalize(self):
         self.lsh_builder.close()

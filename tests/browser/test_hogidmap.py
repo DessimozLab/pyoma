@@ -38,7 +38,7 @@ class HogIdMapTester(unittest.TestCase):
     def yield_hog_hashes_for_family_range(self, start=1, stop=40):
         hasher = hogidmap.HogHasher(self.db)
         for fam in range(start, stop):
-            yield from hasher.analyze_fam(fam)
+            yield from hasher.analyze_fam(fam).items()
 
     def test_query_exact_identical_groups_will_return_same_hogids(self):
         hash_fam_40 = list(self.yield_hog_hashes_for_family_range(stop=40))

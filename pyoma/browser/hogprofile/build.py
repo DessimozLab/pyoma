@@ -67,13 +67,17 @@ class BaseProfileBuilderProcess(mp.Process):
                 continue
 
             if item is None:
+                logger.info("received sentinel from previous pipeline step")
                 with self.outstanding_dones.get_lock():
                     self.outstanding_dones.value -= 1
+                logger.info("outstanding_dones: {}".format(self.outstanding_dones))
+
             else:
                 result = self.handle_input(item)
                 if result is not None:
                     self.out_queue.put(result)
         self.out_queue.put(None)  # signal end of work for this worker
+        logger.info("sent sentinel to next stage")
         self.finalize()
 
     def handle_input(self, item):

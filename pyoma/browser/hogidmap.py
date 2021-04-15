@@ -9,7 +9,10 @@ from datasketch import MinHash, MinHashLSH
 
 from .db import Database
 from .hogprofile.build import BaseProfileBuilderProcess, SourceProcess, Pipeline, Stage
+import logging
 
+
+logger = logging.getLogger(__name__)
 MinHash256 = partial(MinHash, num_perm=256)
 
 
@@ -108,7 +111,7 @@ class FamGenerator(SourceProcess):
         db.close()
         for fam in range(1, nr_hogs + 1):
             yield fam
-        print("all families put to queue")
+        logger.info("all {} families put to queue".format(nr_hogs))
 
 
 class HashWorker(BaseProfileBuilderProcess):
@@ -121,6 +124,7 @@ class HashWorker(BaseProfileBuilderProcess):
         self.hasher = HogHasher(self.db)
 
     def handle_input(self, fam):
+        logger.info("computing hashes for family {}".format(fam))
         return self.hasher.analyze_fam(fam)
 
     def finalize(self):
@@ -136,6 +140,9 @@ class Collector(BaseProfileBuilderProcess):
         self.lsh_builder = LSHBuilder(self.output_path, mode="w")
 
     def handle_input(self, hashes):
+        logger.info(
+            "build lsh for {} hashes ({})".format(len(hashes), next(iter(hashes)))
+        )
         self.lsh_builder.add_minhashes(hashes.items())
 
     def finalize(self):

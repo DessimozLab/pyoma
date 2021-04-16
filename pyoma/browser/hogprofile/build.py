@@ -62,7 +62,11 @@ class BaseProfileBuilderProcess(mp.Process):
         pass
 
     def _handle_signal(self, signum, frame):
-        print("Stopping worker (pid: {}; name: {})".format(self.pid, self.name))
+        print(
+            "Stopping worker (pid: {}; name: {}): received signal {}".format(
+                self.pid, self.name, signum
+            )
+        )
         self.quit_req = True
 
     def run(self):
@@ -393,6 +397,7 @@ class Pipeline(object):
             for p in procs:
                 p.join()
         except KeyboardInterrupt:
+            print("keyboard interupt in main loop")
             time.sleep(20)
         log_queue.put(None)
         logger_process.join()

@@ -171,22 +171,7 @@ def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
     print("finished with computing the MinHashLSH for {}".format(db_path))
 
 
-def build_lookup(target_db, *old_dbs):
-    compute_minhashes_for_db(target_db, target_db + ".hog-lsh.h5")
+def build_lookup(target_db, *old_dbs, nr_procs=None):
+    compute_minhashes_for_db(target_db, target_db + ".hog-lsh.h5", nr_procs=nr_procs)
     for old in old_dbs:
-        compute_minhashes_for_db(old, old + "hog-lsh.h5")
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="find related hogs in new version")
-    parser.add_argument("--target", required=True, help="Path to the target database")
-    parser.add_argument(
-        "--old", nargs="+", help="Path to databases that should be mapped"
-    )
-    conf = parser.parse_args()
-    print(conf)
-
-    build_lookup(conf.target, conf.old)
-    print("done... bye bye")
+        compute_minhashes_for_db(old, old + "hog-lsh.h5", nr_procs=nr_procs)

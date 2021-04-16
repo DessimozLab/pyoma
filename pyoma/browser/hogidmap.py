@@ -134,7 +134,9 @@ class HashWorker(BaseProfileBuilderProcess):
             self.db.close()
             logger.info("resetting database handle")
             self.setup()
-        return self.hasher.analyze_fam(fam)
+        hashes = self.hasher.analyze_fam(fam)
+        self.handled_queries += 1
+        return hashes
 
     def finalize(self):
         self.db.close()

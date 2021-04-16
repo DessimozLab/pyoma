@@ -124,28 +124,9 @@ class LSHBuilder(object):
 
 
 class FamGenerator(SourceProcess):
-    def __init__(self, db_path, lsh_path=None, **kwargs):
+    def __init__(self, fam_generator=None, **kwargs):
         super().__init__(**kwargs)
-        if lsh_path is None or not os.path.exists(lsh_path):
-            self.fams_to_process = range(1, self._get_nr_families(db_path) + 1)
-        else:
-            self.fams_to_process = self._load_unprocessed_fams(db_path, lsh_path)
-
-    def _get_nr_families(self, db_path):
-        db = Database(db_path)
-        nr_hogs = db.get_nr_toplevel_hogs()
-        db.close()
-        logger.info("Found {} families to process".format(nr_hogs))
-        return nr_hogs
-
-    def _load_unprocessed_fams(self, db_path, lsh_path):
-        db = Database(db_path)
-        with tables.open_file(lsh_path, "r") as lsh_h5:
-            processed_fams = set(db.parse_hog_id(x) for x in lsh_h5.get_node("/hogids"))
-        remaining = set(range(1, db.get_nr_toplevel_hogs() + 1)) - processed_fams
-        db.close()
-        logger.info("Found {} unprocessed families".format(len(remaining)))
-        return remaining
+        self.fams_to_process = fam_generator
 
     def generate_data(self):
         for fam in self.fams_to_process:
@@ -189,7 +170,7 @@ class Collector(BaseProfileBuilderProcess):
         self.output_path = output_path
 
     def setup(self):
-        self.lsh_builder = LSHBuilder(self.output_path, mode="w")
+        self.lsh_builder = LSHBuilder(self.output_path, mode="a")
 
     def handle_input(self, hashes):
         logger.info(
@@ -201,14 +182,37 @@ class Collector(BaseProfileBuilderProcess):
         self.lsh_builder.close()
 
 
+def generator_of_unprocessed_fams(db_path, lsh_path=None):
+    def _get_nr_families(db_path):
+        db = Database(db_path)
+        nr_hogs = db.get_nr_toplevel_hogs()
+        db.close()
+        logger.info("Found {} families to process".format(nr_hogs))
+        return nr_hogs
+
+    def _load_unprocessed_fams(db_path, lsh_path):
+        db = Database(db_path)
+        with tables.open_file(lsh_path, "r") as lsh_h5:
+            processed_fams = set(db.parse_hog_id(x) for x in lsh_h5.get_node("/hogids"))
+        remaining = set(range(1, db.get_nr_toplevel_hogs() + 1)) - processed_fams
+        db.close()
+        logger.info("Found {} unprocessed families".format(len(remaining)))
+        return remaining
+
+    if lsh_path is None or not os.path.exists(lsh_path):
+        fams_to_process = range(1, _get_nr_families(db_path) + 1)
+    else:
+        fams_to_process = _load_unprocessed_fams(db_path, lsh_path)
+    return fams_to_process
+
+
 def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
     pipeline = Pipeline()
     if nr_procs is None:
         nr_procs = multiprocessing.cpu_count()
 
-    pipeline.add_stage(
-        Stage(FamGenerator, nr_procs=1, db_path=db_path, lsh_path=output_path)
-    )
+    fams_to_process = generator_of_unprocessed_fams(db_path, output_path)
+    pipeline.add_stage(Stage(FamGenerator, nr_procs=1, fam_generator=fams_to_process))
     pipeline.add_stage(Stage(HashWorker, nr_procs=nr_procs, db_path=db_path))
     pipeline.add_stage(Stage(Collector, nr_procs=1, output_path=output_path))
     print("setup pipeline, about to start it.")

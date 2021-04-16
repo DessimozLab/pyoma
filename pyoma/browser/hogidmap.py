@@ -2,6 +2,7 @@ import collections
 import multiprocessing
 import re
 import os
+import time
 from functools import partial
 
 import tables
@@ -134,7 +135,10 @@ class HashWorker(BaseProfileBuilderProcess):
             self.db.close()
             logger.info("resetting database handle")
             self.setup()
+        logger.info("start chewing on fam {}...".format(fam))
+        t0 = time.time()
         hashes = self.hasher.analyze_fam(fam)
+        logger.info("... done with fam {}. Took {} sec".format(fam, time.time() - t0))
         self.handled_queries += 1
         return hashes
 

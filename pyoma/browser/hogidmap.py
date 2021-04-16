@@ -119,13 +119,21 @@ class HashWorker(BaseProfileBuilderProcess):
     def __init__(self, db_path, **kwargs):
         super().__init__(**kwargs)
         self.db_path = db_path
+        self.db = None
+        self.hasher = None
+        self.handled_queries = None
 
     def setup(self):
         self.db = Database(self.db_path)
         self.hasher = HogHasher(self.db)
+        self.handled_queries = 0
 
     def handle_input(self, fam):
         logger.info("computing hashes for family {}".format(fam))
+        if self.handled_queries > 10000:
+            self.db.close()
+            logger.info("resetting database handle")
+            self.setup()
         return self.hasher.analyze_fam(fam)
 
     def finalize(self):

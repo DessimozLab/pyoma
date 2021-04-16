@@ -44,6 +44,7 @@ class HogIdMapTester(unittest.TestCase):
         hash_fam_40 = list(self.yield_hog_hashes_for_family_range(stop=40))
         lsh = hogidmap.LSHBuilder(self.hogmapfn, "w")
         lsh.add_minhashes(hash_fam_40)
+        lsh.compute_lsh()
         lsh.close()
 
         lshq = hogidmap.LSHBuilder(self.hogmapfn, "r")
@@ -61,6 +62,7 @@ class HogIdMapTester(unittest.TestCase):
         lsh.close()  # close and reopen for append
         lsh = hogidmap.LSHBuilder(self.hogmapfn, "a")
         lsh.add_minhashes(hash_fam_40[split:])
+        lsh.compute_lsh()
 
         for hogid, hashes in hash_fam_40:
             best = sorted(lsh.query(hogid, hashes), key=lambda x: -x[2])[0]
@@ -77,6 +79,7 @@ class HogIdMapTester(unittest.TestCase):
     def test_largely_overlap_matches(self):
         lsh = hogidmap.LSHBuilder(self.hogmapfn, "w")
         lsh.add_minhashes(self.yield_hog_hashes_for_family_range(start=450, stop=480))
+        lsh.compute_lsh()
 
         query_sub_fam = "HOG:0000474.1d.2f"
         all_member_of_subfam = self.db.member_of_hog_id(query_sub_fam)

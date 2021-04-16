@@ -1,5 +1,7 @@
 import functools
 import queue
+import signal
+
 import tables
 import ete3
 import multiprocessing as mp
@@ -51,6 +53,7 @@ class BaseProfileBuilderProcess(mp.Process):
         self.out_queue = out_queue
         self.log_queue = log_queue
         self.outstanding_dones = nr_workers_pre_step
+        self.quit_req = False
 
     def setup(self):
         pass
@@ -58,9 +61,18 @@ class BaseProfileBuilderProcess(mp.Process):
     def finalize(self):
         pass
 
+    def _handle_signal(self, signum, frame):
+        print("Stopping worker (pid: {}; name: {})".format(self.pid, self.name))
+        self.quit_req = True
+
     def run(self):
         self.setup()
-        while self.outstanding_dones.value > 0:
+        # Set signals for worker process
+        signal.signal(signal.SIGINT, self._handle_signal)
+        signal.signal(signal.SIGUSR2, self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_signal)
+
+        while not self.quit_req and self.outstanding_dones.value > 0:
             try:
                 item = self.in_queue.get(timeout=1)
             except queue.Empty:
@@ -76,8 +88,11 @@ class BaseProfileBuilderProcess(mp.Process):
                 result = self.handle_input(item)
                 if result is not None:
                     self.out_queue.put(result)
-        self.out_queue.put(None)  # signal end of work for this worker
-        logger.info("sent sentinel to next stage")
+        if not self.quit_req:
+            self.out_queue.put(None)  # signal end of work for this worker
+            logger.info("sent sentinel to next stage")
+        else:
+            logger.info("received termination signal")
         self.finalize()
 
     def handle_input(self, item):
@@ -374,10 +389,14 @@ class Pipeline(object):
             procs.append(p)
             p.start()
         print("all processes started")
-        for p in procs:
-            p.join()
+        try:
+            for p in procs:
+                p.join()
+        except KeyboardInterrupt:
+            time.sleep(20)
         log_queue.put(None)
         logger_process.join()
+
         print("successfully joined all processes")
 
 

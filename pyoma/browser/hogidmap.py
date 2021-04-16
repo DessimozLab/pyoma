@@ -1,4 +1,5 @@
 import collections
+import itertools
 import multiprocessing
 import re
 import os
@@ -6,7 +7,7 @@ import time
 from functools import partial
 
 import tables
-from datasketch import MinHash, MinHashLSH
+from datasketch import MinHash, MinHashLSH, LeanMinHash
 
 from .db import Database
 from .hogprofile.build import BaseProfileBuilderProcess, SourceProcess, Pipeline, Stage
@@ -14,7 +15,8 @@ import logging
 
 
 logger = logging.getLogger(__name__)
-MinHash256 = partial(MinHash, num_perm=256)
+MinHash256 = partial(MinHash, seed=1, num_perm=256)
+LeanMinHash256 = partial(LeanMinHash, seed=1)
 
 
 class HogHasher(object):
@@ -50,7 +52,8 @@ class LSHBuilder(object):
             self.hogid2row = {}
             self.h5 = self.init_hash_table_file(hash_file)
         self.hashes = self.h5.get_node("/hashes")
-        self._row = len(self.hashes)
+        self.hogids = self.h5.get_node("/hogids")
+        self.threshold = threshold
         self._readonly = mode == "r"
 
     def _open_hdf5(self, filename, mode="w"):
@@ -65,6 +68,13 @@ class LSHBuilder(object):
         h5 = self._open_hdf5(hash_file, mode="w")
         h5.create_earray(
             "/", "hashes", atom=tables.Int64Atom(), shape=(0, 256), expectedrows=1e6
+        )
+        h5.create_earray(
+            "/",
+            "hogids",
+            atom=tables.StringAtom(itemsize=255),
+            shape=(0,),
+            expectedrows=1e6,
         )
         h5.create_vlarray("/", "lsh_obj", atom=tables.ObjectAtom())
         return h5
@@ -82,14 +92,26 @@ class LSHBuilder(object):
             lsh_obj_arr.append(self.lsh)
             lsh_obj_arr.append(self.hogid2row)
             self.hashes.flush()
+            self.hogids.flush()
         self.h5.close()
 
     def add_minhashes(self, it):
-        for key, minhash in it:
+        for hogid, minhash in it:
             self.hashes.append([minhash.digest()])
-            self.lsh.insert(key, minhash)
-            self.hogid2row[key] = self._row
-            self._row += 1
+            self.hogids.append([hogid])
+        self.hashes.flush()
+        self.hogids.flush()
+
+    def compute_lsh(self):
+        lsh = MinHashLSH(threshold=self.threshold, num_perm=256)
+        hog2row = {}
+        for row, (hogid, hashvals) in enumerate(
+            itertools.zip_longest(self.hogids, self.hashes)
+        ):
+            hog2row[hogid] = row
+            lsh.insert(hogid, LeanMinHash256(hashvalues=hashvals))
+        self.lsh = lsh
+        self.hogid2row = hog2row
 
     def query(self, key, minhash):
         """query with a minhash, returns a list of tuples of
@@ -97,23 +119,38 @@ class LSHBuilder(object):
         candidates = self.lsh.query(minhash)
         for c in candidates:
             hashvals = self.hashes[self.hogid2row[c]]
-            h = MinHash(seed=1, hashvalues=hashvals)
+            h = MinHash256(hashvalues=hashvals)
             yield key, c, minhash.jaccard(h)
 
 
 class FamGenerator(SourceProcess):
-    def __init__(self, db_path, **kwargs):
+    def __init__(self, db_path, lsh_path=None, **kwargs):
         super().__init__(**kwargs)
-        self.db_path = db_path
+        if lsh_path is None or not os.path.exists(lsh_path):
+            self.fams_to_process = range(1, self._get_nr_families(db_path) + 1)
+        else:
+            self.fams_to_process = self._load_unprocessed_fams(db_path, lsh_path)
 
-    def generate_data(self):
-        db = Database(self.db_path)
+    def _get_nr_families(self, db_path):
+        db = Database(db_path)
         nr_hogs = db.get_nr_toplevel_hogs()
         db.close()
         logger.info("Found {} families to process".format(nr_hogs))
-        for fam in range(1, nr_hogs + 1):
+        return nr_hogs
+
+    def _load_unprocessed_fams(self, db_path, lsh_path):
+        db = Database(db_path)
+        with tables.open_file(lsh_path, "r") as lsh_h5:
+            processed_fams = set(db.parse_hog_id(x) for x in lsh_h5.get_node("/hogids"))
+        remaining = set(range(1, db.get_nr_toplevel_hogs() + 1)) - processed_fams
+        db.close()
+        logger.info("Found {} unprocessed families".format(len(remaining)))
+        return remaining
+
+    def generate_data(self):
+        for fam in self.fams_to_process:
             yield fam
-        logger.info("all {} families put to queue".format(nr_hogs))
+        logger.info("all families put to queue")
 
 
 class HashWorker(BaseProfileBuilderProcess):
@@ -169,7 +206,9 @@ def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
     if nr_procs is None:
         nr_procs = multiprocessing.cpu_count()
 
-    pipeline.add_stage(Stage(FamGenerator, nr_procs=1, db_path=db_path))
+    pipeline.add_stage(
+        Stage(FamGenerator, nr_procs=1, db_path=db_path, lsh_path=output_path)
+    )
     pipeline.add_stage(Stage(HashWorker, nr_procs=nr_procs, db_path=db_path))
     pipeline.add_stage(Stage(Collector, nr_procs=1, output_path=output_path))
     print("setup pipeline, about to start it.")

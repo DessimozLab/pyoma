@@ -109,6 +109,7 @@ class FamGenerator(SourceProcess):
         db = Database(self.db_path)
         nr_hogs = db.get_nr_toplevel_hogs()
         db.close()
+        logger.info("Found {} families to process".format(nr_hogs))
         for fam in range(1, nr_hogs + 1):
             yield fam
         logger.info("all {} families put to queue".format(nr_hogs))

@@ -90,11 +90,29 @@ class SourceProcess(BaseProfileBuilderProcess):
             in_queue=None, out_queue=out_queue, nr_workers_pre_step=None, **kwargs
         )
 
+    def _put_in_queue_with_status(self, input):
+        while True:
+            try:
+                self.out_queue.put(input, timeout=5)
+                break
+            except queue.Full:
+                qsize = "?"
+                try:
+                    qsize = self.out_queue.qsize()
+                except NotImplementedError:
+                    pass
+                logger.info(
+                    "Queue full. (approx size: {}) Cannot put item {} into output queue".format(
+                        qsize, input
+                    )
+                )
+
     def run(self):
         self.setup()
         for input in self.generate_data():
-            self.out_queue.put(input)
+            self._put_in_queue_with_status(input)
         self.out_queue.put(None)
+        logger.info("sent sentinel to next stage")
         self.finalize()
 
     def generate_data(self):

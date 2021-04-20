@@ -245,10 +245,13 @@ def compare_versions(output_file, target_path, *old_path):
             ):
                 minhash = LeanMinHash256(hashvalues=old_hashvals)
                 candidates = sorted(lsh.query(old_id, minhash), key=lambda x: -x[2])
+                logger.debug("old_id: {}: candidates: {}".format(old_id, candidates))
                 if len(candidates) > 0 and candidates[0][2] > 0.7:
                     tab.append([(old_id, candidates[0][1], candidates[0][2])])
                     if candidates[0][2] < 1:
-                        tab.append([(old_id, c[1], c[2]) for c in candidates[1:]])
+                        other_cands = [(old_id, c[1], c[2]) for c in candidates[1:]]
+                        if len(other_cands) > 0:
+                            tab.append(other_cands)
             tab.flush()
             old.close()
 

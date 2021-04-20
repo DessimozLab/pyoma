@@ -238,6 +238,13 @@ def compare_versions(output_file, target_path, *old_path):
                 [("Old", "S255"), ("New", "S255"), ("Jaccard", "f4")]
             ),
         )
+        dubious = h5_map.create_earray(
+            "/",
+            "dubious",
+            atom=tables.StringAtom(itemsize=255),
+            shape=(0,),
+            expectedrows=1e5,
+        )
         for old in old_path:
             old = LSHBuilder(old, mode="r")
             for old_id, old_hashvals in tqdm(
@@ -246,13 +253,19 @@ def compare_versions(output_file, target_path, *old_path):
                 minhash = LeanMinHash256(hashvalues=old_hashvals)
                 candidates = sorted(lsh.query(old_id, minhash), key=lambda x: -x[2])
                 logger.debug("old_id: {}: candidates: {}".format(old_id, candidates))
-                if len(candidates) > 0 and candidates[0][2] > 0.7:
+                if len(candidates) > 10 and candidates[6][2] > 0.9:
+                    # this is a dubious node, store it for now, maybe try to recover later.
+                    # it seems that this happens if the CanonicalId is truncated and hence maps to several ids.
+                    dubious.append([old_id])
+                    continue
+                if len(candidates) > 0 and candidates[0][2] > 0.6:
                     tab.append([(old_id, candidates[0][1], candidates[0][2])])
                     if candidates[0][2] < 1:
                         other_cands = [(old_id, c[1], c[2]) for c in candidates[1:]]
                         if len(other_cands) > 0:
                             tab.append(other_cands)
             tab.flush()
+            dubious.flush()
             old.close()
 
 

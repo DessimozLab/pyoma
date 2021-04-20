@@ -1,18 +1,19 @@
 import collections
 import itertools
+import logging
 import multiprocessing
-import re
 import os
+import re
 import time
 from functools import partial
+from tqdm import tqdm
 
+import numpy
 import tables
 from datasketch import MinHash, MinHashLSH, LeanMinHash
 
 from .db import Database
 from .hogprofile.build import BaseProfileBuilderProcess, SourceProcess, Pipeline, Stage
-import logging
-
 
 logger = logging.getLogger(__name__)
 MinHash256 = partial(MinHash, seed=1, num_perm=256)
@@ -218,6 +219,38 @@ def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
     print("setup pipeline, about to start it.")
     pipeline.run()
     print("finished with computing the MinHashLSH for {}".format(db_path))
+
+
+def compare_versions(output_file, target_path, *old_path):
+    lsh = LSHBuilder(target_path, mode="r")
+    lsh.compute_lsh()
+    with tables.open_file(
+        output_file,
+        "w",
+        filters=tables.Filters(
+            complevel=1, complib="blosc", shuffle=True, fletcher32=True
+        ),
+    ) as h5_map:
+        tab = h5_map.create_table(
+            "/",
+            "hogmap",
+            description=numpy.dtype(
+                [("Old", "S255"), ("New", "S255"), ("Jaccard", "f4")]
+            ),
+        )
+        for old in old_path:
+            old = LSHBuilder(old, mode="r")
+            for old_id, old_hashvals in tqdm(
+                itertools.zip_longest(old.hogids, old.hashes), total=len(old.hogids)
+            ):
+                minhash = LeanMinHash256(hashvalues=old_hashvals)
+                candidates = sorted(lsh.query(old_id, minhash), key=lambda x: -x[2])
+                if len(candidates) > 0 and candidates[0][2] > 0.7:
+                    tab.append([(old_id, candidates[0][1], candidates[0][2])])
+                    if candidates[0][2] < 1:
+                        tab.append([(old_id, c[1], c[2]) for c in candidates[1:]])
+            tab.flush()
+            old.close()
 
 
 def build_lookup(target_db, *old_dbs, nr_procs=None):

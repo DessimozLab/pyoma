@@ -70,7 +70,7 @@ def create_h5_with_varlen_string_col(nr_row, off_col_type):
     buf = f.create_earray(
         "/test", "buffer", tables.StringAtom(1), (0,), createparents=True
     )
-    tab = numpy.zeros(nr_row, tab_def)
+    tab = numpy.zeros(nr_row + 1, tab_def)
     generator = StringGenerator()
     off = 0
     for i in range(nr_row):
@@ -83,6 +83,7 @@ def create_h5_with_varlen_string_col(nr_row, off_col_type):
         tab["VarCharLen"][i] = l
         tab["CharCol"][i] = val.tostring()
         off += l
+    # last row does not contain any data, simulate not set values in Offset array
     f.create_table("/test", "table", obj=tab)
     return f
 

@@ -208,7 +208,7 @@ class SuffixIndexBuilderVarStringCol(SuffixIndexBuilderStringCol):
             for idx in zero_positions[
                 :0:-1
             ]:  # skip position 0, as this is the true value there
-                starts[idx] = starts[idx + 1]
+                starts[idx] = starts[idx + 1] if idx < len(starts) - 1 else starts.max()
             # now, set the stop position by using the next start postion (shift array by 1)
             stops = numpy.roll(off_data, -1)
             stops[-1] = len(self.orig_buffer)

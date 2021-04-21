@@ -383,10 +383,6 @@ class MakeHomoeologDataFrame:
                 pass
         return df
 
-    def add_genome_column(self, df):
-        df.insert(loc=2, column="genome", value=genome)
-        return df
-
     def _rename_and_remove_columns(self, df):
         df = df.rename(
             columns={

@@ -1113,12 +1113,13 @@ class DarwinExporter(object):
         canonical_sources = [source_enum[z] for z in xrefsource_order]
         max_acceptable_verif_value = xrefs.get_enum("Verification")["unchecked"]
         current_protein = None
+        current_xref = (1000, b"")  # init with a sentinel
         past_proteins = set([])
         for xref in xrefs:
             if xref["EntryNr"] != current_protein:
                 if current_protein:
                     past_proteins.add(current_protein)
-                    yield (current_protein, current_xref[1])
+                    yield current_protein, current_xref[1]
                 current_protein = xref["EntryNr"]
                 current_xref = (1000, b"")  # init with a sentinel
                 if current_protein in past_proteins:
@@ -1132,7 +1133,7 @@ class DarwinExporter(object):
             except ValueError:
                 pass
         if current_protein:
-            yield (current_protein, current_xref[1])
+            yield current_protein, current_xref[1]
 
     def add_canonical_id(self):
         """add one canonical xref id to the /Protein/Entries table."""

@@ -266,7 +266,10 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
             for target in res:
                 if self.ignore_case:
                     self.assertIsNotNone(
-                        re.search(query, tab[target]["CharCol"], flags=re.IGNORECASE)
+                        re.search(query, tab[target]["CharCol"], flags=re.IGNORECASE),
+                        "Query {} not found in {}. target: {}".format(
+                            query, tab[target]["CharCol"], target
+                        ),
                     )
                 else:
                     if not query in tab[target]["CharCol"]:

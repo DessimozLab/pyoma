@@ -23,15 +23,23 @@ LeanMinHash256 = partial(LeanMinHash, seed=1)
 class HogHasher(object):
     def __init__(self, db: Database):
         self.db = db
+        self.xrefs = db.id_mapper["XRef"]
 
     def analyze_fam(self, fam_nr):
         members = self.db.member_of_fam(fam_nr)
         minhashes = collections.defaultdict(MinHash256)
         for e in members:
             hog_id = e["OmaHOG"]
+            prot_id = e["CanonicalId"]
+            if len(prot_id) == e.dtype["CanonicalId"].itemsize:
+                # probably overflow, get full id from xref
+                for ref in self.xrefs.iter_xrefs_for_entry_nr(e["EntryNr"]):
+                    if ref["xref"].encode("utf-8").startswith(prot_id):
+                        prot_id = ref["xref"].encode("utf-8")
+                        break
             for p in re.finditer(br"\.", hog_id):
-                minhashes[hog_id[: p.start()]].update(e["CanonicalId"])
-            minhashes[hog_id].update(e["CanonicalId"])
+                minhashes[hog_id[: p.start()]].update(prot_id)
+            minhashes[hog_id].update(prot_id)
         return minhashes
 
 

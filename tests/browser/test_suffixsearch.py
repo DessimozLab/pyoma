@@ -272,7 +272,7 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
                         ),
                     )
                 else:
-                    if not query in tab[target]["CharCol"]:
+                    if query not in tab[target]["CharCol"]:
                         # we didn't add a sentinel, could be a combination with the next value
                         combined = b"".join(tab[target : target + 2]["CharCol"])
                         self.assertIn(query, combined)

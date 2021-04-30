@@ -175,6 +175,7 @@ class Database(object):
                     )
                 )
         self.db_schema_version = tuple(int(z) for z in db_version.split("."))
+        self._on_close_notify = []
 
         try:
             self.seq_search = SequenceSearch(self)
@@ -199,7 +200,20 @@ class Database(object):
         self.mds = None
         self._set_hogid_schema()
 
+    def register_on_close(self, callback):
+        self._on_close_notify.append(callback)
+        logger.debug("registered call to {} on close".format(callback))
+
+    def unregister_on_close(self, callback):
+        try:
+            self._on_close_notify.remove(callback)
+            logger.debug("un-register {} on close".format(callback))
+        except ValueError:
+            logger.debug("could not un-register {}".format(callback))
+
     def close(self):
+        for listener in self._on_close_notify:
+            listener()
         if self._close_fh:
             self.get_hdf5_handle().close()
 
@@ -2234,6 +2248,26 @@ class OmaIdMapper(object):
             sort_key[g] = (-k, lin_g)
         sorted_genomes = sorted(list(sort_key.keys()), key=lambda g: sort_key[g])
         return {g.decode(): v for v, g in enumerate(sorted_genomes)}
+
+
+class HogIdForwardMapper(object):
+    def __init__(self, db: Database, hogmap_filename=None):
+        if hogmap_filename is None:
+            hogmap_filename = db.get_hdf5_handle().filename.replace(".h5", ".hogmap.h5")
+        self.h5_hogmap = tables.open_file(hogmap_filename, mode="r")
+        self.db = db
+        self.db.register_on_close(self.close)
+
+    def close(self):
+        self.h5_hogmap.close()
+        self.db.unregister_on_close(self.close)
+
+    def map_hogid(self, hogid):
+        hogid = hogid.encode("utf-8") if isinstance(hogid, str) else hogid
+        cand_iter = self.h5_hogmap.get_node("/hogmap").where(
+            "Old == {!r}".format(hogid)
+        )
+        return {c["New"].decode(): float(c["Jaccard"]) for c in cand_iter}
 
 
 class FuzzyMatcher(object):

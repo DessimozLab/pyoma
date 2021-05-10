@@ -1,5 +1,7 @@
 import functools
 import queue
+import signal
+
 import tables
 import ete3
 import multiprocessing as mp
@@ -51,6 +53,7 @@ class BaseProfileBuilderProcess(mp.Process):
         self.out_queue = out_queue
         self.log_queue = log_queue
         self.outstanding_dones = nr_workers_pre_step
+        self.quit_req = False
 
     def setup(self):
         pass
@@ -58,22 +61,42 @@ class BaseProfileBuilderProcess(mp.Process):
     def finalize(self):
         pass
 
+    def _handle_signal(self, signum, frame):
+        print(
+            "Stopping worker (pid: {}; name: {}): received signal {}".format(
+                self.pid, self.name, signum
+            )
+        )
+        self.quit_req = True
+
     def run(self):
         self.setup()
-        while self.outstanding_dones.value > 0:
+        # Set signals for worker process
+        signal.signal(signal.SIGINT, self._handle_signal)
+        signal.signal(signal.SIGUSR2, self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_signal)
+
+        while not self.quit_req and self.outstanding_dones.value > 0:
             try:
                 item = self.in_queue.get(timeout=1)
             except queue.Empty:
                 continue
 
             if item is None:
+                logger.info("received sentinel from previous pipeline step")
                 with self.outstanding_dones.get_lock():
                     self.outstanding_dones.value -= 1
+                logger.info("outstanding_dones: {}".format(self.outstanding_dones))
+
             else:
                 result = self.handle_input(item)
                 if result is not None:
                     self.out_queue.put(result)
-        self.out_queue.put(None)  # signal end of work for this worker
+        if not self.quit_req:
+            self.out_queue.put(None)  # signal end of work for this worker
+            logger.info("sent sentinel to next stage")
+        else:
+            logger.info("received termination signal")
         self.finalize()
 
     def handle_input(self, item):
@@ -86,11 +109,29 @@ class SourceProcess(BaseProfileBuilderProcess):
             in_queue=None, out_queue=out_queue, nr_workers_pre_step=None, **kwargs
         )
 
+    def _put_in_queue_with_status(self, input):
+        while True:
+            try:
+                self.out_queue.put(input, timeout=5)
+                break
+            except queue.Full:
+                qsize = "?"
+                try:
+                    qsize = self.out_queue.qsize()
+                except NotImplementedError:
+                    pass
+                logger.info(
+                    "Queue full. (approx size: {}) Cannot put item {} into output queue".format(
+                        qsize, input
+                    )
+                )
+
     def run(self):
         self.setup()
         for input in self.generate_data():
-            self.out_queue.put(input)
+            self._put_in_queue_with_status(input)
         self.out_queue.put(None)
+        logger.info("sent sentinel to next stage")
         self.finalize()
 
     def generate_data(self):
@@ -352,10 +393,15 @@ class Pipeline(object):
             procs.append(p)
             p.start()
         print("all processes started")
-        for p in procs:
-            p.join()
+        try:
+            for p in procs:
+                p.join()
+        except KeyboardInterrupt:
+            print("keyboard interupt in main loop")
+            time.sleep(20)
         log_queue.put(None)
         logger_process.join()
+
         print("successfully joined all processes")
 
 

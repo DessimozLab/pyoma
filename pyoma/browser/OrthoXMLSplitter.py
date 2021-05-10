@@ -4,6 +4,7 @@ import lxml.etree as etree
 import os
 import errno
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +35,20 @@ class OrthoXMLSplitter(object):
 
     will create files HOGxxxxxx.orthoxml in the ./splits directory."""
 
-    def __init__(self, xml_file, cache_dir=None):
+    def __init__(self, xml_file, cache_dir=None, release_char=None):
         self.xml_file = xml_file
         if cache_dir is not None:
             self._assert_cache_dir(cache_dir)
+        if release_char is None:
+            self.release_char = ""
+        elif re.match(r"^[A-Z]?$", release_char):
+            self.release_char = release_char
+        else:
+            raise ValueError(
+                "unexpected value for release_char: '{}'. Needs to be a single capital ascii letter".format(
+                    release_char
+                )
+            )
         logger.info("loading xml file {}...".format(xml_file))
         parser = etree.XMLParser(remove_blank_text=True)
         self.Etree_XML = etree.parse(self.xml_file, parser=parser)
@@ -130,7 +141,7 @@ class OrthoXMLSplitter(object):
             for og in self._iter_toplevel_groups():
                 if hogs_to_extract is None or int(og.get("id")) in hogs_to_extract:
                     hog_nr = int(og.get("id"))
-                    hog_id = "HOG{:06d}.orthoxml".format(hog_nr)
+                    hog_id = "HOG{:07d}.orthoxml".format(hog_nr)
                     fname = os.path.join(self.cache_dir, hog_id)
                     logger.info("extracting {} into {}".format(hog_id, fname))
                     self.create_new_orthoxml(fname, [og])
@@ -201,8 +212,11 @@ class OrthoXMLSplitter(object):
 
         groupsxml = etree.SubElement(etree_2_dump, "groups")
         for og_et in OGs:
-            if not og_et.get("id").startswith("HOG:"):
-                og_et.set("id", "HOG:{:07d}".format(int(og_et.get("id"))))
+            if not og_et.get("id").startswith("HOG:{:s}".format(self.release_char)):
+                og_et.set(
+                    "id",
+                    "HOG:{:s}{:07d}".format(self.release_char, int(og_et.get("id"))),
+                )
             groupsxml.append(og_et)
 
         tree = etree.ElementTree(etree_2_dump)

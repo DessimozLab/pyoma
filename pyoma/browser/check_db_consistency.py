@@ -100,6 +100,32 @@ class DatabaseChecks(unittest.TestCase):
                 0, len(computed_pairs[0]), "No synteny values computed for {}".format(g)
             )
 
+    def test_alignment_of_pairwise_orthologs(self):
+        SAMPLES = 500
+        nr_entries = self.db.id_resolver.max_entry_nr
+        seq_search = self.db.seq_search
+        for entry_nr1 in random.sample(range(1, nr_entries + 1), 10 * SAMPLES):
+            vps = self.db.get_vpairs(entry_nr1)
+            if len(vps) == 0:
+                continue
+            pair = random.choice(vps)
+            with self.subTest(pair=pair):
+                s1 = self.db.get_sequence(pair["EntryNr1"])
+                matches = [(pair["EntryNr2"],)]
+                alignment = list(
+                    seq_search._align_entries(s1, matches, compute_distance=True)
+                )[0]
+                score = alignment[1][0]
+                dist = alignment[1][2]
+                if pair["Score"] < 1:
+                    self.assertGreaterEqual(score, 120)
+                else:
+                    self.assertAlmostEqual(pair["Score"], score, places=1)
+                    self.assertAlmostEqual(pair["Distance"], dist, places=1)
+            SAMPLES -= 1
+            if SAMPLES <= 0:
+                break
+
     def test_cached_orthologs_count(self):
         SAMPLES = 80
         nr_entries = self.db.id_resolver.max_entry_nr

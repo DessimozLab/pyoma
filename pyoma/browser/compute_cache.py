@@ -66,7 +66,7 @@ class CacheBuilderWorker(mp.Process):
                 for job in iter(timelimit_get_from_in_queue, None):
                     fun, params = job
                     res = getattr(self, fun)(*params)
-                    logger.debug('result for job ({}) ready'.format(job))
+                    logger.debug("result for job ({}) ready".format(job))
                     self.out_queue.put((job, res))
             except Empty:
                 logger.warning(
@@ -81,7 +81,7 @@ class CacheBuilderWorker(mp.Process):
 
     def load_fam_members(self, fam):
         members = []
-        hog_range = ["HOG:{:07d}".format(x).encode("utf8") for x in (fam, fam + 1)]
+        hog_range = [self.db.format_hogid(x).encode("utf-8") for x in (fam, fam + 1)]
         for row in self.h5.get_node("/Protein/Entries").where(
             "({!r} <= OmaHOG) & (OmaHOG < {!r})".format(*hog_range)
         ):
@@ -408,7 +408,7 @@ def compute_and_store_cached_data(db_fpath, nr_procs=None, force=False, tmp_cach
         try:
             n = h5.get_node(ortholog_cnts_cache_path)
             if force:
-                h5.remove_node(orthologs_cnts_cache_path)
+                h5.remove_node(ortholog_cnts_cache_path)
             else:
                 return
         except tables.NoSuchNodeError:
@@ -424,8 +424,9 @@ def update_hdf5_from_cachefile(db_fpath, tmp_cache):
     ortholog_cnts_cache_path = "/Protein/OrthologsCountCache"
     path, name = split(ortholog_cnts_cache_path)
 
-    with tables.open_file(db_fpath, "a") as h5, \
-         tables.open_file(tmp_cache, "r") as cache_h5:
+    with tables.open_file(db_fpath, "a") as h5, tables.open_file(
+        tmp_cache, "r"
+    ) as cache_h5:
         cached_cnts = cache_h5.get_node("/ortholog_counts").read()
         cached_cnts.sort(order="EntryNr")
 

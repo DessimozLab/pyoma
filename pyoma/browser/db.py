@@ -119,10 +119,6 @@ _tables_file._open_files = ThreadsafeFileRegistry()
 ####
 
 
-class DBOutdatedError(Exception):
-    pass
-
-
 class Database(object):
     """This is the main interface to the oma database. Queries
     will typically be issued by methods of this object. Typically
@@ -157,6 +153,11 @@ class Database(object):
             db_version = "1.0"
 
         logger.info("database version: {}".format(db_version))
+        logger.info(
+            "release: {}; release_char in HOG-IDs: '{}'".format(
+                self.get_release_name(), self.release_char
+            )
+        )
         if db_version != self.EXPECTED_DB_SCHEMA:
             exp_tup = self.EXPECTED_DB_SCHEMA.split(".")
             db_tup = db_version.split(".")
@@ -174,6 +175,7 @@ class Database(object):
                     )
                 )
         self.db_schema_version = tuple(int(z) for z in db_version.split("."))
+        self._on_close_notify = []
 
         try:
             self.seq_search = SequenceSearch(self)
@@ -198,7 +200,20 @@ class Database(object):
         self.mds = None
         self._set_hogid_schema()
 
+    def register_on_close(self, callback):
+        self._on_close_notify.append(callback)
+        logger.debug("registered call to {} on close".format(callback))
+
+    def unregister_on_close(self, callback):
+        try:
+            self._on_close_notify.remove(callback)
+            logger.debug("un-register {} on close".format(callback))
+        except ValueError:
+            logger.debug("could not un-register {}".format(callback))
+
     def close(self):
+        for listener in self._on_close_notify:
+            listener()
         if self._close_fh:
             self.get_hdf5_handle().close()
 
@@ -297,7 +312,7 @@ class Database(object):
         or with the prefix, but without padding. This method checks
         which schema is used and sets the appropriate member vars
         """
-        re_id = re.compile(b"(?P<prefix>HOG:)(?P<nr>\d+)")
+        re_id = re.compile(rb"(?P<prefix>HOG:)(?P<rel>[A-Z]+)?(?P<nr>\d+)")
         for entry in self.db.root.Protein.Entries:
             m = re_id.match(entry["OmaHOG"])
             if m is None:
@@ -309,8 +324,17 @@ class Database(object):
             prefix = m.group("prefix").decode()
             if prefix is None:
                 prefix = ""
-            fmt = "{}{{:{}d}}".format(prefix, "07" if is_padded else "")
-            self._re_fam = re.compile("{}(?P<fam>\d+)".format(prefix).encode("ascii"))
+            rel = m.group("rel").decode() if m.group("rel") else ""
+            if rel != self.release_char:
+                raise DBConsistencyError(
+                    "release_char does not match HOG-ids: {} vs {}".format(
+                        self.release_char, rel
+                    )
+                )
+            fmt = "{}{}{{:{}d}}".format(prefix, rel, "07" if is_padded else "")
+            self._re_fam = re.compile(
+                r"{}(?P<rel>[A-Z]+)?(?P<fam>\d+)".format(prefix).encode("ascii")
+            )
             self.format_hogid = lambda fam: fmt.format(fam)
             logger.info(
                 "setting HOG ID schema: re_fam: {}, hog_fmt: {}".format(
@@ -562,6 +586,9 @@ class Database(object):
         entry = self.ensure_entry(entry)
         genome = self.id_mapper["OMA"].genome_of_entry_nr(entry["EntryNr"])
         lineage = self.tax.get_parent_taxa(genome["NCBITaxonId"])["Name"]
+        lineage = numpy.fromiter(
+            filter(lambda x: x in self.tax.all_hog_levels, lineage), dtype=lineage.dtype
+        )
         lineage_sorter = numpy.argsort(lineage)
         try:
             fam = self.hog_family(entry)
@@ -653,6 +680,11 @@ class Database(object):
         hog_id = hog_id if isinstance(hog_id, bytes) else hog_id.encode("ascii")
         m = self._re_fam.match(hog_id)
         if m is not None:
+            rel = m.group("rel")
+            if rel is None:
+                rel = b""
+            if rel.decode() != self.release_char:
+                raise OutdatedHogId(hog_id)
             return int(m.group("fam"))
         else:
             raise ValueError("invalid hog id format")
@@ -1206,9 +1238,23 @@ class Database(object):
             edge_data = []
         G = nx.Graph()
         G.add_weighted_edges_from(edge_data)
-        neighbors = [hog_row] + [
-            v for u, v in nx.bfs_edges(G, source=hog_row, depth_limit=steps)
-        ]
+        try:
+            neighbors = [hog_row] + [
+                v for u, v in nx.bfs_edges(G, source=hog_row, depth_limit=steps)
+            ]
+        except nx.exception.NetworkXError as e:
+            logger.error(
+                "Trying to access a non-stored HOG in the ancestral synteny graph: "
+                "HOG: {}, Level: {}, taxid: {}, hog_row: {}, Size of Graph: N={}, E={}".format(
+                    hog_id, level, taxid_of_level, hog_row, len(G), len(G.edges)
+                )
+            )
+            raise DBConsistencyError(
+                'Cannot find HOG "{}/{}" in Ancestral synteny graph'.format(
+                    hog_id, level
+                )
+            )
+
         S = G.subgraph(neighbors)
         return nx.relabel_nodes(S, lambda x: hl_tab[x]["ID"].decode())
 
@@ -1417,6 +1463,14 @@ class Database(object):
 
     def get_release_name(self):
         return str(self.db.get_node_attr("/", "oma_version"))
+
+    @LazyProperty
+    def release_char(self):
+        try:
+            release = self.db.get_node_attr("/", "oma_release_char")
+        except AttributeError:
+            release = ""
+        return release
 
     def get_exons(self, entry_nr):
         genome = (
@@ -2196,6 +2250,26 @@ class OmaIdMapper(object):
         return {g.decode(): v for v, g in enumerate(sorted_genomes)}
 
 
+class HogIdForwardMapper(object):
+    def __init__(self, db: Database, hogmap_filename=None):
+        if hogmap_filename is None:
+            hogmap_filename = db.get_hdf5_handle().filename.replace(".h5", ".hogmap.h5")
+        self.h5_hogmap = tables.open_file(hogmap_filename, mode="r")
+        self.db = db
+        self.db.register_on_close(self.close)
+
+    def close(self):
+        self.h5_hogmap.close()
+        self.db.unregister_on_close(self.close)
+
+    def map_hogid(self, hogid):
+        hogid = hogid.encode("utf-8") if isinstance(hogid, str) else hogid
+        cand_iter = self.h5_hogmap.get_node("/hogmap").where(
+            "Old == {!r}".format(hogid)
+        )
+        return {c["New"].decode(): float(c["Jaccard"]) for c in cand_iter}
+
+
 class FuzzyMatcher(object):
     def __init__(
         self,
@@ -2712,19 +2786,31 @@ class Taxonomy(object):
         return et.tostring(root, encoding="utf-8")
 
 
-class InvalidTaxonId(Exception):
+class PyOmaException(Exception):
     pass
 
 
-class DBVersionError(Exception):
+class IdException(PyOmaException):
     pass
 
 
-class DBConsistencyError(Exception):
+class InvalidTaxonId(IdException):
     pass
 
 
-class InvalidId(Exception):
+class DBVersionError(PyOmaException):
+    pass
+
+
+class DBConsistencyError(PyOmaException):
+    pass
+
+
+class DBOutdatedError(PyOmaException):
+    pass
+
+
+class InvalidId(IdException):
     pass
 
 
@@ -2732,12 +2818,18 @@ class InvalidOmaId(InvalidId):
     pass
 
 
-class UnknownIdType(Exception):
+class UnknownIdType(IdException):
     pass
 
 
-class UnknownSpecies(Exception):
+class UnknownSpecies(IdException):
     pass
+
+
+class OutdatedHogId(InvalidId):
+    def __init__(self, hog_id):
+        super().__init__("Outdated HOG ID: {}".format(hog_id), hog_id)
+        self.outdated_hog_id = hog_id
 
 
 class Singleton(Exception):

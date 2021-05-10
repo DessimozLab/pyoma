@@ -43,6 +43,12 @@ def main(args):
         "option.",
     )
     parser.add_argument(
+        "--hog-release-char",
+        required=("--standalone" not in sys.argv and "-s" not in sys.argv),
+        help="A single character indicating the release in the hog ids. "
+        "This argument is ignored for oma standalone imports",
+    )
+    parser.add_argument(
         "-v",
         default=0,
         action="count",

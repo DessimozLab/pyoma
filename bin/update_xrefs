@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import time
+import tables
 import pyoma.browser.convert
 from pyoma.browser import suffixsearch
 import logging
@@ -14,7 +15,7 @@ def update_xrefs(filename):
         "/XRef",
         "/_si_XRef",
         "/Protein/DescriptionBuffer",
-        "/Protein/_si_Entries/",
+        "/Protein/_si_Entries",
         "/Annotations/GeneOntology",
         "/Annotations/EC",
         "/Ontologies/GO",
@@ -22,11 +23,18 @@ def update_xrefs(filename):
         "/OmaGroups",
     ]
     for node in nodes_to_remove:
-        exporter.h5.remove_node(node, recursive=True)
+        logger.info('removing node "{}"'.format(node))
+        try:
+            exporter.h5.remove_node(node, recursive=True)
+        except tables.NoSuchNodeError:
+            pass
 
     exporter.add_xrefs()
     exporter.add_group_metadata()
     exporter.add_roothog_metadata()
+    exporter.close()
+
+    exporter = pyoma.browser.convert.DarwinExporter(filename, mode="append")
 
     logger.info("creating suffix index for Descriptions")
     desc_buffer = exporter.h5.get_node("/Protein/DescriptionBuffer")

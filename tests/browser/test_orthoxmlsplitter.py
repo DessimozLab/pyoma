@@ -117,7 +117,7 @@ class OrthoXMLSplitterResultTester(unittest.TestCase):
 
     def test_properly_split_in_hogs(self):
         for nr in range(1, 4):
-            fn = os.path.join(self.outdir, "HOG{:06d}.orthoxml".format(nr))
+            fn = os.path.join(self.outdir, "HOG{:07d}.orthoxml".format(nr))
             exp = [str(nr), str(nr + 10)]
             self.assertEqual(
                 sorted(self.load_data_of_file(fn)), sorted(exp), "{} failed.".format(fn)

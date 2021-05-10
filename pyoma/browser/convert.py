@@ -406,9 +406,19 @@ class DarwinExporter(object):
                         break
         raise DataImportError("No version information found")
 
-    def add_version(self):
+    def add_version(self, release_char=None):
+        if release_char is not None:
+            if not re.match(r"^[A-Z]*$", release_char):
+                raise ValueError(
+                    "Unexpected release_char argument: {}. Must be a capital ascii character".format(
+                        release_char
+                    )
+                )
+        else:
+            release_char = ""
         version = self.get_version()
         self.h5.set_node_attr("/", "oma_version", version)
+        self.h5.set_node_attr("/", "oma_release_char", release_char)
         self.h5.set_node_attr("/", "pytables", tables.get_pytables_version())
         self.h5.set_node_attr("/", "hdf5_version", tables.get_hdf5_version())
         self.h5.set_node_attr("/", "db_schema_version", self.DB_SCHEMA_VERSION)
@@ -812,6 +822,10 @@ class DarwinExporter(object):
                 )
             )
         entryTab = self.h5.get_node("/Protein/Entries")
+        try:
+            release = self.h5.get_node_attr("/", "oma_release_char")
+        except AttributeError:
+            release = ""
         if tree_filename is None:
             tree_filename = os.path.join(
                 os.environ["DARWIN_BROWSERDATA_PATH"], "speciestree.nwk"
@@ -824,14 +838,16 @@ class DarwinExporter(object):
                     "downloads",
                     "oma-hogs.orthoXML.gz",
                 )
-            splitter = OrthoXMLSplitter(hog_file, cache_dir=hog_path)
+            splitter = OrthoXMLSplitter(
+                hog_file, cache_dir=hog_path, release_char=release
+            )
             splitter()
         tax_tab = self.h5.get_node("/Taxonomy")
         tax_2_code = {
             int(row["NCBITaxonId"]): row["UniProtSpeciesCode"].decode()
             for row in self.h5.get_node("/Genome")
         }
-        hog_converter = HogConverter(entryTab, tax_tab, tax_2_code)
+        hog_converter = HogConverter(entryTab, release, tax_tab, tax_2_code)
         hog_converter.attach_newick_taxonomy(tree_filename)
         hogTab = self.h5.create_table(
             "/",
@@ -1568,7 +1584,17 @@ class DarwinExporter(object):
                     # DA exists in more than one member.
                     cons_da = da[0][0]
                     repr_entry = da[0][1][0]
-                    tl = fam_to_rootlevel[hog_id]
+                    try:
+                        tl = hl_tab.read_where("Fam == {}".format(hog_id))[0][
+                            "Level"
+                        ].decode("ascii")
+                    except IndexError as exc:
+                        self.logger.exception(
+                            "cannot get level for fam {}".format(hog_id)
+                        )
+                        self.warning(hl_tab.read_where("Fam == {}".format(hog_id)))
+                        raise
+
                     rep_len = hdf[hdf["EntryNr"] == repr_entry]["SeqBufferLength"]
                     rep_len = int(rep_len if len(rep_len) == 1 else list(rep_len)[0])
 
@@ -2085,8 +2111,8 @@ class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
 
 
 class HogConverter(object):
-    def __init__(self, entry_tab, tax_tab=None, tax_2_code=None):
-        self.fam_re = re.compile(r"HOG:(?P<fam_nr>\d+)")
+    def __init__(self, entry_tab, release_char=None, tax_tab=None, tax_2_code=None):
+        self.fam_re = re.compile(r"HOG:(?P<release>[A-Z]+)?(?P<fam_nr>\d+)")
         self.hogs = numpy.zeros(
             shape=(len(entry_tab) + 1,), dtype=entry_tab.cols.OmaHOG.dtype
         )
@@ -2095,6 +2121,16 @@ class HogConverter(object):
             self._extract_taxrange_2_taxid_map(tax_tab) if tax_tab else None
         )
         self.taxid_2_code = tax_2_code
+        if release_char is None:
+            self.release_char = ""
+        elif re.match(r"^[A-Z]?$", release_char):
+            self.release_char = release_char
+        else:
+            raise ValueError(
+                "invalid release_char value: {}. Expected is a single capital ascii character".format(
+                    release_char
+                )
+            )
 
     def _extract_taxrange_2_taxid_map(self, tax_tab):
         return {row["Name"].decode(): int(row["NCBITaxonId"]) for row in tax_tab}
@@ -2104,8 +2140,10 @@ class HogConverter(object):
 
     def _assert_hogid_has_correct_prefix(self, fa_parser):
         for grp in fa_parser.getToplevelGroups():
-            if not grp.get("id").startswith("HOG:"):
-                grp.set("id", "HOG:{:07d}".format(int(grp.get("id"))))
+            if not grp.get("id").startswith("HOG:{:s}".format(self.release_char)):
+                grp.set(
+                    "id", "HOG:{:s}{:07d}".format(self.release_char, int(grp.get("id")))
+                )
 
     def convert_file(self, fn, store=None):
         p = familyanalyzer.OrthoXMLParser(fn)
@@ -2775,12 +2813,19 @@ def getLogger(level="DEBUG"):
     return log
 
 
-def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level="INFO"):
+def main(
+    name="OmaServer.h5",
+    k=6,
+    idx_name=None,
+    domains=None,
+    log_level="INFO",
+    release=None,
+):
     idx_name = (name + ".idx") if idx_name is None else idx_name
 
     log = getLogger(log_level)
     x = DarwinExporter(name, logger=log)
-    x.add_version()
+    x.add_version(release_char=release)
     x.add_species_data()
     x.add_orthologs()
     x.add_same_species_relations()
@@ -2836,6 +2881,6 @@ def main(name="OmaServer.h5", k=6, idx_name=None, domains=None, log_level="INFO"
     x.close()
 
     # compute cached orthology counts
-    compute_and_store_cached_data(
-        x.h5.filename, "/Protein/OrthologsCountCache", min(os.cpu_count(), 12)
-    )
+    # compute_and_store_cached_data(
+    #    x.h5.filename, "/Protein/OrthologsCountCache", min(os.cpu_count(), 12)
+    # )

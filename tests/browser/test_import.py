@@ -320,6 +320,9 @@ class HogConverterTest(unittest.TestCase):
             obj=numpy.zeros(6, tables.dtype_from_descr(tablefmt.ProteinTable)),
         )
 
+    def tearDown(self):
+        self.h5.close()
+
     def test_extract_levels(self):
         conv = HogConverter(self.h5.root.Entries)
         levels = conv.convert_file(self.orthoxml_file)
@@ -337,3 +340,14 @@ class HogConverterTest(unittest.TestCase):
         self.assertEqual(
             [1, 0.5], [z[3] for z in rodents], "CompletenessScore does not match"
         )
+
+    def test_set_release_char(self):
+        conv = HogConverter(self.h5.root.Entries, release_char="B")
+        levels = conv.convert_file(self.orthoxml_file)
+        self.assertTrue(all(map(lambda row: row[1].startswith("HOG:B0"), levels)))
+
+    def test_invalid_release_char(self):
+        for release_char in ("a", "AB", " "):
+            with self.subTest(release_char=release_char):
+                with self.assertRaises(ValueError):
+                    conv = HogConverter(self.h5.root.Entries, release_char=release_char)

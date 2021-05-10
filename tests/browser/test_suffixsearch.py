@@ -70,7 +70,7 @@ def create_h5_with_varlen_string_col(nr_row, off_col_type):
     buf = f.create_earray(
         "/test", "buffer", tables.StringAtom(1), (0,), createparents=True
     )
-    tab = numpy.zeros(nr_row, tab_def)
+    tab = numpy.zeros(nr_row + 1, tab_def)
     generator = StringGenerator()
     off = 0
     for i in range(nr_row):
@@ -83,6 +83,7 @@ def create_h5_with_varlen_string_col(nr_row, off_col_type):
         tab["VarCharLen"][i] = l
         tab["CharCol"][i] = val.tostring()
         off += l
+    # last row does not contain any data, simulate not set values in Offset array
     f.create_table("/test", "table", obj=tab)
     return f
 
@@ -265,10 +266,13 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
             for target in res:
                 if self.ignore_case:
                     self.assertIsNotNone(
-                        re.search(query, tab[target]["CharCol"], flags=re.IGNORECASE)
+                        re.search(query, tab[target]["CharCol"], flags=re.IGNORECASE),
+                        "Query {} not found in {}. target: {}".format(
+                            query, tab[target]["CharCol"], target
+                        ),
                     )
                 else:
-                    if not query in tab[target]["CharCol"]:
+                    if query not in tab[target]["CharCol"]:
                         # we didn't add a sentinel, could be a combination with the next value
                         combined = b"".join(tab[target : target + 2]["CharCol"])
                         self.assertIn(query, combined)

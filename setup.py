@@ -64,6 +64,7 @@ setup(
             "matplotlib",
             "scikit-learn",
             "scikit-fuzzy",
+            "pebble",
             "lark-parser",
             "pyham",
         ],

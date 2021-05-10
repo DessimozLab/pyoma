@@ -81,7 +81,7 @@ class CacheBuilderWorker(mp.Process):
 
     def load_fam_members(self, fam):
         members = []
-        hog_range = [self.h5.format_hogid(x).encode("utf-8") for x in (fam, fam + 1)]
+        hog_range = [self.db.format_hogid(x).encode("utf-8") for x in (fam, fam + 1)]
         for row in self.h5.get_node("/Protein/Entries").where(
             "({!r} <= OmaHOG) & (OmaHOG < {!r})".format(*hog_range)
         ):

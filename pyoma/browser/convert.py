@@ -1582,7 +1582,15 @@ class DarwinExporter(object):
                     # DA exists in more than one member.
                     cons_da = da[0][0]
                     repr_entry = da[0][1][0]
-                    tl = fam_to_rootlevel[hog_id]
+                    try:
+                        tl = hl_tab.read_where("Fam == {}".format(hog_id))[0][
+                            "Level"
+                        ].decode("ascii")
+                    except IndexError as exc:
+                        self.logger.exception("cannot get level for fam {}".format(hog_id))
+                        self.warning(hl_tab.read_where("Fam == {}".format(hog_id)))
+                        raise
+
                     rep_len = hdf[hdf["EntryNr"] == repr_entry]["SeqBufferLength"]
                     rep_len = int(rep_len if len(rep_len) == 1 else list(rep_len)[0])
 
@@ -2869,6 +2877,6 @@ def main(
     x.close()
 
     # compute cached orthology counts
-    compute_and_store_cached_data(
-        x.h5.filename, "/Protein/OrthologsCountCache", min(os.cpu_count(), 12)
-    )
+    #compute_and_store_cached_data(
+    #    x.h5.filename, "/Protein/OrthologsCountCache", min(os.cpu_count(), 12)
+    #)

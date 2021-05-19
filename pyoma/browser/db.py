@@ -23,6 +23,7 @@ import pandas as pd
 import pyopa
 import tables
 import tables.file as _tables_file
+import tables.tableextension as tabExt
 from Bio.UniProt import GOA
 from datasketch import MinHash
 from tqdm import tqdm
@@ -359,7 +360,7 @@ class Database(object):
         infer the orthologs. It is the one variant that has the most alignment
         matches to all other gnomes.
 
-        The genome parameter should be the UniProtSpeciesCode of the species of
+        The `genome` parameter should be the UniProtSpeciesCode of the species of
         interest. If it is a numeric value, the genome parameter is interpreted
         as the protein entrynr. The method returns then the main isoforms for
         the species to which this protein belongs.
@@ -372,12 +373,49 @@ class Database(object):
                        number (EntryNr) from the genome of interest.
         """
         rng = self.id_mapper["OMA"].genome_range(genome)
-        prot_tab = self.get_hdf5_handle().get_node("/Protein/Entries")
-        return prot_tab.read_where(
-            "(EntryNr >= {}) & (EntryNr <= {}) & ((AltSpliceVariant == EntryNr) | (AltSpliceVariant == 0))".format(
-                rng[0], rng[1]
+        it = self._main_isoform_iter(rng[0], rng[1])
+        try:
+            first = next(it)
+        except StopIteration:
+            return numpy.array(
+                [], dtype=self.get_hdf5_handle().get_node("/Protein/Entries").dtype
             )
+        return numpy.fromiter(
+            map(lambda x: x.fetch_all_fields(), itertools.chain([first], it)),
+            dtype=first.table.dtype,
         )
+
+    def _main_isoform_iter(self, entry_nr_low=None, entry_nr_high=None):
+        query = []
+        if entry_nr_low is not None:
+            query.append("(EntryNr >= {})".format(entry_nr_low))
+        if entry_nr_high is not None:
+            query.append("(EntryNr <= {})".format(entry_nr_high))
+        query.append("((AltSpliceVariant == EntryNr) | (AltSpliceVariant == 0))")
+        query = " & ".join(query)
+        prot_tab = self.get_hdf5_handle().get_node("/Protein/Entries")
+        res_iter = prot_tab.where(query)
+        return res_iter
+
+    def count_main_isoforms(self, genome=None):
+        """returns the number of main isoforms (i.e. the number
+        of genes).
+
+        If `genome` parameter is not `None`, the count is limited to the specified
+        genome, otherwise all genomes in the database are used.
+
+        The `genome` parameter should be the UniProtSpeciesCode of the species of
+        interest. If it is a numeric value, the genome parameter is interpreted
+        as the protein entrynr. The method returns then the main isoforms for
+        the species to which this protein belongs.
+
+        :param genome: UniProtSpeciesCode of the genome of interest, or a gene
+                       number (EntryNr) from the genome of interest.
+        """
+        low, high = None, None
+        if genome is not None:
+            low, high = self.id_mapper["OMA"].genome_range(genome)
+        return count_elements(self._main_isoform_iter(low, high))
 
     def get_splicing_variants(self, entry):
         e = self.ensure_entry(entry)

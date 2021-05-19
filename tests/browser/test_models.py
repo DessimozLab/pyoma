@@ -118,6 +118,18 @@ class OmaGroupModelTest(TestDbBase):
         self.assertEqual("methylenetetrahydrofolate reductase", grp.keyword)
 
 
+class GenomeModelTest(TestDbBase):
+    def test_count_genes(self):
+        g = self.db.id_mapper["OMA"].identify_genome("YEAST")
+        genome = models.Genome(self.db, g)
+        self.assertGreaterEqual(genome.nr_genes, genome.nr_entries)
+
+    def test_nr_genes_adds_up(self):
+        genomes = self.db.id_mapper["OMA"].genome_table
+        tot_genes = sum(models.Genome(self.db, g).nr_genes for g in genomes)
+        self.assertEqual(tot_genes, self.db.count_main_isoforms())
+
+
 class ExonStructureTest(unittest.TestCase):
     def get_exons(self):
         loc_dtype = tablefmt.tables.dtype_from_descr(tablefmt.LocusTable)

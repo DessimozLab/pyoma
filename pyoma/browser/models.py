@@ -315,6 +315,10 @@ class Genome(object):
     def nr_entries(self):
         return int(self._genome["TotEntries"])
 
+    @LazyProperty
+    def nr_genes(self):
+        return self._db.count_main_isoforms(self.uniprot_species_code)
+
     @property
     def entry_nr_offset(self):
         return int(self._genome["EntryOff"])

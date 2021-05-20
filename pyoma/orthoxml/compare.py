@@ -1,6 +1,6 @@
 from xml.etree.ElementTree import XMLParser
 from datasketch import MinHash, MinHashLSH
-import gzip
+from ..common import auto_open
 import logging
 
 logger = logging.getLogger(__name__)
@@ -83,8 +83,7 @@ class Analysis(object):
 
 
 def load_toplevel_hogs(fpath, species_to_skip=None):
-    open_ = gzip.open if fpath.endswith(".gz") else open
-    with open_(fpath) as fh:
+    with auto_open(fpath) as fh:
         if species_to_skip is None:
             gene_mapper = GeneMapper()
         else:

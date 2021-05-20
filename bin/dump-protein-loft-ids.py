@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import pyoma.browser.db
-import gzip
+from pyoma.common import auto_open
 import numpy
 import pandas as pd
 
@@ -46,8 +46,7 @@ if __name__ == "__main__":
         )
 
     if conf.format == "darwin":
-        open_ = gzip.open if conf.out.endswith(".gz") else open
-        with open_(conf.out, "wt", encoding="utf-8") as fh:
+        with auto_open(conf.out, "wt", encoding="utf-8") as fh:
             fh.write("HOG_IDs := [\n")
             for hogid in df["OmaHOG"]:
                 fh.write("'{}',\n".format(hogid))

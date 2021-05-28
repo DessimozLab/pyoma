@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import csv
-import gzip
 import pyoma.browser.db
+from pyoma.common import auto_open
 import logging
 
 logger = logging.getLogger("uniprot-xrefs")
@@ -60,6 +60,5 @@ if __name__ == "__main__":
     conf = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
 
-    open_ = gzip.open if conf.out.endswith(".gz") else open
-    with open_(conf.out, "wt", encoding="utf-8", newline="") as fout:
+    with auto_open(conf.out, "wt", encoding="utf-8", newline="") as fout:
         write_omagrp_xref_map(fout, conf.hdf5)

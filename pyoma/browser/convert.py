@@ -1683,7 +1683,7 @@ def iter_domains(url):
     fname = download_url_if_not_present(url)
     if fname is None:
         return
-    with gzip.open(fname, "rt") as uncompressed:
+    with common.auto_open(fname, "rt") as uncompressed:
         dialect = csv.Sniffer().sniff(uncompressed.read(4096))
         uncompressed.seek(0)
         csv_reader = csv.reader(uncompressed, dialect)
@@ -2652,8 +2652,7 @@ class CathDomainNameParser(object):
         self.fname = download_url_if_not_present(url)
 
     def parse(self):
-        open_lib = gzip.open if self.fname.endswith(".gz") else open
-        with open_lib(self.fname, "rt") as fh:
+        with common.auto_open(self.fname, "rt") as fh:
             for line in fh:
                 match = self.re_pattern.match(line)
                 if match is not None:

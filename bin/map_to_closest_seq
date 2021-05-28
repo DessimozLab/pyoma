@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-import gzip
 import os
 
 import pyoma.browser.db
+from pyoma.common import auto_open
 import pyoma.hpc
 import Bio.SeqIO
 import logging
@@ -68,8 +68,7 @@ if __name__ == "__main__":
         with open(outfn + ".ckpt") as fh:
             last_id = fh.read()
 
-    open_ = gzip.open if outfn.endswith(".gz") else open
-    with open_(outfn, "at") as fout:
+    with auto_open(outfn, "at") as fout:
         csv_writer = csv.writer(fout, delimiter="\t")
         if last_id is None and pInf.this_proc_nr == 1:
             csv_writer.writerow(
@@ -85,7 +84,7 @@ if __name__ == "__main__":
             )
 
         for infn in conf.fasta:
-            with open(infn, "rt") as fin:
+            with auto_open(infn, "rt") as fin:
                 seqs = Bio.SeqIO.parse(fin, "fasta")
                 myjobs = filter(lambda srec: pInf.is_my_job(srec.id), seqs)
                 # forward in case we have a

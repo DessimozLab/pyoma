@@ -132,7 +132,7 @@ class Database(object):
             logger.info("opening {} for read-only".format(db))
             self.db = tables.open_file(db, "r")
             self._close_fh = True
-        elif isinstance(db, tables.File):
+        elif isinstance(db, (tables.File, tables.file.File)):
             self.db = db
             self._close_fh = False
         else:

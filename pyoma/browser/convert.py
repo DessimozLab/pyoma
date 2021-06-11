@@ -36,7 +36,6 @@ from . import suffixsearch
 from . import tablefmt
 from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
-from .compute_cache import compute_and_store_cached_data
 from .geneontology import GeneOntology, OntologyParser
 from .homoeologs import HomeologsConfidenceCalculator
 from .synteny import SyntenyScorer
@@ -2752,14 +2751,13 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
     # load taxonomy and sorter by Name
     tax = h5.get_node("/Taxonomy").read()
     sorter = numpy.argsort(tax["Name"])
+    gs = h5.get_node("/Genome").read()
+    pe = h5.get_node("/Protein/Entries")
     with open(fpath, "rt") as fh:
         genomes = json.load(fh)
     os.rename(fpath, fpath + ".bak")
 
     def traverse(node, parent_hogs=None):
-        if "children" not in node:
-            return
-
         if parent_hogs is None:
             parent_hogs = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
         try:
@@ -2781,6 +2779,23 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
             for x in diff_parent["Event"]:
                 changes[x.decode()] += 1
             changes["duplications"] = dupl_events
+            if "children" not in node:
+                # dealing with an extend species, special way to assess gains, based on
+                # HOG singletons that are main isoforms
+                assert changes["gains"] == 0
+                g = numpy.extract(
+                    gs["UniProtSpeciesCode"] == node["id"].encode("utf-8"), gs
+                )[0]
+                query_main_iso_of_genome = "(EntryNr > {}) & (EntryNr <= {}) & ((AltSpliceVariant == 0) | (AltSpliceVariant == EntryNr))".format(
+                    g["EntryOff"], g["EntryOff"] + g["TotEntries"]
+                )
+                nr_genes, nr_gains = 0, 0
+                for p in pe.where(query_main_iso_of_genome):
+                    nr_genes += 1
+                    if p["OmaHOG"] == b"":
+                        nr_gains += 1
+                changes["gains"] = nr_gains
+                node["nr_genes"] = nr_genes
             node["evolutionaryEvents"] = changes
         except Exception:
             common.package_logger.exception("Cannot identify taxonomy id")

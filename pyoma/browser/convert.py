@@ -2782,7 +2782,7 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
             if "children" not in node:
                 # dealing with an extend species, special way to assess gains, based on
                 # HOG singletons that are main isoforms
-                assert changes["gains"] == 0
+                assert changes["gained"] == 0
                 g = numpy.extract(
                     gs["UniProtSpeciesCode"] == node["id"].encode("utf-8"), gs
                 )[0]

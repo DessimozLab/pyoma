@@ -2794,15 +2794,16 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
                     nr_genes += 1
                     if p["OmaHOG"] == b"":
                         nr_gains += 1
-                changes["gains"] = nr_gains
+                changes["gained"] = nr_gains
                 node["nr_genes"] = nr_genes
             node["evolutionaryEvents"] = changes
         except Exception:
             common.package_logger.exception("Cannot identify taxonomy id")
             hog_level = parent_hogs.copy()
 
-        for child in node["children"]:
-            traverse(child, parent_hogs=hog_level)
+        if "children" in node:
+            for child in node["children"]:
+                traverse(child, parent_hogs=hog_level)
 
     traverse(genomes)
     with open(fpath, "wt") as fh:

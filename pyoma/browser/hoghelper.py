@@ -1,4 +1,6 @@
+import collections
 import logging
+import re
 import numpy
 
 logger = logging.getLogger(__name__)
@@ -75,6 +77,20 @@ class HogLevelFilter(object):
             else:
                 for subhog_id in subhog_ids:
                     yield (subhog_id, self.level)
+
+
+def build_hog_to_og_map(db):
+    hog_to_og_cnts = collections.defaultdict(collections.Counter)
+    entries = db.get_hdf5_handle().get_node("/Protein/Entries")
+    for protein in entries.where("(OmaHOG != b'') & (OmaGroup > 0)"):
+        hog_id = protein["OmaHOG"]
+        og = int(protein["OmaGroup"])
+        for p in re.finditer(br"\.", hog_id):
+            cur_id = hog_id[: p.start()]
+            hog_to_og_cnts[cur_id].update((og,))
+        hog_to_og_cnts[hog_id].update((og,))
+    for hog_id, cnts in hog_to_og_cnts.items():
+        yield hog_id, cnts.most_common(1)
 
 
 def compare_levels(

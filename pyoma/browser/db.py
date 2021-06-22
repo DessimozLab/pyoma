@@ -1334,8 +1334,15 @@ class Database(object):
 
         :param group_id: numeric oma group id or Fingerprint"""
         group_nr = self.resolve_oma_group(group_id)
-        members = self.db.root.Protein.Entries.read_where(
-            "OmaGroup=={:d}".format(group_nr)
+        pe_tab = self.db.get_node("/Protein/Entries")
+        it = pe_tab.where("OmaGroup == {:d}".format(group_nr))
+        try:
+            first = next(it)
+        except StopIteration:
+            return numpy.array([], dtype=pe_tab.dtype)
+        members = numpy.fromiter(
+            map(lambda row: row.fetch_all_fields(), itertools.chain([first], it)),
+            dtype=pe_tab.dtype,
         )
         return members
 

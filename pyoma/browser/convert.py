@@ -47,7 +47,18 @@ with hooks():
 
 
 class DarwinException(Exception):
-    pass
+    def __init__(self, stderr, stdout):
+        msg = ["Exception running darwin. End of stdout:\n"]
+        if len(stdout) > 100:
+            msg.append(" ...[{:d}]...".format(len(stdout) - 100))
+        msg.append("{!r}".format(stdout[-100:]))
+        msg.append("End of stderr:\n")
+        if len(stderr) > 100:
+            msg.append(" ...[{:d}]...".format(len(stderr) - 200))
+        msg.append("{!r}".format(stderr[-200:]))
+        super(DarwinException, self).__init__("".join(msg))
+        self.stderr = stderr
+        self.stdout = stdout
 
 
 def callDarwinExport(func, drwfile=None):
@@ -77,13 +88,13 @@ def callDarwinExport(func, drwfile=None):
             tmpfile.name, drwfile, func
         ).encode("utf-8")
         common.package_logger.debug("calling darwin function: {}".format(func))
-        (stdout, stderr) = p.communicate(input=drw_cmd)
+        stdout, stderr = p.communicate(input=drw_cmd)
         if p.returncode > 0:
-            raise DarwinException(p.stderr.read())
+            raise DarwinException(stderr, stdout)
 
         trans_tab = "".join(str(chr(x)) for x in range(128)) + " " * 128
         if not os.path.exists(tmpfile.name) or os.path.getsize(tmpfile.name) == 0:
-            raise DarwinException(p.stderr.read())
+            raise DarwinException(stderr, stdout)
         with open(tmpfile.name, "r") as jsonData:
             rawdata = jsonData.read()
             return json.loads(rawdata.translate(trans_tab))

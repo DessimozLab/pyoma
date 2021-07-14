@@ -49,10 +49,10 @@ setup(
         "Topic :: Scientific/Engineering :: Bio-Informatics",
         "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
     ],
     scripts=["bin/importdata.py", "bin/oma2hdf", "bin/map_to_closest_seq"],
     package_data={"pyoma": ["browser/*.drw"]},
@@ -71,7 +71,7 @@ setup(
         "docs": ["sphinx"],
     },
     test_require=["nose"],
-    python_requires=">=3.5",
+    python_requires=">=3.6",
 )
 
 # Remove local copy of oma2hdf (installed)

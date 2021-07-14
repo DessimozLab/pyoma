@@ -137,7 +137,7 @@ GetGenomeData := proc()
         linData := sort([seq([GS[g,Lineage], g], g=genomes)]):
         SpeciesTreeR(linData, 1, 0);
         if sum(If(z[2]=0,1,0), z=_parents) > 1 then
-            _parents = append(_parents, [0,0, 'LUCA']);
+            _parents := append(_parents, [0,0, 'LUCA']);
         fi:
     else
         stree := SpeciesTree;

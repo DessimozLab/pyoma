@@ -45,6 +45,10 @@ from .. import common, version
 with hooks():
     import urllib.request
 
+hog_re = re.compile(
+    br"((?P<prefix>HOG):)?(?P<rel>[A-Z]?)(?P<fam>\d+)(\.(?P<subfamid>[0-9a-z.]+))?$"
+)
+
 
 class DarwinException(Exception):
     def __init__(self, stderr, stdout):
@@ -1349,12 +1353,11 @@ class DarwinExporter(object):
         self.logger.info("Building grouping size histograms")
         groupings = ("OmaHOG", "OmaGroup")
         memb_cnts = {grp: collections.defaultdict(int) for grp in groupings}
-        fam_re = re.compile(br"([A-Z]+:)?(?P<fam>[0-9]+).*")
         prot_tab = self.h5.get_node("/Protein/Entries")
         for row in prot_tab:
             for grp in groupings:
                 if grp == "OmaHOG":
-                    m = fam_re.match(row[grp])
+                    m = hog_re.match(row[grp])
                     if m is None:
                         continue
                     grp_id = int(m.group("fam"))
@@ -1557,10 +1560,8 @@ class DarwinExporter(object):
         df = df[~(df["OmaHOG"] == b"")]
 
         # Reformat HOG ID to plain-integer for top-level grouping only
-        roothog_re = re.compile(br"HOG:[A-Z]*(?P<fam>\d+)(\.[\w.]+)?")
-
         def root_hog_nr(id_):
-            m = roothog_re.match(id_)
+            m = hog_re.match(id_)
             return int(m.group("fam"))
 
         df["OmaHOG"] = df["OmaHOG"].apply(root_hog_nr)
@@ -2744,9 +2745,8 @@ class PerGenomeHOGAuxAdder(PerGenomeOMAGroupAuxDataAdder):
 
     def get_group_members(self, etab):
         grp_members = collections.defaultdict(list)
-        fam_re = re.compile(rb"HOG:(?P<fam_nr>\d+)")
         for row in etab.where('OmaHOG != b""'):
-            fam = int(fam_re.match(row["OmaHOG"]).group("fam_nr"))
+            fam = int(hog_re.match(row["OmaHOG"]).group("fam"))
             grp_members[fam].append(row["EntryNr"])
         return grp_members
 

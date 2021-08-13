@@ -129,7 +129,7 @@ def uniq(seq, transform=None):
     seen = set()
     if transform is None:
         transform = pass_trough
-    return [x for x in seq if not (transform(x) in seen or seen.add(transform(x)))]
+    return [x for x in seq if not (transform(x) in seen or seen.ad(transform(x)))]
 
 
 def silentremove(filename):
@@ -983,9 +983,10 @@ class DarwinExporter(object):
                 level = future_to_level[future]
                 try:
                     hogs = future.result()
+                    tab_name = "tax{}".format(lev2tax.get(level, level))
                     tab = self.h5.create_table(
-                        "/Hogs_per_Level",
-                        "tax{}".format(lev2tax[level]),
+                        where="/Hogs_per_Level",
+                        name=tab_name,
                         title="cached HogLevel data for {}".format(level.decode()),
                         obj=hogs,
                         createparents=True,
@@ -2784,6 +2785,10 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
                 node["taxid"] = taxid = int(tax["NCBITaxonId"][sorter[idx]])
             elif n == b"LUCA":
                 taxid = 0
+            elif "(disambiguate" in n:
+                # this is a special case to deal with internal species
+                # hoginfo is stored at tax[UniProtSpeciesCode]
+                taxid = node["id"]
             else:
                 node["nr_hogs"] = 0
                 raise ValueError("not in taxonomy: {}".format(n))

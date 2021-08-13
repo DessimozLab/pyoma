@@ -2785,7 +2785,7 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
                 node["taxid"] = taxid = int(tax["NCBITaxonId"][sorter[idx]])
             elif n == b"LUCA":
                 taxid = 0
-            elif "(disambiguate" in n:
+            elif b"(disambiguate" in n:
                 # this is a special case to deal with internal species
                 # hoginfo is stored at tax[UniProtSpeciesCode]
                 taxid = node["id"]

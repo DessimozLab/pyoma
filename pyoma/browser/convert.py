@@ -1557,7 +1557,13 @@ class DarwinExporter(object):
         df = df[~(df["OmaHOG"] == b"")]
 
         # Reformat HOG ID to plain-integer for top-level grouping only
-        df["OmaHOG"] = df["OmaHOG"].apply(lambda i: int(i[4:].split(b".")[0]))
+        roothog_re = re.compile(br"HOG:[A-Z]*(?P<fam>\d+)(\.[\w.]+)?")
+
+        def root_hog_nr(id_):
+            m = roothog_re.match(id_)
+            return int(m.group("fam"))
+
+        df["OmaHOG"] = df["OmaHOG"].apply(root_hog_nr)
 
         # Load domains
         domains = pandas.DataFrame.from_records(self.h5.root.Annotations.Domains[:])

@@ -983,7 +983,8 @@ class DarwinExporter(object):
                 level = future_to_level[future]
                 try:
                     hogs = future.result()
-                    tab_name = "tax{}".format(lev2tax.get(level, level))
+                    # fallback to level if taxid is not known
+                    tab_name = "tax{}".format(lev2tax.get(level, level.decode()))
                     tab = self.h5.create_table(
                         where="/Hogs_per_Level",
                         name=tab_name,

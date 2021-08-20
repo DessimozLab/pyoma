@@ -353,6 +353,20 @@ class Genome(object):
             chrs[row["Chromosome"].decode()].append(row["EntryNr"])
         return chrs
 
+    def approx_chromosome_length(self, chromosome):
+        if isinstance(chromosome, bytes):
+            chr = chromosome
+        elif isinstance(chromosome, str):
+            chr = chromosome.encode("utf-8")
+        else:
+            chr = "{}".format(chromosome).encode("utf-8")
+        query = "(EntryNr > {}) & (EntryNr <= {}) & (Chromosome == {!r})".format(
+            self.entry_nr_offset, self.entry_nr_offset + self.nr_entries, chr
+        )
+        tab = self._db.get_hdf5_handle().get_node("/Protein/Entries")
+        chr_len = int(max((row["LocusEnd"] for row in tab.where(query))))
+        return chr_len
+
     def __repr__(self):
         return "<{}({}, {})>".format(
             self.__class__.__name__, self.uniprot_species_code, self.ncbi_taxon_id

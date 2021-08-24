@@ -129,7 +129,7 @@ def uniq(seq, transform=None):
     seen = set()
     if transform is None:
         transform = pass_trough
-    return [x for x in seq if not (transform(x) in seen or seen.ad(transform(x)))]
+    return [x for x in seq if not (transform(x) in seen or seen.add(transform(x)))]
 
 
 def silentremove(filename):

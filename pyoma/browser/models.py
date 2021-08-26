@@ -248,24 +248,34 @@ class ProteinEntry(object):
 
 
 class Genome(object):
+    """Model of a genome/proteome
+
+    This model provides information about a genome. It is instantiated with
+    row of the the /Genome table from the hdf5 file."""
+
     def __init__(self, db, g):
         self._genome = g
         self._db = db
 
     @property
     def ncbi_taxon_id(self):
+        """returns the ncbi taxonomy id of the genome"""
         return int(self._genome["NCBITaxonId"])
 
     @property
     def uniprot_species_code(self):
+        """returns the uniprot mnemonic species code"""
         return self._genome["UniProtSpeciesCode"].decode()
 
     @property
     def sciname(self):
+        """returns the scientific name of the genome"""
         return self._genome["SciName"].decode()
 
     @property
     def common_name(self):
+        """returns the common name of the genome. If not set,
+        the empty string is returned"""
         try:
             return self._genome["CommonName"].decode()
         except ValueError:
@@ -273,6 +283,7 @@ class Genome(object):
 
     @property
     def synonym_name(self):
+        """returns the synonym name"""
         return self._genome["SynName"].decode()
 
     @LazyProperty
@@ -313,10 +324,12 @@ class Genome(object):
 
     @property
     def nr_entries(self):
+        """returns the number of protein entries of the genome in the database"""
         return int(self._genome["TotEntries"])
 
     @LazyProperty
     def nr_genes(self):
+        """returns the number of genes of the genome in the database"""
         return self._db.count_main_isoforms(self.uniprot_species_code)
 
     @property
@@ -332,10 +345,12 @@ class Genome(object):
 
     @property
     def is_polyploid(self):
+        """returns whether or not this is a polyploid genome"""
         return self._genome["IsPolyploid"]
 
     @LazyProperty
     def lineage(self):
+        """returns the lineage of the genome."""
         return [
             lev["Name"].decode()
             for lev in self._db.tax.get_parent_taxa(self._genome["NCBITaxonId"])
@@ -354,6 +369,13 @@ class Genome(object):
         return chrs
 
     def approx_chromosome_length(self, chromosome):
+        """method to retrieve the approximate length of a given chromosome.
+        The value corresponds to the end locus coordinate of the last gene
+        on the chromosome.
+
+        :param chromosome: the chromosome of interest
+        :type chromosome: (str, bytes)
+        :raises ValueError: if chromosome does not exist for this genome"""
         if isinstance(chromosome, bytes):
             chr = chromosome
         elif isinstance(chromosome, str):
@@ -377,6 +399,10 @@ class Genome(object):
 
 
 class OmaGroup(object):
+    """OmaGroup object model
+
+    The OmaGroup model can be instantiated with a group nr or a fingerprint."""
+
     def __init__(self, db, og):
         self._stored_group = og
         self._db = db
@@ -392,18 +418,22 @@ class OmaGroup(object):
 
     @property
     def group_nbr(self):
+        """numeric representation of the OmaGroup"""
         return int(self._group["group_nr"])
 
     @property
     def fingerprint(self):
+        """fingerprint of the OmaGroup"""
         return self._group["fingerprint"]
 
     @property
     def keyword(self):
+        """inferred keyword of the OmaGroup"""
         return self._group["keywords"]
 
     @LazyProperty
     def members(self):
+        """returns a list of member proteins as :class:`ProteinEntry` objects"""
         return [
             ProteinEntry(self._db, pe)
             for pe in self._db.oma_group_members(self.group_nbr)
@@ -411,6 +441,7 @@ class OmaGroup(object):
 
     @property
     def nr_member_genes(self):
+        """number of genes/proteins belonging to he group."""
         size = self._group["size"]
         if size < 0:
             # fallback in case it is not yet stored in db

@@ -733,5 +733,29 @@ class FastMapperTester(unittest.TestCase):
         self.assertIn("Skipping", "\n".join(cm.output))
         self.assertEqual(0, len(anno))
 
-    def test_search_existing_sequance(self):
-        pass
+    def check_mapped_seqs(self, seqs, way="Exact"):
+        with self.assertLogs("pyoma", level=logging.INFO) as cm:
+            anno = list(self.fast_mapper.iter_projected_goannotations(seqs))
+        for a in anno:
+            with_ = self.fast_mapper.db.id_mapper["OMA"].map_entry_nr(
+                int(a["DB_Object_ID"])
+            )
+            self.assertEqual(f"{way}:{with_}".split(":"), a["With"].split(":")[:2])
+        self.assertGreaterEqual(len(a), 1)
+
+    def test_search_existing_sequences(self):
+        seqs = [
+            SeqRecord(
+                id=f"{enr}", seq=Seq(self.fast_mapper.db.get_sequence(enr).decode())
+            )
+            for enr in range(1, 5)
+        ]
+        self.check_mapped_seqs(seqs, way="Exact")
+
+    def test_search_inexact_search_seq(self):
+        seqs = []
+        for en in range(1, 5):
+            s = self.fast_mapper.db.get_sequence(en).decode()
+            modif_seq = s.replace("A", "R")
+            seqs.append(SeqRecord(id=f"{en}", seq=Seq(modif_seq)))
+        self.check_mapped_seqs(seqs, way="Approx")

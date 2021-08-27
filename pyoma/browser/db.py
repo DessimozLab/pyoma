@@ -23,7 +23,6 @@ import pandas as pd
 import pyopa
 import tables
 import tables.file as _tables_file
-import tables.tableextension as tabExt
 from Bio.UniProt import GOA
 from datasketch import MinHash
 from tqdm import tqdm
@@ -1334,8 +1333,15 @@ class Database(object):
 
         :param group_id: numeric oma group id or Fingerprint"""
         group_nr = self.resolve_oma_group(group_id)
-        members = self.db.root.Protein.Entries.read_where(
-            "OmaGroup=={:d}".format(group_nr)
+        pe_tab = self.db.get_node("/Protein/Entries")
+        it = pe_tab.where("OmaGroup == {:d}".format(group_nr))
+        try:
+            first = next(it)
+        except StopIteration:
+            return numpy.array([], dtype=pe_tab.dtype)
+        members = numpy.fromiter(
+            map(lambda row: row.fetch_all_fields(), itertools.chain([first], it)),
+            dtype=pe_tab.dtype,
         )
         return members
 
@@ -3200,10 +3206,14 @@ class FastMapper(object):
     def __init__(self, db):
         self.db = db
 
-    def iter_projected_goannotations(self, records):
+    def iter_projected_goannotations(self, records, target_species=None):
         # gene ontology fast mapping, uses exact / approximate search.
         # todo: implement taxonomic restriction.
         # Input: iterable of biopython SeqRecords
+
+        entrynr_range = None
+        if target_species is not None:
+            entrynr_range = self.db.id_mapper["OMA"].genome_range(target_species)
 
         for rec in records:
             logger.debug("projecting function to {}".format(rec))
@@ -3211,7 +3221,7 @@ class FastMapper(object):
                 logger.warning("Skipping short sequence (len={} AA)".format(len(rec)))
                 continue
             t0 = time.time()
-            r = self.db.seq_search.search(str(rec.seq))
+            r = self.db.seq_search.search(str(rec.seq), entrynr_range=entrynr_range)
             logger.info(
                 "sequence matching of {} ({} AA) took {:.3f}sec".format(
                     rec.id, len(rec), time.time() - t0
@@ -3235,20 +3245,29 @@ class FastMapper(object):
                         go_df = pd.concat(tdfs1, ignore_index=True)
 
                 else:
-                    # Take best match. TODO: remove those below some level of match.
-                    match_enum = r[1][0][0]
-                    match_score = r[1][0][1]["score"]
-                    logger.debug(
-                        "match: enum: {}, score:{}".format(match_enum, match_score)
-                    )
-                    go_df = self.db.get_gene_ontology_annotations(
-                        match_enum, as_dataframe=True
-                    )
-                    if go_df is not None:
-                        go_df["With"] = "Approx:{}:{}".format(
-                            self.db.id_mapper["Oma"].map_entry_nr(match_enum),
-                            match_score,
+                    # Take best match, that has go-annotations unless it's alignment score
+                    # is less than 80% of the highest scoring match.
+                    max_score = r[1][0][1]["score"]
+                    for enr, match_res in r[1]:
+                        score = match_res["score"]
+                        if score < 70 or score < 0.8 * max_score:
+                            break
+
+                        go_df = self.db.get_gene_ontology_annotations(
+                            enr, as_dataframe=True
                         )
+                        cnt = len(go_df) if go_df is not None else 0
+                        logger.debug(
+                            "match: enr: {}, score:{}, go_anno: {}".format(
+                                enr, score, cnt
+                            )
+                        )
+
+                        if go_df is not None:
+                            go_df["With"] = "Approx:{}:{}".format(
+                                self.db.id_mapper["Oma"].map_entry_nr(enr), score,
+                            )
+                            break
                 if go_df is not None:
                     go_df["DB"] = "OMA_FastMap"
                     go_df["Assigned_By"] = go_df["DB"]
@@ -3267,7 +3286,7 @@ class FastMapper(object):
                     for row in go_df.to_dict("records"):
                         yield row
 
-    def write_annotations(self, file, seqrecords):
+    def write_annotations(self, file, seqrecords, target_species=None):
         """Project annotations and write them to file
 
         This method takes a filehandle and an iterable of BioPython
@@ -3283,7 +3302,7 @@ class FastMapper(object):
         file.write("!Project Name: OMA Fast Function Projection\n")
         file.write("!Date created: {}\n".format(time.strftime("%c")))
         file.write("!Contact Email: contact@omabrowser.org\n")
-        for anno in self.iter_projected_goannotations(seqrecords):
+        for anno in self.iter_projected_goannotations(seqrecords, target_species):
             GOA.writerec(anno, file, GOA.GAF20FIELDS)
 
 

@@ -46,6 +46,12 @@ class DatabaseChecks(unittest.TestCase):
             with self.subTest(entry_nr=entry_nr):
                 cdna = self.db.get_cdna(entry_nr).decode()
                 prot = self.db.get_sequence(entry_nr).decode()
+                self.assertTrue(
+                    abs(3 * len(prot) - len(cdna)) < 9,
+                    "CDS and protein sequence are too different in len: 3*{}={} vs {}".format(
+                        len(prot), 3 * len(prot), len(cdna)
+                    ),
+                )
                 self.assertTrue(self.translated_cdna_match_protein_sequence(cdna, prot))
 
     def test_increasing_offsets(self):

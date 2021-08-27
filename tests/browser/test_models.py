@@ -129,6 +129,13 @@ class GenomeModelTest(TestDbBase):
         tot_genes = sum(models.Genome(self.db, g).nr_genes for g in genomes)
         self.assertEqual(tot_genes, self.db.count_main_isoforms())
 
+    def test_chromosome_length(self):
+        g = self.db.id_mapper["OMA"].identify_genome("YEAST")
+        genome = models.Genome(self.db, g)
+        chr_len = genome.approx_chromosome_length("I")
+        self.assertGreaterEqual(chr_len, 220000)
+        self.assertLessEqual(chr_len, 230218)  # actual len according to Ensembl
+
 
 class ExonStructureTest(unittest.TestCase):
     def get_exons(self):

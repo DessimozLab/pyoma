@@ -45,9 +45,24 @@ from .. import common, version
 with hooks():
     import urllib.request
 
+hog_re = re.compile(
+    br"((?P<prefix>HOG):)?(?P<rel>[A-Z]?)(?P<fam>\d+)(\.(?P<subfamid>[0-9a-z.]+))?$"
+)
+
 
 class DarwinException(Exception):
-    pass
+    def __init__(self, stderr, stdout):
+        msg = ["Exception running darwin. End of stdout:\n"]
+        if len(stdout) > 100:
+            msg.append(" ...[{:d}]...".format(len(stdout) - 100))
+        msg.append("{!r}".format(stdout[-100:]))
+        msg.append("End of stderr:\n")
+        if len(stderr) > 100:
+            msg.append(" ...[{:d}]...".format(len(stderr) - 200))
+        msg.append("{!r}".format(stderr[-200:]))
+        super(DarwinException, self).__init__("".join(msg))
+        self.stderr = stderr
+        self.stdout = stdout
 
 
 def callDarwinExport(func, drwfile=None):
@@ -77,13 +92,13 @@ def callDarwinExport(func, drwfile=None):
             tmpfile.name, drwfile, func
         ).encode("utf-8")
         common.package_logger.debug("calling darwin function: {}".format(func))
-        (stdout, stderr) = p.communicate(input=drw_cmd)
+        stdout, stderr = p.communicate(input=drw_cmd)
         if p.returncode > 0:
-            raise DarwinException(p.stderr.read())
+            raise DarwinException(stderr, stdout)
 
         trans_tab = "".join(str(chr(x)) for x in range(128)) + " " * 128
         if not os.path.exists(tmpfile.name) or os.path.getsize(tmpfile.name) == 0:
-            raise DarwinException(p.stderr.read())
+            raise DarwinException(stderr, stdout)
         with open(tmpfile.name, "r") as jsonData:
             rawdata = jsonData.read()
             return json.loads(rawdata.translate(trans_tab))
@@ -968,9 +983,11 @@ class DarwinExporter(object):
                 level = future_to_level[future]
                 try:
                     hogs = future.result()
+                    # fallback to level if taxid is not known
+                    tab_name = "tax{}".format(lev2tax.get(level, level.decode()))
                     tab = self.h5.create_table(
-                        "/Hogs_per_Level",
-                        "tax{}".format(lev2tax[level]),
+                        where="/Hogs_per_Level",
+                        name=tab_name,
                         title="cached HogLevel data for {}".format(level.decode()),
                         obj=hogs,
                         createparents=True,
@@ -1338,12 +1355,11 @@ class DarwinExporter(object):
         self.logger.info("Building grouping size histograms")
         groupings = ("OmaHOG", "OmaGroup")
         memb_cnts = {grp: collections.defaultdict(int) for grp in groupings}
-        fam_re = re.compile(br"([A-Z]+:)?(?P<fam>[0-9]+).*")
         prot_tab = self.h5.get_node("/Protein/Entries")
         for row in prot_tab:
             for grp in groupings:
                 if grp == "OmaHOG":
-                    m = fam_re.match(row[grp])
+                    m = hog_re.match(row[grp])
                     if m is None:
                         continue
                     grp_id = int(m.group("fam"))
@@ -1546,7 +1562,11 @@ class DarwinExporter(object):
         df = df[~(df["OmaHOG"] == b"")]
 
         # Reformat HOG ID to plain-integer for top-level grouping only
-        df["OmaHOG"] = df["OmaHOG"].apply(lambda i: int(i[4:].split(b".")[0]))
+        def root_hog_nr(id_):
+            m = hog_re.match(id_)
+            return int(m.group("fam"))
+
+        df["OmaHOG"] = df["OmaHOG"].apply(root_hog_nr)
 
         # Load domains
         domains = pandas.DataFrame.from_records(self.h5.root.Annotations.Domains[:])
@@ -2727,9 +2747,8 @@ class PerGenomeHOGAuxAdder(PerGenomeOMAGroupAuxDataAdder):
 
     def get_group_members(self, etab):
         grp_members = collections.defaultdict(list)
-        fam_re = re.compile(rb"HOG:(?P<fam_nr>\d+)")
         for row in etab.where('OmaHOG != b""'):
-            fam = int(fam_re.match(row["OmaHOG"]).group("fam_nr"))
+            fam = int(hog_re.match(row["OmaHOG"]).group("fam"))
             grp_members[fam].append(row["EntryNr"])
         return grp_members
 
@@ -2767,6 +2786,10 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
                 node["taxid"] = taxid = int(tax["NCBITaxonId"][sorter[idx]])
             elif n == b"LUCA":
                 taxid = 0
+            elif b"(disambiguate" in n:
+                # this is a special case to deal with internal species
+                # hoginfo is stored at tax[UniProtSpeciesCode]
+                taxid = node["id"]
             else:
                 node["nr_hogs"] = 0
                 raise ValueError("not in taxonomy: {}".format(n))

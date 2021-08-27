@@ -248,24 +248,34 @@ class ProteinEntry(object):
 
 
 class Genome(object):
+    """Model of a genome/proteome
+
+    This model provides information about a genome. It is instantiated with
+    row of the the /Genome table from the hdf5 file."""
+
     def __init__(self, db, g):
         self._genome = g
         self._db = db
 
     @property
     def ncbi_taxon_id(self):
+        """returns the ncbi taxonomy id of the genome"""
         return int(self._genome["NCBITaxonId"])
 
     @property
     def uniprot_species_code(self):
+        """returns the uniprot mnemonic species code"""
         return self._genome["UniProtSpeciesCode"].decode()
 
     @property
     def sciname(self):
+        """returns the scientific name of the genome"""
         return self._genome["SciName"].decode()
 
     @property
     def common_name(self):
+        """returns the common name of the genome. If not set,
+        the empty string is returned"""
         try:
             return self._genome["CommonName"].decode()
         except ValueError:
@@ -273,6 +283,7 @@ class Genome(object):
 
     @property
     def synonym_name(self):
+        """returns the synonym name"""
         return self._genome["SynName"].decode()
 
     @LazyProperty
@@ -313,10 +324,12 @@ class Genome(object):
 
     @property
     def nr_entries(self):
+        """returns the number of protein entries of the genome in the database"""
         return int(self._genome["TotEntries"])
 
     @LazyProperty
     def nr_genes(self):
+        """returns the number of genes of the genome in the database"""
         return self._db.count_main_isoforms(self.uniprot_species_code)
 
     @property
@@ -332,10 +345,12 @@ class Genome(object):
 
     @property
     def is_polyploid(self):
+        """returns whether or not this is a polyploid genome"""
         return self._genome["IsPolyploid"]
 
     @LazyProperty
     def lineage(self):
+        """returns the lineage of the genome."""
         return [
             lev["Name"].decode()
             for lev in self._db.tax.get_parent_taxa(self._genome["NCBITaxonId"])
@@ -353,6 +368,27 @@ class Genome(object):
             chrs[row["Chromosome"].decode()].append(row["EntryNr"])
         return chrs
 
+    def approx_chromosome_length(self, chromosome):
+        """method to retrieve the approximate length of a given chromosome.
+        The value corresponds to the end locus coordinate of the last gene
+        on the chromosome.
+
+        :param chromosome: the chromosome of interest
+        :type chromosome: str, bytes
+        :raises ValueError: if chromosome does not exist for this genome"""
+        if isinstance(chromosome, bytes):
+            chr = chromosome
+        elif isinstance(chromosome, str):
+            chr = chromosome.encode("utf-8")
+        else:
+            chr = "{}".format(chromosome).encode("utf-8")
+        query = "(EntryNr > {}) & (EntryNr <= {}) & (Chromosome == {!r})".format(
+            self.entry_nr_offset, self.entry_nr_offset + self.nr_entries, chr
+        )
+        tab = self._db.get_hdf5_handle().get_node("/Protein/Entries")
+        chr_len = int(max((row["LocusEnd"] for row in tab.where(query))))
+        return chr_len
+
     def __repr__(self):
         return "<{}({}, {})>".format(
             self.__class__.__name__, self.uniprot_species_code, self.ncbi_taxon_id
@@ -363,6 +399,11 @@ class Genome(object):
 
 
 class OmaGroup(object):
+    """OmaGroup object model
+
+    The OmaGroup model can be instantiated with a group nr or a fingerprint.
+    The (meta-)data for the group will be loaded lazily if properties are accessed."""
+
     def __init__(self, db, og):
         self._stored_group = og
         self._db = db
@@ -378,18 +419,22 @@ class OmaGroup(object):
 
     @property
     def group_nbr(self):
+        """numeric representation of the OmaGroup"""
         return int(self._group["group_nr"])
 
     @property
     def fingerprint(self):
+        """fingerprint of the OmaGroup"""
         return self._group["fingerprint"]
 
     @property
     def keyword(self):
+        """inferred keyword of the OmaGroup"""
         return self._group["keywords"]
 
     @LazyProperty
     def members(self):
+        """returns a list of member proteins as :class:`ProteinEntry` objects"""
         return [
             ProteinEntry(self._db, pe)
             for pe in self._db.oma_group_members(self.group_nbr)
@@ -397,6 +442,7 @@ class OmaGroup(object):
 
     @property
     def nr_member_genes(self):
+        """number of genes/proteins belonging to he group."""
         size = self._group["size"]
         if size < 0:
             # fallback in case it is not yet stored in db
@@ -413,6 +459,27 @@ class OmaGroup(object):
 
 
 class HOG(object):
+    """HOG object model
+
+    This object stores information about a HOG at a certain level and provides
+    convenince methods / properties to load various additional data related to
+    the HOG from the underlying database.
+
+    The model can be instantiated with a *hog* argument, that can be either a
+    roothog family interger numer, or a valid Hog-ID (as string/byte). Optionally,
+    the *level* argument can be used to select the sub-hog at the given taxonomic
+    range. Up on access of any property / method of the
+    created object, the model will lazily load the
+    :class:`pyoma.browser.tablefmt.HogLevel` array for the specified hog / level
+    arguments.
+
+    :param db: the underlying database object
+    :type db: :class:`pyoma.browser.db.Database`
+    :param hog: the hog id or the HogLevel numpy array instance
+    :type hog: int, str, bytes, numpy.void
+    :param level: desired level of (sub-)HOG
+    :type level: str, bytes, optional"""
+
     def __init__(self, db, hog, level=None):
         self._stored_hog = hog
         self._stored_level = level
@@ -433,26 +500,34 @@ class HOG(object):
 
     @property
     def fam(self):
+        """roothog id as integer"""
         return int(self._hog["Fam"])
 
     @property
     def hog_id(self):
+        """HogID of the HOG"""
         return self._hog["ID"].decode()
 
     @property
     def level(self):
+        """taxonomic range of the HOG"""
         return self._hog["Level"].decode()
 
     @property
     def nr_member_genes(self):
+        """number of extent genes belonging to the HOG"""
         return int(self._hog["NrMemberGenes"])
 
     @property
     def is_root(self):
+        """whether or not this is the deepest taxonomic range for
+        this (sub-)HOG."""
         return bool(self._hog["IsRoot"])
 
     @property
     def completeness_score(self):
+        """returns the completness score of the HOG. It corresponds to the fraction of
+        genomes that have at least one gene in this HOG."""
         return float(self._hog["CompletenessScore"])
 
     def __len__(self):
@@ -463,10 +538,14 @@ class HOG(object):
 
     @LazyProperty
     def keyword(self):
+        """returns the inferred keywords for the HOG. It is based on the descriptions
+        and IDs of all the member genes"""
         return self._db.get_roothog_keywords(self.fam)
 
     @LazyProperty
     def members(self):
+        """returns a list of :class:`pyoma.browser.models.ProteinEntry` instances with all
+        the proteins / genes belonging to this HOG."""
         return [
             ProteinEntry(self._db, pe)
             for pe in self._db.member_of_hog_id(self.hog_id, level=self.level)
@@ -474,6 +553,7 @@ class HOG(object):
 
     @LazyProperty
     def parent_hogs(self):
+        """returns a list of the parent HOGs."""
         return self._db.get_parent_hogs(self.hog_id, self.level)
 
 

@@ -374,7 +374,7 @@ class Genome(object):
         on the chromosome.
 
         :param chromosome: the chromosome of interest
-        :type chromosome: (str, bytes)
+        :type chromosome: str, bytes
         :raises ValueError: if chromosome does not exist for this genome"""
         if isinstance(chromosome, bytes):
             chr = chromosome
@@ -401,7 +401,8 @@ class Genome(object):
 class OmaGroup(object):
     """OmaGroup object model
 
-    The OmaGroup model can be instantiated with a group nr or a fingerprint."""
+    The OmaGroup model can be instantiated with a group nr or a fingerprint.
+    The (meta-)data for the group will be loaded lazily if properties are accessed."""
 
     def __init__(self, db, og):
         self._stored_group = og
@@ -458,6 +459,27 @@ class OmaGroup(object):
 
 
 class HOG(object):
+    """HOG object model
+
+    This object stores information about a HOG at a certain level and provides
+    convenince methods / properties to load various additional data related to
+    the HOG from the underlying database.
+
+    The model can be instantiated with a *hog* argument, that can be either a
+    roothog family interger numer, or a valid Hog-ID (as string/byte). Optionally,
+    the *level* argument can be used to select the sub-hog at the given taxonomic
+    range. Up on access of any property / method of the
+    created object, the model will lazily load the
+    :class:`pyoma.browser.tablefmt.HogLevel` array for the specified hog / level
+    arguments.
+
+    :param db: the underlying database object
+    :type db: :class:`pyoma.browser.db.Database`
+    :param hog: the hog id or the HogLevel numpy array instance
+    :type hog: int, str, bytes, numpy.void
+    :param level: desired level of (sub-)HOG
+    :type level: str, bytes, optional"""
+
     def __init__(self, db, hog, level=None):
         self._stored_hog = hog
         self._stored_level = level
@@ -478,26 +500,34 @@ class HOG(object):
 
     @property
     def fam(self):
+        """roothog id as integer"""
         return int(self._hog["Fam"])
 
     @property
     def hog_id(self):
+        """HogID of the HOG"""
         return self._hog["ID"].decode()
 
     @property
     def level(self):
+        """taxonomic range of the HOG"""
         return self._hog["Level"].decode()
 
     @property
     def nr_member_genes(self):
+        """number of extent genes belonging to the HOG"""
         return int(self._hog["NrMemberGenes"])
 
     @property
     def is_root(self):
+        """whether or not this is the deepest taxonomic range for
+        this (sub-)HOG."""
         return bool(self._hog["IsRoot"])
 
     @property
     def completeness_score(self):
+        """returns the completness score of the HOG. It corresponds to the fraction of
+        genomes that have at least one gene in this HOG."""
         return float(self._hog["CompletenessScore"])
 
     def __len__(self):
@@ -508,10 +538,14 @@ class HOG(object):
 
     @LazyProperty
     def keyword(self):
+        """returns the inferred keywords for the HOG. It is based on the descriptions
+        and IDs of all the member genes"""
         return self._db.get_roothog_keywords(self.fam)
 
     @LazyProperty
     def members(self):
+        """returns a list of :class:`pyoma.browser.models.ProteinEntry` instances with all
+        the proteins / genes belonging to this HOG."""
         return [
             ProteinEntry(self._db, pe)
             for pe in self._db.member_of_hog_id(self.hog_id, level=self.level)
@@ -519,6 +553,7 @@ class HOG(object):
 
     @LazyProperty
     def parent_hogs(self):
+        """returns a list of the parent HOGs."""
         return self._db.get_parent_hogs(self.hog_id, self.level)
 
 

@@ -130,62 +130,6 @@ def mark_isoforms(dbfn):
     splice_column = (
         db.get_hdf5_handle().get_node("/Protein/Entries").col("AltSpliceVariant")
     )
-    for file in os.scandir("DB/"):
-        if not file.name.endswith(".splice"):
-            continue
-        common.package_logger.warning("handling {}".format(file.name))
-        with open(file) as fh:
-            for line in fh:
-                splice_variants = [z.strip() for z in line.split(";")]
-                main = [v for v in splice_variants if v in main_variants]
-                if len(main) != 1:
-                    common.package_logger.warning(
-                        "not a single main variant for {}: {}".format(
-                            splice_variants, main
-                        )
-                    )
-                    continue
-                for v in splice_variants:
-                    enr = idmapper.omaid_to_entry_nr(v)
-                    splice_column[enr] = main_variants[main[0]]
-    db.close()
-    print(splice_column)
-    with tables.open_file(dbfn, "a") as h5:
-        tab = h5.get_node("/Protein/Entries")
-        tab.modify_column(column=splice_column, colname="AltSpliceVariant")
-
-
-def mark_isoforms(dbfn):
-    from .db import Database, OmaIdMapper
-
-    used_splice_fn = os.path.join(
-        os.getenv("DARWIN_BROWSERDATA_PATH"), "Output", "used_splicing_variants.txt"
-    )
-    if not os.path.exists(used_splice_fn):
-        common.package_logger.info(
-            "no splicing output file found. Assume not splice variants"
-        )
-        return
-
-    db = Database(dbfn)
-    idmapper = OmaIdMapper(db)
-    main_variants = {}
-    with open(used_splice_fn) as fh:
-        for line in fh:
-            try:
-                main_variant = line.split("\t")[1].split("|")[0].strip()
-                common.package_logger.debug(main_variant)
-                main_variants[main_variant] = idmapper.omaid_to_entry_nr(main_variant)
-            except Exception:
-                common.package_logger.warning("cannot convert line: {}".format(line))
-                pass
-    common.package_logger.info(
-        "found {} main splicing variants".format(len(main_variants))
-    )
-    common.package_logger.debug(main_variants)
-    splice_column = (
-        db.get_hdf5_handle().get_node("/Protein/Entries").col("AltSpliceVariant")
-    )
     for file in os.scandir(os.path.join(os.getenv("DARWIN_BROWSERDATA_PATH"), "DB")):
         if not file.name.endswith(".splice"):
             continue

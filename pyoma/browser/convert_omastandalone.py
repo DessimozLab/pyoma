@@ -1,5 +1,5 @@
 from .convert import *
-from pyoma.browser import OrthoXMLSplitter
+from .compute_cache import compute_and_store_cached_data
 import os
 
 
@@ -258,13 +258,7 @@ def import_oma_run(path, outfile, domains=None, log_level="INFO"):
     x.close()
     mark_isoforms(os.path.join(path, outfile))
 
-    compute_and_store_cached_data(
-        x.h5.filename, "/Protein/OrthologsCountCache", min(os.cpu_count(), 12)
-    )
-
-    compute_and_store_cached_data(
-        x.h5.filename, "/Protein/OrthologsCountCache", min(os.cpu_count(), 12)
-    )
+    compute_and_store_cached_data(x.h5.filename, nr_procs=min(os.cpu_count(), 12))
 
 
 if __name__ == "__main__":

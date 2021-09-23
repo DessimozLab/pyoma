@@ -251,11 +251,26 @@ class Genome(object):
     """Model of a genome/proteome
 
     This model provides information about a genome. It is instantiated with
-    row of the the /Genome table from the hdf5 file."""
+    row of the the /Genome table from the hdf5 file.
+    Alternatively, it can now also be instantiated with a uniprot mnemonic
+    species code or taxonomy id. Note that the validity of the parameter is
+    only checked at first propery/method access.
 
-    def __init__(self, db, g):
-        self._genome = g
+    :param db: the underlying database object
+    :type db: :class:`pyoma.browser.db.Database`
+    :param genome: the genome data or identifier to be handled. See above for details.
+    :type genome: (:class:`numpy.void`, int, str)"""
+
+    def __init__(self, db, genome):
+        self._stored_genome = genome
         self._db = db
+
+    @LazyProperty
+    def _genome(self):
+        if isinstance(self._stored_genome, (numpy.void, numpy.ndarray)):
+            return self._stored_genome
+        else:
+            return self._db.id_mapper["OMA"].identify_genome(self._stored_genome)
 
     @property
     def ncbi_taxon_id(self):

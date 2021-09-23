@@ -136,6 +136,19 @@ class GenomeModelTest(TestDbBase):
         self.assertGreaterEqual(chr_len, 220000)
         self.assertLessEqual(chr_len, 230218)  # actual len according to Ensembl
 
+    def test_instantiate_from_species_code(self):
+        genome = models.Genome(self.db, "YEAST")
+        self.assertEqual(genome.uniprot_species_code, "YEAST")
+
+    def test_raises_for_invalid_species(self):
+        with self.assertRaises(db.UnknownSpecies):
+            genome = models.Genome(self.db, "HUMAN")
+            genome.uniprot_species_code
+
+    def test_instantitate_from_taxid(self):
+        genome = models.Genome(self.db, 559292)
+        self.assertEqual(genome.uniprot_species_code, "YEAST")
+
 
 class ExonStructureTest(unittest.TestCase):
     def get_exons(self):

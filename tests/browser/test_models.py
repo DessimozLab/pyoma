@@ -20,7 +20,7 @@ class TestDbBase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.db.get_hdf5_handle().close()
+        cls.db.close()
 
 
 class ProteinEntryTests(TestDbBase):

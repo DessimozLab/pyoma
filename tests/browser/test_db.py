@@ -56,7 +56,7 @@ class DatabaseTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.db.get_hdf5_handle().close()
+        cls.db.close()
 
     def test_get_vpairs_of_entry_with_orthologs(self):
         for entry_nr, exp_vps_cnt in [(12, 3), (1, 0), (4, 1)]:

@@ -2873,7 +2873,7 @@ def main(
     x.add_synteny_scores()
     x.add_homoeology_confidence()
     if domains is None:
-        domains = ["file://dev/null"]
+        domains = ["file:///dev/null"]
     else:
         domains = list(
             map(lambda url: "file://" + url if url.startswith("/") else url, domains)

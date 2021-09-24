@@ -164,7 +164,7 @@ def import_oma_run(path, outfile, domains=None, log_level="INFO"):
     x.add_hogs()
     x.add_xrefs()
     if domains is None:
-        domains = ["file://dev/null"]
+        domains = ["file:///dev/null"]
     else:
         domains = list(
             map(lambda url: "file://" + url if url.startswith("/") else url, domains)

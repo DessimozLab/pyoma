@@ -124,8 +124,8 @@ class SuffixIndexBuilderStringCol(object):
         from PySAIS import sais
 
         data = self.get_aux_array_handle("buffer")[:]
-        suffix = sais(data)
-        arr = self.h5.create_carray(
+        suffix = sais(data) if len(data) > 0 else data
+        arr = self.h5.create_earray(
             self.index_group, self._arrayname("suffix"), obj=suffix
         )
         self.h5.set_node_attr(
@@ -207,6 +207,11 @@ class SuffixIndexBuilderVarStringCol(SuffixIndexBuilderStringCol):
         # length of the entire buffer.
         if off_data[-1] == 0:
             off_data[-1] = len(self.orig_buffer)
+            # if now off_data[-1] is still 0, then there is actually no buffer data at all
+            if off_data[-1] == 0:
+                off_arr = self.get_aux_array_handle("offset")
+                off_arr.append(off_data)
+                return
         zero_positions = numpy.where(off_data == 0)[0]
         for idx in zero_positions[:0:-1]:
             off_data[idx] = off_data[idx + 1]

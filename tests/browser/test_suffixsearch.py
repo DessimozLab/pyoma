@@ -60,7 +60,7 @@ def create_h5_with_table(nr_row):
     return f
 
 
-def create_h5_with_varlen_string_col(nr_row, off_col_type):
+def create_h5_with_varlen_string_col(nr_row, off_col_type, max_str_len=800):
     f = tables.open_file(
         "testsuffix.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0
     )
@@ -74,14 +74,14 @@ def create_h5_with_varlen_string_col(nr_row, off_col_type):
     generator = StringGenerator()
     off = 0
     for i in range(nr_row):
-        l = random.randint(0, 800)
+        l = random.randint(0, max_str_len)
         val = numpy.ndarray(
             (l,), buffer=generator.get_string(l), dtype=tables.StringAtom(1)
         )
         buf.append(val)
         tab["VarCharOff"][i] = off
         tab["VarCharLen"][i] = l
-        tab["CharCol"][i] = val.tostring()
+        tab["CharCol"][i] = val.tobytes()
         off += l
     # last row does not contain any data, simulate not set values in Offset array
     f.create_table("/test", "table", obj=tab)
@@ -286,6 +286,20 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
 
 class SuffixArrayVarLenSearchTestsCaseSensitive(
     SuffixArrayVarLenSearchTestsCaseInsensitive
+):
+    ignore_case = False
+
+
+class SuffixArrayVarLenSearchTestsWithEmptyData(
+    SuffixArrayVarLenSearchTestsCaseInsensitive
+):
+    def setUp(self):
+        self.h5 = create_h5_with_varlen_string_col(5000, numpy.int32, 0)
+        self.build_index()
+
+
+class SuffixArrayVarLenSearchTestsWithEmptyDataInsensitiveCase(
+    SuffixArrayVarLenSearchTestsWithEmptyData
 ):
     ignore_case = False
 

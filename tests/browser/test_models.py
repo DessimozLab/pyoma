@@ -150,6 +150,36 @@ class GenomeModelTest(TestDbBase):
         self.assertEqual(genome.uniprot_species_code, "YEAST")
 
 
+class AncestralGenomeModelTests(TestDbBase):
+    def test_ncbi_taxon_id_agrees(self):
+        query = 4890
+        ag = models.AncestralGenome(self.db, query)
+        self.assertEqual(query, ag.ncbi_taxon_id)
+
+    def test_retrieve_extant_genomes(self):
+        query = 4890
+        ag = models.AncestralGenome(self.db, query)
+        self.assertIn("YEAST", (g.uniprot_species_code for g in ag.extant_genomes))
+
+    def test_lineage(self):
+        query = 4890
+        ag = models.AncestralGenome(self.db, query)
+        self.assertEqual(ag.lineage[0], ag.sciname)
+        self.assertEqual("Eukaryota", ag.kingdom)
+
+    def test_raises_UnknownSpecies_for_invalid_taxid(self):
+        with self.assertRaises(db.UnknownSpecies):
+            tax66 = models.AncestralGenome(self.db, 66).ncbi_taxon_id
+
+    def test_with_luca(self):
+        query = "LUCA"
+        ag = models.AncestralGenome(self.db, query)
+        self.assertEqual(0, ag.ncbi_taxon_id)
+
+    def test_extant_genomes_of_luca(self):
+        self.assertEqual(4, len(models.AncestralGenome(self.db, 0).extant_genomes))
+
+
 class ExonStructureTest(unittest.TestCase):
     def get_exons(self):
         loc_dtype = tablefmt.tables.dtype_from_descr(tablefmt.LocusTable)

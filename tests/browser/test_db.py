@@ -45,7 +45,7 @@ def find_path_to_test_db(dbfn="TestDb.h5"):
         raise IOError("cannot access {}. (Tried {} and {})".format(dbfn, path1, path2))
 
 
-class DatabaseTests(unittest.TestCase):
+class TestWithDbInstance(unittest.TestCase):
     db = None
 
     @classmethod
@@ -58,6 +58,8 @@ class DatabaseTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.db.close()
 
+
+class DatabaseTests(TestWithDbInstance):
     def test_get_vpairs_of_entry_with_orthologs(self):
         for entry_nr, exp_vps_cnt in [(12, 3), (1, 0), (4, 1)]:
             vps = self.db.get_vpairs(entry_nr)

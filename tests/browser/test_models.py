@@ -179,6 +179,11 @@ class AncestralGenomeModelTests(TestDbBase):
     def test_extant_genomes_of_luca(self):
         self.assertEqual(4, len(models.AncestralGenome(self.db, 0).extant_genomes))
 
+    def test_extant_genome_of_extant_genome_taxid(self):
+        query = 559292
+        ag = models.AncestralGenome(self.db, query)
+        self.assertIn(query, [g.ncbi_taxon_id for g in ag.extant_genomes])
+
 
 class ExonStructureTest(unittest.TestCase):
     def get_exons(self):

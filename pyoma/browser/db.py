@@ -2319,6 +2319,12 @@ class HogIdForwardMapper(object):
         self.h5_hogmap.close()
         self.db.unregister_on_close(self.close)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def map_hogid(self, hogid):
         hogid = hogid.encode("utf-8") if isinstance(hogid, str) else hogid
         cand_iter = self.h5_hogmap.get_node("/hogmap").where(

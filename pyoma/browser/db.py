@@ -1957,6 +1957,12 @@ class SequenceSearch(object):
             "ascii"
         )
 
+    def _tax_filter_range(self, en, rng):
+        return rng[0] <= en <= rng[1]
+
+    def _tax_filter_set(self, en, taxset):
+        return en in taxset
+
     def search(
         self,
         seq,
@@ -1972,10 +1978,7 @@ class SequenceSearch(object):
         search.
         """
         seq = self._sanitise_seq(seq) if not is_sanitised else seq
-        m = self.exact_search(seq, is_sanitised=True)
-        # TODO: taxonomic filtering.
-        if entrynr_range is not None:
-            m = [x for x in m if entrynr_range[0] <= x <= entrynr_range[1]]
+        m = self.exact_search(seq, is_sanitised=True, entrynr_range=entrynr_range)
         if len(m) == 0:
             # Do approximate search
             m = self.approx_search(
@@ -1991,15 +1994,18 @@ class SequenceSearch(object):
         else:
             return "exact", m
 
-    def exact_search(self, seq, only_full_length=True, is_sanitised=None):
+    def exact_search(
+        self, seq, only_full_length=True, is_sanitised=None, entrynr_range=None
+    ):
         """
         Performs an exact match search using the suffix array.
         """
-        # TODO: work out whether to just use the approximate search and then
-        # check if any are actually exact matches. Do the counting and then
-        # do an equality checking on any of the sequences that have the correct
-        # number of kmer matches.
         seq = seq if is_sanitised else self._sanitise_seq(seq)
+        filt = (
+            self._tax_filter_range
+            if isinstance(entrynr_range, tuple)
+            else self._tax_filter_set
+        )
         nn = len(seq)
         if nn > 0:
             z = KeyWrapper(
@@ -2017,8 +2023,10 @@ class SequenceSearch(object):
                 # Find entry numbers and filter to remove incorrect entries
                 return list(
                     filter(
-                        lambda e: (not only_full_length)
-                        or self.get_entry_length(e) == nn,
+                        lambda e: (
+                            ((not only_full_length) or self.get_entry_length(e) == nn)
+                            and (entrynr_range is None or filt(e, entrynr_range))
+                        ),
                         self.get_entrynr(self.seq_idx[ii:jj]),
                     )
                 )
@@ -2042,6 +2050,11 @@ class SequenceSearch(object):
         seq = seq if is_sanitised else self._sanitise_seq(seq)
         n = n if n is not None else 50
         coverage = 0.0 if coverage is None else coverage
+        tax_filt = (
+            self._tax_filter_range
+            if isinstance(entrynr_range, tuple)
+            else self._tax_filter_set
+        )
 
         # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
         c = collections.Counter()
@@ -2058,7 +2071,7 @@ class SequenceSearch(object):
             (enr, (cnts / z))
             for enr, cnts in c.items()
             if cnts >= cut_off
-            and (entrynr_range is None or entrynr_range[0] <= enr <= entrynr_range[1])
+            and (entrynr_range is None or tax_filt(enr, entrynr_range))
         ]
         c = sorted(c, reverse=True, key=lambda x: x[1])[:n] if n > 0 else c
 

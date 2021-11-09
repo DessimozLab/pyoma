@@ -169,3 +169,30 @@ class SequenceSearch(BaseSearch):
             p.oma_group for p in self._matched_seqs.values() if p.oma_group != 0
         )
         return [models.OmaGroup(self.db, grp) for grp, cnt in grps.most_common(10)]
+
+
+class XRefSearch(BaseSearch):
+    def __init__(
+        self,
+        pyomadb: db.Database,
+        term: Union[int, str],
+        max_matches: Union[None, int] = None,
+    ):
+        super().__init__(pyomadb, term)
+        self.max_matches = max_matches
+
+    @models.LazyProperty
+    def estimated_occurrences(self):
+        return self.db.id_mapper["XRef"].xref_index.count(self.term)
+
+    @models.LazyProperty
+    def _matched_proteins(self):
+        return self.db.id_resolver.search_protein(self.term, limit=self.max_matches)
+
+    def search_entries(self):
+        res = []
+        for enr, xrefdata in self._matched_proteins.items():
+            p = models.ProteinEntry(self.db, enr)
+            p.xref_data = xrefdata
+            res.append(p)
+        return res

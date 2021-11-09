@@ -1,5 +1,6 @@
 from __future__ import division, print_function, absolute_import, unicode_literals
 
+import functools
 import time
 from builtins import bytes, str, range, str
 from bisect import bisect_left
@@ -380,7 +381,8 @@ class SuffixSearcher(object):
         self.offset_arr = offset[:]
         self.ignore_case = bool(ignore_case)
 
-    def find(self, query):
+    @functools.lru_cache(maxsize=16)
+    def _get_index_range(self, query):
         if isinstance(query, str):
             query = query.encode("utf-8")
         if self.ignore_case:
@@ -390,29 +392,34 @@ class SuffixSearcher(object):
             slicer = KeyWrapper(
                 self.suffix_arr, key=lambda i: self.buffer_arr[i : (i + n)].tobytes()
             )
-            t0 = time.time()
             ii = bisect_left(slicer, query)
-            t1 = time.time()
             if ii and ii < len(self.suffix_arr) and (slicer[ii] == query):
                 query_after = query[:-1] + chr(query[-1] + 1).encode("utf-8")
                 jj = bisect_left(slicer, query_after)
-                if (jj < len(self.suffix_arr) and slicer[jj] == query) or slicer[
-                    jj - 1
-                ] != query:
+                if (jj < len(self.suffix_arr) and slicer[jj] == query) or (
+                    slicer[jj - 1] != query
+                ):
                     raise RuntimeError("index broken, should not happen")
-                t2 = time.time()
-                # Find row numbers
-                res = (
-                    numpy.searchsorted(self.offset_arr, self.suffix_arr[ii:jj] + 1) - 1
-                )
-                t3 = time.time()
-                logger.debug(
-                    "SuffixIndex.find({}) bisect: {}, zoom: {}, extract: {} --> {}rows".format(
-                        query, t1 - t0, t2 - t1, t3 - t2, len(res)
-                    )
-                )
-                return res
-        return []
+                return slice(ii, jj)
+        return slice(0, 0)
+
+    def count(self, query):
+        index_range = self._get_index_range(query)
+        return index_range.stop - index_range.start
+
+    def find(self, query, limit=None):
+        index_range = self._get_index_range(query)
+        if index_range.stop - index_range.start == 0:
+            return []
+
+        if limit is not None:
+            index_range = slice(
+                index_range.start, max(index_range.stop, index_range.start + limit)
+            )
+
+        # Find row numbers
+        res = numpy.searchsorted(self.offset_arr, self.suffix_arr[index_range] + 1) - 1
+        return res
 
 
 class SuffixIndexError(Exception):

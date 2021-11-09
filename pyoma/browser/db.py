@@ -2470,7 +2470,7 @@ class IDResolver(object):
         for nr, res_dict in id_res.items():
             candidates[nr].update(res_dict)
         try:
-            desc_res = DescriptionSearcher(self._db).search_term(query)
+            desc_res = DescriptionSearcher(self._db).search_term(query, limit)
             for row_nr in desc_res[:limit]:
                 nr = row_nr + 1
                 candidates[nr]["Description"] = [self._db.get_description(nr).decode()]
@@ -3075,7 +3075,10 @@ class XrefIdMapper(object):
             term = query
 
         result = collections.defaultdict(dict)
-        for xref_row in self.xref_index.find(term):
+        high_limit = None if limit is None else 4 * limit
+        xref_rows = self.xref_index.find(term, limit=high_limit)
+        xref_rows.sort()
+        for xref_row in xref_rows:
             xref = self.xref_tab[xref_row]
             if not source_filter or xref["XRefSource"] == source_filter:
                 source = self.xrefEnum(xref["XRefSource"])
@@ -3215,8 +3218,8 @@ class DescriptionSearcher(object):
         )
 
     @timethis(logging.DEBUG)
-    def search_term(self, term):
-        return self.desc_index.find(term)
+    def search_term(self, term, limit=None):
+        return self.desc_index.find(term, limit=limit)
 
 
 class FastMapper(object):

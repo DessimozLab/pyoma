@@ -897,6 +897,8 @@ class DarwinExporter(object):
         )
         for root, dirs, filenames in os.walk(hog_path):
             for fn in filenames:
+                if fn.endswith(".augmented"):
+                    continue
                 try:
                     input_file = os.path.join(root, fn)
                     out_orthoxml = input_file + ".augmented"

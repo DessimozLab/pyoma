@@ -907,7 +907,8 @@ class DarwinExporter(object):
                 except Exception as e:
                     self.logger.error("an error occured while processing " + fn + ":")
                     self.logger.exception(e)
-
+        # flushing index table
+        self.orthoxml_index.flush()
         hog_converter.write_hogs()
 
     def add_orthoxml(self, orthoxml_path, augmented_orthoxml_path, fam_nrs):

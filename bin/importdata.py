@@ -54,6 +54,12 @@ def main(args):
         action="count",
         help="Increase verbosity level to INFO or DEBUG level",
     )
+    parser.add_argument(
+        "--phases",
+        type=int,
+        nargs="+",
+        help="select phases to run individually. By default, all phases are run.",
+    )
 
     options = parser.parse_args(args)
     log_level = 30 - (10 * min(options.v, 2))
@@ -66,7 +72,11 @@ def main(args):
             os.environ["DARWIN_BROWSERDATA_PATH"] = options.release
         print(options.out)
         pyoma.browser.convert.main(
-            options.out, domains=options.domains, log_level=log_level
+            options.out,
+            domains=options.domains,
+            log_level=log_level,
+            release=options.hog_release_char,
+            phases=options.phases,
         )
 
 

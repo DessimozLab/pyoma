@@ -21,10 +21,10 @@ def add_xrefs_and_rebuild_indexes(filename, tsv_paths):
         except tables.NoSuchNodeError:
             pass
 
-    xref_tab = exporter.h5.get_node("XRef")
+    xref_tab = exporter.h5.get_node("/XRef")
     dtype = xref_tab.dtype
     for fname in tsv_paths:
-        rows = numpy.fromfile(fname, dtype=dtype, sep="\t")
+        rows = numpy.loadtxt(fname, dtype=dtype, delimiter="\t")
         xref_tab.append(rows)
     xref_tab.flush()
     exporter.close()
@@ -51,4 +51,4 @@ if __name__ == "__main__":
     conf = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
 
-    add_xrefs_and_rebuild_indexes(conf.hdf5, conf.tsv)
+    add_xrefs_and_rebuild_indexes(conf.db, conf.tsv)

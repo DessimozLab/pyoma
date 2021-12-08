@@ -74,13 +74,13 @@ def map_missing(db, missing, nr_procs=1):
                     (
                         best,
                         src_enum["UniProtKB/TrEMBL"],
-                        rec.id.encode("utf-8"),
+                        rec.id,
                         verif_enum["modified"],
                     ),
                     (
                         best,
                         src_enum["UniProtKB/SwissProt"],
-                        rec.name.encode("utf-8"),
+                        rec.name,
                         verif_enum["modified"],
                     ),
                 ]

@@ -278,6 +278,17 @@ def compare_versions(output_file, target_path, *old_path):
 
 
 def build_lookup(target_db, *old_dbs, nr_procs=None):
-    compute_minhashes_for_db(target_db, target_db + ".hog-lsh.h5", nr_procs=nr_procs)
-    for old in old_dbs:
-        compute_minhashes_for_db(old, old + "hog-lsh.h5", nr_procs=nr_procs)
+    def lsh_fn_from_db_path(dbpath):
+        dbname = os.path.splitext(os.path.basename(dbpath))[0]
+        lsh_fn = dbname + ".hog-lsh.h5"
+        return lsh_fn
+
+    for dbpath in itertools.chain([target_db], old_dbs):
+        compute_minhashes_for_db(dbpath, lsh_fn_from_db_path(dbpath), nr_procs=nr_procs)
+
+    hogmap_name = os.path.splitext(os.path.basename(target_db))[0] + ".hogmap.h5"
+    compare_versions(
+        hogmap_name,
+        lsh_fn_from_db_path(target_db),
+        list(map(lsh_fn_from_db_path, old_dbs)),
+    )

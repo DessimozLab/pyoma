@@ -1120,7 +1120,7 @@ class Database(object):
         except StopIteration:
             raise ValueError(
                 'HOG-ID/Level combination "{}/{:s}" unknown'.format(
-                    hog_id.decode(), level
+                    hog_id.decode(), level if level is not None else "Root"
                 )
             )
 

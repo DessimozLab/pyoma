@@ -1,8 +1,11 @@
-from . import db, models
-from typing import Union
 import abc
 import collections
+import itertools
 import logging
+import re
+from typing import Union
+
+from . import db, models
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +48,64 @@ class OmaGroupSearch(BaseSearch):
 
 
 class HogIDSearch(BaseSearch):
+    def __init__(self, pyomadb: db.Database, term: Union[int, str]):
+        super().__init__(pyomadb, term)
+        self.outdated_query_hog = False
+
+    def _map_forward_outdated_hogid(self, hogid):
+        try:
+            with db.HogIdForwardMapper(self.db) as fwd:
+                return fwd.map_hogid(hogid)
+        except IOError as e:
+            return {}
+
     @models.LazyProperty
     def _matched_hogs(self):
-        pass
+        match = re.match(
+            r"(?P<id>(?P<prefix>HOG:)?(?P<rel>[A-Z]*)(?P<fam>\d+)(?P<subid>[a-z0-9.]*))(?:_(?P<taxid>\d+))?",
+            self.term,
+        )
+        hogs = []
+        if match is not None:
+            level = None
+            if match.group("taxid") is not None:
+                try:
+                    n = self.db.tax.get_taxnode_from_name_or_taxid(match.group("taxid"))
+                    level = n[0]["Name"].decode()
+                except (db.InvalidTaxonId, KeyError):
+                    pass
+            new_hogs = {}
+            if match.group("rel") != self.db.release_char and match.group("prefix"):
+                new_hogs = self._map_forward_outdated_hogid(match.group("id"))
+                self.outdated_query_hog = True
+                ids = new_hogs.keys()
+            else:
+                ids = (
+                    match.group("id"),
+                    "HOG:{}{:07d}".format(
+                        self.db.release_char, int(match.group("fam"))
+                    ),
+                )
+            levels = [level]
+            if level is not None:
+                levels.append(None)
+            for hog_id, lev in itertools.product(ids, levels):
+                try:
+                    hog = models.HOG(self.db, self.db.get_hog(hog_id, lev))
+                    hogs.append(hog)
+                    if self.outdated_query_hog:
+                        hog.query_jaccard_similarity = new_hogs[hog_id]
+                    else:
+                        break  # not an outdated hog. break at the best candidate
+                except ValueError:
+                    pass
+        return hogs
+
+    def search_entries(self):
+        return list(itertools.chain(hog.members for hog in self._matched_hogs))
+
+    def search_groups(self):
+        return self._matched_hogs
 
 
 class GOSearch(BaseSearch):
@@ -112,10 +170,7 @@ class TaxSearch(BaseSearch):
 
 class SequenceSearch(BaseSearch):
     def __init__(
-        self,
-        pyomadb: db.Database,
-        term: Union[int, str],
-        strategy: Union[None, str] = None,
+        self, pyomadb: db.Database, term: str, strategy: Union[None, str] = None,
     ):
         super().__init__(pyomadb, term)
         self.strategy = strategy.lower() if strategy else "mixed"
@@ -173,10 +228,7 @@ class SequenceSearch(BaseSearch):
 
 class XRefSearch(BaseSearch):
     def __init__(
-        self,
-        pyomadb: db.Database,
-        term: Union[int, str],
-        max_matches: Union[None, int] = None,
+        self, pyomadb: db.Database, term: str, max_matches: Union[None, int] = None,
     ):
         super().__init__(pyomadb, term)
         self.max_matches = max_matches

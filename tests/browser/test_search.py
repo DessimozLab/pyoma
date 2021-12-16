@@ -6,6 +6,7 @@ from unittest.mock import patch
 from .test_db import TestWithDbInstance
 from pyoma.browser.search import (
     OmaGroupSearch,
+    HogIDSearch,
     GOSearch,
     TaxSearch,
     SequenceSearch,
@@ -137,3 +138,44 @@ class XRefSearchTest(TestWithDbInstance):
                 self.assertEqual(20, len(res_limit))
                 self.assertGreater(len(res_ref), len(res_limit))
                 self.assertGreater(t1 - t0, t2 - t1, "limited search took longer")
+
+
+class HogIDSearchTest(TestWithDbInstance):
+    def test_existing_hog_with_level(self):
+        for query in ("HOG:0000002_4890", "HOG:0000165.1a_4890"):
+            with self.subTest(query=query):
+                s = HogIDSearch(self.db, query)
+                self.assertIn(
+                    query.split("_")[0], [h.hog_id for h in s.search_groups()]
+                )
+                self.assertFalse(s.outdated_query_hog)
+
+    def test_inexact_hogid_with_level(self):
+        for query, (exp_hog_id, exp_level, is_root) in zip(
+            (
+                "HOG:0000002.5a.6c_4890",
+                "HOG:0000165.1a_4751",
+                "HOG:0000165_4890",
+                "HOG:0000165_4751",
+            ),
+            (
+                ("HOG:0000002", "Ascomycota", False),
+                ("HOG:0000165.1a", "Ascomycota", True),
+                ("HOG:0000165", "Eukaryota", True),
+                ("HOG:0000165", "Fungi", False),
+            ),
+        ):
+            with self.subTest(query=query):
+                s = HogIDSearch(self.db, query)
+                res = s.search_groups()
+                self.assertEqual(1, len(res))
+                res = res[0]
+                self.assertFalse(s.outdated_query_hog)
+                self.assertEqual(exp_hog_id, res.hog_id)
+                self.assertEqual(exp_level, res.level)
+                self.assertEqual(is_root, res.is_root)
+
+    def test_bogous_hogid(self):
+        query = "HOG:1111111.6a"
+        s = HogIDSearch(self.db, query)
+        self.assertEqual([], s.search_groups())

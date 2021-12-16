@@ -278,17 +278,22 @@ def compare_versions(output_file, target_path, *old_path):
 
 
 def build_lookup(target_db, *old_dbs, nr_procs=None):
-    def lsh_fn_from_db_path(dbpath):
+    def lsh_fn_from_db_path(dbpath, modif=None):
         dbname = os.path.splitext(os.path.basename(dbpath))[0]
-        lsh_fn = dbname + ".hog-lsh.h5"
+        modif_str = "-{}".format(modif) if modif else ""
+        lsh_fn = "{}{}.hog-lsh.h5".format(dbname, modif_str)
         return lsh_fn
 
-    for dbpath in itertools.chain([target_db], old_dbs):
-        compute_minhashes_for_db(dbpath, lsh_fn_from_db_path(dbpath), nr_procs=nr_procs)
+    target_lsh_fn = lsh_fn_from_db_path(target)
+    compute_minhashes_for_db(target_db, target_lsh_fn, nr_procs=nr_procs)
+
+    old_lsh_paths = []
+    for k, dbpath in enumerate(old_dbs):
+        cached_lsh_fn = dbpath.replace(".h5", ".hog-lsh.h5")
+        if not os.path.exists(cached_lsh_fn):
+            cached_lsh_fn = lsh_fn_from_db_path(dbpath, modif=k)
+            compute_minhashes_for_db(dbpath, cached_lsh_fn, nr_procs=nr_procs)
+        old_lsh_paths.append(cached_lsh_fn)
 
     hogmap_name = os.path.splitext(os.path.basename(target_db))[0] + ".hogmap.h5"
-    compare_versions(
-        hogmap_name,
-        lsh_fn_from_db_path(target_db),
-        list(map(lsh_fn_from_db_path, old_dbs)),
-    )
+    compare_versions(hogmap_name, target_lsh_fn, old_lsh_paths)

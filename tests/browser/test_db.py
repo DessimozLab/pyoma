@@ -4,6 +4,8 @@ import random
 import types
 import unittest
 
+import numpy.testing
+
 try:
     import unittest.mock as mock
 except ImportError:
@@ -69,6 +71,23 @@ class DatabaseTests(TestWithDbInstance):
                 sorted(["EntryNr1", "EntryNr2", "RelType", "Distance", "Score"]),
                 sorted(vps.dtype.fields.keys()),
             )
+
+    def test_get_vpairs_between_species_is_same_as_loading_all_vpairs(self):
+        g1, g2 = "YEAST", "SCHPO"
+        t0 = time.time()
+        rng1 = self.db.id_mapper["OMA"].genome_range(g1)
+        rng2 = self.db.id_mapper["OMA"].genome_range(g2)
+        expected = []
+        for en in range(rng1[0], rng1[1] + 1):
+            for vp in self.db.get_vpairs(en):
+                if rng2[0] <= vp["EntryNr2"] <= rng2[1]:
+                    expected.append(vp)
+        expected = numpy.fromiter(expected, dtype=expected[0].dtype)
+        t1 = time.time()
+        actual = self.db.get_vpairs_between_species_pair(g1, g2)
+        t2 = time.time()
+        numpy.testing.assert_equal(expected, actual)
+        self.assertLess(10 * (t2 - t1), t1 - t0, "expect at least 10x speedup")
 
     def test_neighborhood_close_to_boundary(self):
         query, window = 3, 7

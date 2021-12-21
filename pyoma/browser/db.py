@@ -492,8 +492,15 @@ class Database(object):
             cnt = 0
         return cnt
 
-    def _get_pw_data(self, entry_nr, tab, typ_filter=None, extra_cols=None):
-        query = "(EntryNr1 == {:d})".format(entry_nr)
+    def _get_pw_data(
+        self, entry_nr, tab, target_range=None, typ_filter=None, extra_cols=None
+    ):
+        if isinstance(entry_nr, tuple):
+            query = "(EntryNr1 >= {:d}) & (EntryNr1 <= {:d})".format(*entry_nr)
+        else:
+            query = "(EntryNr1 == {:d})".format(entry_nr)
+        if target_range is not None:
+            query += " & (EntryNr2 >= {:d}) & (EntryNr2 <= {:d})".format(*target_range)
         if typ_filter is not None:
             query += " & (RelType == {:d})".format(typ_filter)
         dat = tab.read_where(query)
@@ -522,6 +529,40 @@ class Database(object):
         :param int entry_nr: the numeric entry_nr of the query protein."""
         vp_tab = self._get_vptab(entry_nr)
         return self._get_pw_data(entry_nr, vp_tab)
+
+    def get_vpairs_between_species_pair(self, genome1, genome2):
+        """Returns all the pairwise orthologs between two species.
+
+        This method returns a numpy array of the same dtype as
+        :meth:`get_vpairs` does. As input, two genomes present in the
+        OMA database need to be passed, either as rows from from the
+        GenomeTable or with the UniProt mnemonic species code.
+        The pairwise orthologs are symetric, so the order of genome1
+        and genome2 does not have any impact (except of the order of
+        EntryNr1 and EntryNr2)
+
+        :param genome1: first genome
+        :type genome1: :class:`numpy.void`, :class:`pyoma.browser.models.Genome`, str
+        :param genome2: second genome
+        :type genome2: :class:`numpy.void`, :class:`pyoma.browser.models.Genome`, str
+        :returns array with pairwise orthologs between genome1 and genome2
+        :rtype: `numpy.ndarray` of dtype :class:`.tablefmt.PairwiseRelationTable`
+
+        """
+
+        def to_genome(g) -> Genome:
+            if isinstance(g, Genome):
+                return g
+            else:
+                return Genome(self, g)
+
+        g1, g2 = map(to_genome, (genome1, genome2))
+        vptab = self._get_vptab(g1.entry_nr_offset + 1)
+        return self._get_pw_data(
+            entry_nr=(g1.entry_nr_offset + 1, g1.entry_nr_offset + g1.nr_entries),
+            target_range=(g2.entry_nr_offset + 1, g2.entry_nr_offset + g2.nr_entries),
+            tab=vptab,
+        )
 
     def get_within_species_paralogs(self, entry_nr):
         """returns the within species paralogs of a given entry

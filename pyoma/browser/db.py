@@ -3070,6 +3070,39 @@ class XrefIdMapper(object):
             mapped_junks.append(self.xref_tab.read_where(condition))
         return numpy.lib.recfunctions.stack_arrays(mapped_junks, usemask=False)
 
+    def map_entry_nr_range(self, start, stop):
+        """maps for a whole range the entry numbers to the xrefs
+
+        param start: the first entry nr to be mapped
+        type start: int, numpy.int
+        param stop: the first entry nr that is not included in the result (exlusive)
+        type stop: int, numpy.int
+
+        returns: all the mapped xrefs that are respecting
+                 the filtering conditions of the actual subtype of
+                 XRefIdMapper.
+        rtype: :class:`numpy.lib.recarray`"""
+        conditions = ["(EntryNr >= {:d}) & (EntryNr < {:d})".format(start, stop)]
+        if len(self.idtype) < len(self.xrefEnum):
+            source_condition = self._combine_query_values("XRefSource", self.idtype)
+            conditions.append(source_condition)
+        if self._max_verif_for_mapping_entrynrs < max(x[1] for x in self.verif_enum):
+            verif_condition = "(Verification <= {:d})".format(
+                self._max_verif_for_mapping_entrynrs
+            )
+            conditions.append(verif_condition)
+        query = " & ".join(conditions)
+        it = self.xref_tab.where(query)
+        try:
+            first = next(it)
+        except StopIteration:
+            return numpy.array([], dtype=self.xref_tab.dtype)
+        res = numpy.fromiter(
+            map(lambda row: row.fetch_all_fields(), itertools.chain([first], it)),
+            dtype=self.xref_tab.dtype,
+        )
+        return res
+
     @timethis(logging.DEBUG)
     def search_xref(self, xref, is_prefix=False, match_any_substring=False):
         """identify proteins associcated with `xref`.

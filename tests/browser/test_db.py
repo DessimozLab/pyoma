@@ -411,6 +411,11 @@ class XRefIdMapperTest(unittest.TestCase):
         self.assertEqual((expected_len,), all_mapped.shape)
         self.assertEqual(self.xrefmapper.xref_tab.dtype, all_mapped.dtype)
 
+    def test_entry_nr_range(self):
+        all_mapped = self.xrefmapper.map_many_entry_nrs(numpy.arange(1, 4))
+        range_mapped = self.xrefmapper.map_entry_nr_range(1, 4)
+        numpy.testing.assert_equal(all_mapped, range_mapped)
+
     def test_map_entry_iterator(self):
         it = self.xrefmapper.iter_xrefs_for_entry_nr(1)
         self.assertTrue(isinstance(it, types.GeneratorType), "not a generator")

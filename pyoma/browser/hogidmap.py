@@ -275,16 +275,18 @@ def compare_versions(output_file, target_path, *old_path):
             tab.flush()
             dubious.flush()
             old.close()
+        # build index of Old ids
+        tab.colinstances['Old'].create_csindex() 
 
 
-def build_lookup(target_db, *old_dbs, nr_procs=None):
+def build_lookup(target_db, old_dbs, nr_procs=None):
     def lsh_fn_from_db_path(dbpath, modif=None):
         dbname = os.path.splitext(os.path.basename(dbpath))[0]
-        modif_str = "-{}".format(modif) if modif else ""
+        modif_str = "-{}".format(modif) if modif is not None else ""
         lsh_fn = "{}{}.hog-lsh.h5".format(dbname, modif_str)
         return lsh_fn
 
-    target_lsh_fn = lsh_fn_from_db_path(target)
+    target_lsh_fn = lsh_fn_from_db_path(target_db)
     compute_minhashes_for_db(target_db, target_lsh_fn, nr_procs=nr_procs)
 
     old_lsh_paths = []
@@ -292,6 +294,7 @@ def build_lookup(target_db, *old_dbs, nr_procs=None):
         cached_lsh_fn = dbpath.replace(".h5", ".hog-lsh.h5")
         if not os.path.exists(cached_lsh_fn):
             cached_lsh_fn = lsh_fn_from_db_path(dbpath, modif=k)
+            print("computing lsh for {} - storing in {}".format(dbpath, cached_lsh_fn))
             compute_minhashes_for_db(dbpath, cached_lsh_fn, nr_procs=nr_procs)
         old_lsh_paths.append(cached_lsh_fn)
 

@@ -200,6 +200,12 @@ class Database(object):
         self.mds = None
         self._set_hogid_schema()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def register_on_close(self, callback):
         self._on_close_notify.append(callback)
         logger.debug("registered call to {} on close".format(callback))

@@ -68,9 +68,7 @@ class LSHBuilder(object):
     def _open_hdf5(self, filename, mode="w"):
         filters = None
         if mode == "w":
-            filters = tables.Filters(
-                complevel=1, complib="blosc", shuffle=True, fletcher32=True
-            )
+            filters = tables.Filters(complevel=1, complib="blosc", shuffle=True)
         return tables.open_file(filename, mode=mode, filters=filters)
 
     def init_hash_table_file(self, hash_file):
@@ -276,7 +274,7 @@ def compare_versions(output_file, target_path, *old_path):
             dubious.flush()
             old.close()
         # build index of Old ids
-        tab.colinstances['Old'].create_csindex() 
+        tab.colinstances["Old"].create_csindex()
 
 
 def build_lookup(target_db, old_dbs, nr_procs=None):

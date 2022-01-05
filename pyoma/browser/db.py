@@ -3210,6 +3210,19 @@ class XrefIdMapper(object):
         return xrefdict
 
 
+class BestIdPerEntryOnlyMixin:
+    def filter_best_id(self, arr):
+        df = pd.DataFrame(arr)
+        order = self.canonical_source_order()
+        df["ord"] = df["XRefSource"].apply(lambda x: order.index(self.xrefEnum(x)))
+        df = df.sort_values(by=["EntryNr", "ord"]).drop_duplicates(
+            subset="EntryNr", keep="first"
+        )
+        return df.drop(columns="ord").to_records(
+            index=False, column_dtypes=dict(arr.dtype.descr)
+        )
+
+
 class XRefNoApproximateIdMapper(XrefIdMapper):
     def __init__(self, db):
         super(XRefNoApproximateIdMapper, self).__init__(db)
@@ -3268,6 +3281,22 @@ class LinkoutIdMapper(XrefIdMapper):
         for xref in super(LinkoutIdMapper, self).iter_xrefs_for_entry_nr(entry_nr):
             xref["url"] = self.url(xref["source"], xref["xref"])
             yield xref
+
+
+class GeneNameOrSymbolIdMapper(XRefNoApproximateIdMapper):
+    def __init__(self, db):
+        super(GeneNameOrSymbolIdMapper, self).__init__(db)
+        self.order = [
+            "HGNC",
+            "Gene Name",
+            "UniProtKB/SwissProt",
+            "UniProtKB/TrEMBL",
+            "SourceID",
+        ]
+        self.idtype = frozenset(self.xrefEnum[z] for z in self.order)
+
+    def canonical_source_order(self):
+        return self.order
 
 
 class DomainNameIdMapper(object):

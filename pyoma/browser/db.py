@@ -3287,10 +3287,10 @@ class GeneNameOrSymbolIdMapper(XRefNoApproximateIdMapper):
     def __init__(self, db):
         super(GeneNameOrSymbolIdMapper, self).__init__(db)
         self.order = [
-            "HGNC",
             "Gene Name",
             "UniProtKB/SwissProt",
             "UniProtKB/TrEMBL",
+            "HGNC",
             "SourceID",
         ]
         self.idtype = frozenset(self.xrefEnum[z] for z in self.order)

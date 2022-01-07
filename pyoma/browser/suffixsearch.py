@@ -414,7 +414,7 @@ class SuffixSearcher(object):
 
         if limit is not None:
             index_range = slice(
-                index_range.start, max(index_range.stop, index_range.start + limit)
+                index_range.start, min(index_range.stop, index_range.start + limit)
             )
 
         # Find row numbers

@@ -25,7 +25,8 @@ if __name__ == "__main__":
         help="Overwrite existing cache values",
     )
     conf = parser.parse_args()
-    logging.basicConfig(level=30 - 10 * min(conf.v, 2))
+    log_fmt='%(asctime)s - %(name)s - %(levelname)s: %(message)s'
+    logging.basicConfig(level=30 - 10 * min(conf.v, 2), format=log_fmt)
 
     cache = pyoma.browser.compute_cache.compute_and_store_cached_data(
         conf.hdf5,

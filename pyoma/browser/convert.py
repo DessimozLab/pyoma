@@ -1150,6 +1150,8 @@ class DarwinExporter(object):
         current_protein = None
         past_proteins = set([])
         for xref in xrefs:
+            if xref["Verification"] > max_acceptable_verif_value:
+                continue
             if xref["EntryNr"] != current_protein:
                 if current_protein:
                     past_proteins.add(current_protein)
@@ -1159,8 +1161,6 @@ class DarwinExporter(object):
                 if current_protein in past_proteins:
                     raise DataImportError("Data in /XRef is not grouped w.r.t. EntryNr")
             try:
-                if xref["Verification"] > max_acceptable_verif_value:
-                    continue
                 rank = canonical_sources.index(xref["XRefSource"])
                 if rank < current_xref[0]:
                     current_xref = (rank, xref["XRefId"])
@@ -2894,18 +2894,18 @@ def main(
 
     def phase5():
         if domains is None:
-            domains = ["file:///dev/null"]
+            domainFiles = ["file:///dev/null"]
         else:
-            domains = list(
+            domainFiles = list(
                 map(
                     lambda url: "file://" + url if url.startswith("/") else url, domains
                 )
             )
-        log.info("loading domain annotations from {}".format(domains))
+        log.info("loading domain annotations from {}".format(domainFiles))
         x.add_domain_info(
             filter_duplicated_domains(
                 only_pfam_or_cath_domains(
-                    itertools.chain.from_iterable(map(iter_domains, domains))
+                    itertools.chain.from_iterable(map(iter_domains, domainFiles))
                 )
             )
         )

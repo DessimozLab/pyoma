@@ -18,8 +18,7 @@ def augment_orthoxml(h5, taxonomy, orthoxml, release, out=None):
     }
     hog_converter = HogConverter(entry_tab, release, tax_tab, tax_2_code)
     hog_converter.attach_newick_taxonomy(taxonomy)
-    out_orthoxml = orthoxml + ".augmented"
-    levels = hog_converter.convert_file(orthoxml, store=out_orthoxml)
+    levels = hog_converter.convert_file(orthoxml, store=out)
 
 
 if __name__ == "__main__":

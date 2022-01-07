@@ -200,6 +200,12 @@ class Database(object):
         self.mds = None
         self._set_hogid_schema()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def register_on_close(self, callback):
         self._on_close_notify.append(callback)
         logger.debug("registered call to {} on close".format(callback))
@@ -492,8 +498,15 @@ class Database(object):
             cnt = 0
         return cnt
 
-    def _get_pw_data(self, entry_nr, tab, typ_filter=None, extra_cols=None):
-        query = "(EntryNr1 == {:d})".format(entry_nr)
+    def _get_pw_data(
+        self, entry_nr, tab, target_range=None, typ_filter=None, extra_cols=None
+    ):
+        if isinstance(entry_nr, tuple):
+            query = "(EntryNr1 >= {:d}) & (EntryNr1 <= {:d})".format(*entry_nr)
+        else:
+            query = "(EntryNr1 == {:d})".format(entry_nr)
+        if target_range is not None:
+            query += " & (EntryNr2 >= {:d}) & (EntryNr2 <= {:d})".format(*target_range)
         if typ_filter is not None:
             query += " & (RelType == {:d})".format(typ_filter)
         dat = tab.read_where(query)
@@ -522,6 +535,40 @@ class Database(object):
         :param int entry_nr: the numeric entry_nr of the query protein."""
         vp_tab = self._get_vptab(entry_nr)
         return self._get_pw_data(entry_nr, vp_tab)
+
+    def get_vpairs_between_species_pair(self, genome1, genome2):
+        """Returns all the pairwise orthologs between two species.
+
+        This method returns a numpy array of the same dtype as
+        :meth:`get_vpairs` does. As input, two genomes present in the
+        OMA database need to be passed, either as rows from from the
+        GenomeTable or with the UniProt mnemonic species code.
+        The pairwise orthologs are symetric, so the order of genome1
+        and genome2 does not have any impact (except of the order of
+        EntryNr1 and EntryNr2)
+
+        :param genome1: first genome
+        :type genome1: :class:`numpy.void`, :class:`pyoma.browser.models.Genome`, str
+        :param genome2: second genome
+        :type genome2: :class:`numpy.void`, :class:`pyoma.browser.models.Genome`, str
+        :returns array with pairwise orthologs between genome1 and genome2
+        :rtype: `numpy.ndarray` of dtype :class:`.tablefmt.PairwiseRelationTable`
+
+        """
+
+        def to_genome(g) -> Genome:
+            if isinstance(g, Genome):
+                return g
+            else:
+                return Genome(self, g)
+
+        g1, g2 = map(to_genome, (genome1, genome2))
+        vptab = self._get_vptab(g1.entry_nr_offset + 1)
+        return self._get_pw_data(
+            entry_nr=(g1.entry_nr_offset + 1, g1.entry_nr_offset + g1.nr_entries),
+            target_range=(g2.entry_nr_offset + 1, g2.entry_nr_offset + g2.nr_entries),
+            tab=vptab,
+        )
 
     def get_within_species_paralogs(self, entry_nr):
         """returns the within species paralogs of a given entry
@@ -3029,6 +3076,39 @@ class XrefIdMapper(object):
             mapped_junks.append(self.xref_tab.read_where(condition))
         return numpy.lib.recfunctions.stack_arrays(mapped_junks, usemask=False)
 
+    def map_entry_nr_range(self, start, stop):
+        """maps for a whole range the entry numbers to the xrefs
+
+        param start: the first entry nr to be mapped
+        type start: int, numpy.int
+        param stop: the first entry nr that is not included in the result (exlusive)
+        type stop: int, numpy.int
+
+        returns: all the mapped xrefs that are respecting
+                 the filtering conditions of the actual subtype of
+                 XRefIdMapper.
+        rtype: :class:`numpy.lib.recarray`"""
+        conditions = ["(EntryNr >= {:d}) & (EntryNr < {:d})".format(start, stop)]
+        if len(self.idtype) < len(self.xrefEnum):
+            source_condition = self._combine_query_values("XRefSource", self.idtype)
+            conditions.append(source_condition)
+        if self._max_verif_for_mapping_entrynrs < max(x[1] for x in self.verif_enum):
+            verif_condition = "(Verification <= {:d})".format(
+                self._max_verif_for_mapping_entrynrs
+            )
+            conditions.append(verif_condition)
+        query = " & ".join(conditions)
+        it = self.xref_tab.where(query)
+        try:
+            first = next(it)
+        except StopIteration:
+            return numpy.array([], dtype=self.xref_tab.dtype)
+        res = numpy.fromiter(
+            map(lambda row: row.fetch_all_fields(), itertools.chain([first], it)),
+            dtype=self.xref_tab.dtype,
+        )
+        return res
+
     @timethis(logging.DEBUG)
     def search_xref(self, xref, is_prefix=False, match_any_substring=False):
         """identify proteins associcated with `xref`.
@@ -3130,6 +3210,19 @@ class XrefIdMapper(object):
         return xrefdict
 
 
+class BestIdPerEntryOnlyMixin:
+    def filter_best_id(self, arr):
+        df = pd.DataFrame(arr)
+        order = self.canonical_source_order()
+        df["ord"] = df["XRefSource"].apply(lambda x: order.index(self.xrefEnum(x)))
+        df = df.sort_values(by=["EntryNr", "ord"]).drop_duplicates(
+            subset="EntryNr", keep="first"
+        )
+        return df.drop(columns="ord").to_records(
+            index=False, column_dtypes=dict(arr.dtype.descr)
+        )
+
+
 class XRefNoApproximateIdMapper(XrefIdMapper):
     def __init__(self, db):
         super(XRefNoApproximateIdMapper, self).__init__(db)
@@ -3188,6 +3281,22 @@ class LinkoutIdMapper(XrefIdMapper):
         for xref in super(LinkoutIdMapper, self).iter_xrefs_for_entry_nr(entry_nr):
             xref["url"] = self.url(xref["source"], xref["xref"])
             yield xref
+
+
+class GeneNameOrSymbolIdMapper(XRefNoApproximateIdMapper):
+    def __init__(self, db):
+        super(GeneNameOrSymbolIdMapper, self).__init__(db)
+        self.order = [
+            "Gene Name",
+            "UniProtKB/SwissProt",
+            "UniProtKB/TrEMBL",
+            "HGNC",
+            "SourceID",
+        ]
+        self.idtype = frozenset(self.xrefEnum[z] for z in self.order)
+
+    def canonical_source_order(self):
+        return self.order
 
 
 class DomainNameIdMapper(object):

@@ -245,6 +245,14 @@ if __name__ == "__main__":
             )
         extractor.process_per_pair(conf.out)
     else:
-        fh = sys.stdout if conf.out == "-" else open(conf.out, "w")
-        extractor.process(fh)
-        fh.close()
+        if conf.out == "-":
+            fh = sys.stdout
+        elif conf.out.endswith(".gz"):
+            fh = gzip.open(conf.out, "wt")
+        else:
+            fh = open(conf.out, "wt")
+        try:
+            extractor.process(fh)
+        finally:
+            if fh != sys.stdout:
+                fh.close()

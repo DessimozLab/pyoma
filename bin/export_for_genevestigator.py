@@ -180,7 +180,8 @@ class PairsExtractor(object):
                 )
             )
         )
-        df["OrthologyType"] = df["RelType"].apply(tab.get_enum("RelType"))
+        enum = tab.get_enum("RelType")
+        df["OrthologyType"] = df["RelType"].apply(lambda x: enum(x))
         df["Protein1"] = df["EntryNr1"].apply(
             lambda enr: "{}{:05d}".format(
                 g1.uniprot_species_code, enr - g1.entry_nr_offset

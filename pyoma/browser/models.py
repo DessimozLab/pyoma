@@ -121,6 +121,8 @@ class ProteinEntry(object):
 
     @property
     def entry_nr(self):
+        if isinstance(self._stored_entry, (int, numpy.integer)):
+            return int(self._stored_entry)
         return int(self._entry["EntryNr"])
 
     @property
@@ -527,6 +529,8 @@ class OmaGroup(object):
     @property
     def group_nbr(self):
         """numeric representation of the OmaGroup"""
+        if isinstance(self._stored_group, (int, numpy.integer)):
+            return int(self._stored_group)
         return int(self._group["group_nr"])
 
     @property

@@ -68,6 +68,7 @@ setup(
             "lark-parser",
             "pyham",
         ],
+        "notebooks": ["jupyter", "matplotlib", "seaborn",],
         "docs": ["sphinx"],
     },
     test_require=["nose"],

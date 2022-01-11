@@ -4,6 +4,7 @@ import time
 from unittest.mock import patch
 
 from .test_db import TestWithDbInstance
+from pyoma.browser.models import ProteinEntry
 from pyoma.browser.search import (
     OmaGroupSearch,
     HogIDSearch,
@@ -12,6 +13,7 @@ from pyoma.browser.search import (
     SequenceSearch,
     ECSearch,
     XRefSearch,
+    SearchResult,
 )
 
 logger = logging.getLogger("search-tests")
@@ -62,7 +64,9 @@ class TaxSearchTest(TestWithDbInstance):
         for query in ("Ascomycota", 4890, "Ascomicotta"):
             with self.subTest("existing internal node", query=query):
                 s = TaxSearch(self.db, query)
-                self.assertIn(4890, [z.ncbi_taxon_id for z in s.search_ancestral()])
+                self.assertIn(
+                    4890, [z.ncbi_taxon_id for z in s.search_ancestral_genomes()]
+                )
                 self.assertIn(559292, [z.ncbi_taxon_id for z in s.search_species()])
 
     def test_existing_extant_node(self):
@@ -175,7 +179,34 @@ class HogIDSearchTest(TestWithDbInstance):
                 self.assertEqual(exp_level, res.level)
                 self.assertEqual(is_root, res.is_root)
 
+    def test_entries_from_hogid(self):
+        query = "HOG:0000165.1a"
+        s = HogIDSearch(self.db, query)
+        for e in s.search_entries():
+            self.assertIsInstance(e, ProteinEntry)
+
     def test_bogous_hogid(self):
         query = "HOG:1111111.6a"
         s = HogIDSearch(self.db, query)
         self.assertEqual([], s.search_groups())
+
+
+class CombineTest(TestWithDbInstance):
+    def test_combine_tax_limit(self):
+        s1 = TaxSearch(self.db, "Saccharomycetes")
+        s2 = SequenceSearch(self.db, "HAISGRE")
+        res = SearchResult()
+        res &= s1
+        self.assertEqual(len(s1.search_entries()), len(res.entries_set))
+        self.assertGreater(len(s2.search_entries()), 2)
+        res &= s2
+        self.assertEqual(len(s2.search_entries()), len(res.entries_set))
+        self.assertEqual(2, len(res.species))
+        self.assertEqual(1, len(res.ancestral_genomes))
+        self.assertEqual(1, len(res.groups))
+
+    def test_combine_tax_and_hog(self):
+        s1 = TaxSearch(self.db, "Saccharomycetes")
+        s2 = HogIDSearch(self.db, "HOG:0000165.1a")
+        res = SearchResult() & s1 & s2
+        self.assertEqual()

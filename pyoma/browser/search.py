@@ -4,7 +4,7 @@ import itertools
 import logging
 import re
 from typing import Union
-
+from dataclasses import dataclass
 from . import db, models
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,9 @@ class BaseSearch(metaclass=abc.ABCMeta):
         pass
 
     def search_species(self):
+        pass
+
+    def search_ancestral_genomes(self):
         pass
 
 
@@ -102,7 +105,14 @@ class HogIDSearch(BaseSearch):
         return hogs
 
     def search_entries(self):
-        return list(itertools.chain(hog.members for hog in self._matched_hogs))
+        if (
+            len(self._matched_hogs) == 0
+            or max(h.nr_member_genes for h in self._matched_hogs) > 100
+        ):
+            return None
+        return list(
+            itertools.chain.from_iterable(hog.members for hog in self._matched_hogs)
+        )
 
     def search_groups(self):
         return self._matched_hogs
@@ -158,14 +168,14 @@ class TaxSearch(BaseSearch):
             enrs.update(range(g.entry_nr_offset + 1, g.entry_nr_offset + len(g) + 1))
         return enrs
 
-    def search_ancestral(self):
+    def search_ancestral_genomes(self):
         return [models.AncestralGenome(self.db, tax) for tax in self._matched_taxons]
 
     def search_species(self):
         sp_set = set([])
         for tax in self._matched_taxons:
             sp_set |= set(models.AncestralGenome(self.db, tax).extant_genomes)
-        return sp_set
+        return list(sp_set)
 
 
 class SequenceSearch(BaseSearch):
@@ -176,14 +186,18 @@ class SequenceSearch(BaseSearch):
         self.strategy = strategy.lower() if strategy else "mixed"
         self.seq = self.db.seq_search._sanitise_seq(self.term)
         self.entry_filter = None
+        self._matched_seqs = None
 
     def set_entry_nr_filter(self, filter: Union[tuple, set]):
         if isinstance(filter, tuple) and len(filter) > 2:
             raise ValueError("filter parameter must be range tuple or a set")
         self.entry_filter = filter
+        self._matched_seqs = None
 
-    @models.LazyProperty
-    def _matched_seqs(self):
+    def get_matched_seqs(self):
+        if self._matched_seqs is not None:
+            return self._matched_seqs
+
         if len(self.seq) < 5:
             logger.debug("too short sequence motif to search: {}".format(self.seq))
             raise ValueError("too short sequence motif")
@@ -214,14 +228,15 @@ class SequenceSearch(BaseSearch):
                 pe.score = align_res["score"]
                 pe.alignment = align_res["alignment"]
                 res[en] = pe
+        self._matched_seqs = res
         return res
 
     def search_entries(self):
-        return list(self._matched_seqs.values())
+        return list(self.get_matched_seqs().values())
 
     def search_groups(self):
         grps = collections.Counter(
-            p.oma_group for p in self._matched_seqs.values() if p.oma_group != 0
+            p.oma_group for p in self.get_matched_seqs().values() if p.oma_group != 0
         )
         return [models.OmaGroup(self.db, grp) for grp, cnt in grps.most_common(10)]
 
@@ -247,4 +262,48 @@ class XRefSearch(BaseSearch):
             p = models.ProteinEntry(self.db, enr)
             p.xref_data = xrefdata
             res.append(p)
+        return res
+
+
+@dataclass
+class SearchResult:
+    entries: dict = None
+    groups: dict = None
+    species: dict = None
+    ancestral_genomes: dict = None
+    entries_set: set = None
+    groups_set: set = None
+    species_set: set = None
+    ancestral_genomes_set: set = None
+
+    def __and__(self, other: BaseSearch):
+        assert isinstance(other, BaseSearch)
+        if hasattr(other, "set_entry_nr_filter") and self.entries is not None:
+            other.set_entry_nr_filter(self.entries_set)
+
+        res = SearchResult()
+        for aspect, key in zip(
+            ("entries", "groups", "species", "ancestral_genomes"),
+            ("entry_nr", "group_nbr", "ncbi_taxon_id", "ncbi_taxon_id"),
+        ):
+            term_aspect_result = getattr(other, "search_" + aspect)()
+            if term_aspect_result is not None:
+                if isinstance(term_aspect_result, set):
+                    keyset = term_aspect_result
+                    keyvals = collections.defaultdict(dict)
+                else:
+                    keyset = set(getattr(z, key) for z in term_aspect_result)
+                    keyvals = {getattr(z, key): z for z in term_aspect_result}
+
+                if getattr(self, aspect) is None:
+                    setattr(res, aspect, keyvals)
+                    setattr(res, aspect + "_set", keyset)
+                else:
+                    setattr(
+                        res, aspect + "_set", getattr(self, aspect + "_set") & keyset
+                    )
+                    setattr(res, aspect, getattr(self, aspect) | keyvals)
+            else:
+                setattr(res, aspect + "_set", getattr(self, aspect + "_set"))
+                setattr(res, aspect, getattr(self, aspect))
         return res

@@ -383,7 +383,9 @@ class SearchResult:
                     setattr(
                         res, aspect + "_set", getattr(self, aspect + "_set") & keyset
                     )
-                    setattr(res, aspect, getattr(self, aspect) | keyvals)
+                    d = dict(getattr(self, aspect))
+                    d.update(keyvals)
+                    setattr(res, aspect, d)
             else:
                 setattr(res, aspect + "_set", getattr(self, aspect + "_set"))
                 setattr(res, aspect, getattr(self, aspect))

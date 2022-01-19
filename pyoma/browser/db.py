@@ -10,6 +10,7 @@ import os
 import re
 import threading
 import time
+import warnings
 from bisect import bisect_left
 from builtins import chr, range, object, zip, bytes, str
 from xml.etree import ElementTree as et
@@ -37,6 +38,12 @@ from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .. import version
 
 logger = logging.getLogger(__name__)
+warnings.filterwarnings(
+    "ignore",
+    category=tables.PerformanceWarning,
+    message=".*maximum recommended rowsize.*",
+    append=True,
+)
 
 # Raise stack limit for PyOPA ~400MB
 threading.stack_size(4096 * 100000)

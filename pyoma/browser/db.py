@@ -124,7 +124,7 @@ class Database(object):
     will typically be issued by methods of this object. Typically
     the result of queries will be :py:class:`numpy.recarray` objects."""
 
-    EXPECTED_DB_SCHEMA = "3.4"
+    EXPECTED_DB_SCHEMA = "3.5"
 
     def __init__(self, db):
         if isinstance(db, str):
@@ -2067,7 +2067,7 @@ class SequenceSearch(object):
                 if (jj < len(self.seq_idx) and z[jj] == seq) or z[jj - 1] != seq:
                     raise RuntimeError("suffix index broken. should not happen")
 
-                # Find entry numbers and filter to remove incorrect entries
+                # Find entry numbers and enr_filter to remove incorrect entries
                 return list(
                     filter(
                         lambda e: (
@@ -2501,26 +2501,33 @@ class IDResolver(object):
             nr = (nr, False)
         return nr
 
-    def search_protein(self, query: str, limit=None):
+    def search_protein(self, query: str, limit=None, entrynr_range=None):
         candidates = collections.defaultdict(dict)
         try:
             nr = self._from_numeric(query)
-            candidates[nr]["numeric_id"] = [query]
+            if entrynr_range is None or entrynr_range[0] <= nr <= entrynr_range[1]:
+                candidates[nr]["numeric_id"] = [query]
         except ValueError:
             pass
         try:
             nr = self._from_omaid(query)
-            candidates[nr]["omaid"] = [query]
+            if entrynr_range is None or entrynr_range[0] <= nr <= entrynr_range[1]:
+                candidates[nr]["omaid"] = [query]
         except (InvalidOmaId, UnknownSpecies) as e:
             pass
-        id_res = self._db.id_mapper["XRef"].search_id(query, limit)
+        id_res = self._db.id_mapper["XRef"].search_id(
+            query, limit=limit, entrynr_range=entrynr_range
+        )
         for nr, res_dict in id_res.items():
             candidates[nr].update(res_dict)
         try:
             desc_res = DescriptionSearcher(self._db).search_term(query, limit)
             for row_nr in desc_res[:limit]:
                 nr = row_nr + 1
-                candidates[nr]["Description"] = [self._db.get_description(nr).decode()]
+                if entrynr_range is None or entrynr_range[0] <= nr <= entrynr_range[1]:
+                    candidates[nr]["Description"] = [
+                        self._db.get_description(nr).decode()
+                    ]
         except SuffixIndexError as e:
             logger.warning(e)
             logger.warning("No Descriptions searched")
@@ -2986,6 +2993,12 @@ class XrefIdMapper(object):
             # compability mode
             idx_node = db.get_hdf5_handle().get_node("/XRef_Index")
             self.xref_index = SuffixSearcher.from_index_node(idx_node)
+        try:
+            self._xref_entry_offset = db.get_hdf5_handle().get_node(
+                "/XRef_EntryNr_offset"
+            )
+        except tables.NoSuchNodeError:
+            self._xref_entry_offset = None
 
     def map_entry_nr(self, entry_nr):
         """returns the XRef entries associated with the query protein.
@@ -2997,20 +3010,33 @@ class XrefIdMapper(object):
 
         :param entry_nr: the numeric id of the query protein.
         :returns: list of dicts with 'source' and 'xref' keys."""
+        it = self._iter_xref_for_entrynr(entry_nr)
         res = [
             {
                 "source": self.xrefEnum(row["XRefSource"]),
                 "xref": row["XRefId"].decode(),
                 "seq_match": self.verif_enum(row["Verification"]),
             }
-            for row in self.xref_tab.where(
+            for row in it
+            if row["XRefSource"] in self.idtype
+        ]
+        return res
+
+    def _iter_xref_for_entry_nr(self, entry_nr):
+        if self._xref_entry_offset is not None:
+            start, stop = (self._xref_entry_offset[z] for z in (entry_nr, entry_nr + 1))
+            it = self.xref_tab.where(
+                "Verification <= {:d}".format(self._max_verif_for_mapping_entrynrs),
+                start=start,
+                stop=stop,
+            )
+        else:
+            it = self.xref_tab.where(
                 "(EntryNr=={:d}) & (Verification <= {:d})".format(
                     entry_nr, self._max_verif_for_mapping_entrynrs
                 )
             )
-            if row["XRefSource"] in self.idtype
-        ]
-        return res
+        return it
 
     def canonical_source_order(self):
         """returns the list of xref sources in order of their importance.
@@ -3028,14 +3054,10 @@ class XrefIdMapper(object):
         (both str) holding the information of the xref record.
 
         :param entry_nr: the numeric id of the query protein"""
-        for row in self.xref_tab.where(
-            "(EntryNr=={:d}) & (Verification <= {:d})".format(
-                entry_nr, self._max_verif_for_mapping_entrynrs
-            )
-        ):
+        for row in self._iter_xref_for_entry_nr(entry_nr):
             if row["XRefSource"] in self.idtype:
                 yield {
-                    "source": self.xrefEnum._values[row["XRefSource"]],
+                    "source": self.xrefEnum(row["XRefSource"]),
                     "xref": row["XRefId"].decode(),
                 }
 
@@ -3143,7 +3165,7 @@ class XrefIdMapper(object):
 
         return res
 
-    def search_id(self, query, limit=None):
+    def search_id(self, query, limit=None, entrynr_range=None):
         source_filter = None
         try:
             prefix, term = query.split(":", maxsplit=1)
@@ -3158,8 +3180,21 @@ class XrefIdMapper(object):
         high_limit = None if limit is None else 4 * limit
         xref_rows = self.xref_index.find(term, limit=high_limit)
         xref_rows.sort()
+        if entrynr_range is not None and self._db.db_schema_version >= (3, 5):
+            row_low = self._xref_entry_offset[entrynr_range[0]]
+            row_high = self._xref_entry_offset[entrynr_range[1] + 1]
+            xref_rows = xref_rows[
+                numpy.where(
+                    numpy.logical_and(xref_rows >= row_low, xref_rows < row_high)
+                )
+            ]
+
         for xref_row in xref_rows:
             xref = self.xref_tab[xref_row]
+            if entrynr_range is not None and not (
+                entrynr_range[0] <= xref["EntryNr"] <= entrynr_range[1]
+            ):
+                continue
             if not source_filter or xref["XRefSource"] == source_filter:
                 source = self.xrefEnum(xref["XRefSource"])
                 try:
@@ -3177,10 +3212,7 @@ class XrefIdMapper(object):
         a xref source into a string representation.
 
         :param int source: numeric value of xref source"""
-        try:
-            return self.xrefEnum._values[source]
-        except KeyError:
-            raise ValueError("'{}' is not a valid xref source value".format(source))
+        return self.xrefEnum(source)
 
     def verification_as_string(self, verif):
         """string representation of xref verifiction enum value"""

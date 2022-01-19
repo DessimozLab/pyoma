@@ -4,7 +4,7 @@ import time
 from unittest.mock import patch
 
 from .test_db import TestWithDbInstance
-from pyoma.browser.models import ProteinEntry
+from pyoma.browser.models import ProteinEntry, HOG
 from pyoma.browser.search import (
     OmaGroupSearch,
     HogIDSearch,
@@ -182,6 +182,9 @@ class HogIDSearchTest(TestWithDbInstance):
     def test_entries_from_hogid(self):
         query = "HOG:0000165.1a"
         s = HogIDSearch(self.db, query)
+        self.assertIsNone(s.search_entries())
+        tax = TaxSearch(self.db, "Saccharomycetes")
+        s.set_taxon_filter(tax.search_ancestral_genomes()[0])
         for e in s.search_entries():
             self.assertIsInstance(e, ProteinEntry)
 
@@ -207,6 +210,23 @@ class CombineTest(TestWithDbInstance):
 
     def test_combine_tax_and_hog(self):
         s1 = TaxSearch(self.db, "Saccharomycetes")
-        s2 = HogIDSearch(self.db, "HOG:0000165.1a")
+        s2 = HogIDSearch(self.db, "HOG:0000165")
         res = SearchResult() & s1 & s2
-        self.assertEqual()
+        self.assertTrue(
+            any(
+                x.hog_id.startswith("HOG:0000165.1a") and x.level == "Saccharomycetes"
+                for x in res.groups.values()
+                if isinstance(x, HOG)
+            ),
+            str(res.groups),
+        )
+
+    def test_combine_tax_and_xref(self):
+        s1 = TaxSearch(self.db, "Saccharomycetes")
+        s2 = XRefSearch(self.db, "K")
+        unfiltered_xref = s2.search_entries()
+        res = SearchResult() & s1 & s2
+        self.assertIsNotNone(s2.entry_filter)
+        tax_range = s1.search_entries()
+        self.assertTrue(all(p.entry_nr in tax_range for p in res.entries.values()))
+        self.assertGreater(len(unfiltered_xref), len(res.entries))

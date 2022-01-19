@@ -3,7 +3,7 @@ import collections
 import itertools
 import logging
 import re
-from typing import Union
+from typing import Union, List
 from dataclasses import dataclass
 from . import db, models
 
@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 class BaseSearch(metaclass=abc.ABCMeta):
+    PRIO = 100
+
     def __init__(self, pyomadb: db.Database, term: Union[int, str]):
         self.db = pyomadb
         self.term = term
@@ -29,6 +31,8 @@ class BaseSearch(metaclass=abc.ABCMeta):
 
 
 class OmaGroupSearch(BaseSearch):
+    PRIO = 50
+
     @models.LazyProperty
     def _matched_groups(self):
         try:
@@ -51,9 +55,33 @@ class OmaGroupSearch(BaseSearch):
 
 
 class HogIDSearch(BaseSearch):
-    def __init__(self, pyomadb: db.Database, term: Union[int, str]):
+    PRIO = 70
+
+    def __init__(
+        self,
+        pyomadb: db.Database,
+        term: Union[int, str],
+        level: Union[None, int] = None,
+    ):
         super().__init__(pyomadb, term)
         self.outdated_query_hog = False
+        self._level = None
+        self._get_protein_entries = False
+        self._matched_hogs = None
+        if level is not None:
+            try:
+                self.set_taxon_level(models.AncestralGenome(self.db, level))
+            except db.UnknownSpecies:
+                pass
+
+    def set_taxon_filter(self, taxon):
+        if not isinstance(taxon, models.AncestralGenome):
+            return
+        if self._level != taxon.scientific_name:
+            self._level = taxon.scientific_name
+            self._get_protein_entries = len(taxon.extant_genomes) < 3
+            self._matched_hogs = None
+            self.outdated_query_hog = False
 
     def _map_forward_outdated_hogid(self, hogid):
         try:
@@ -62,8 +90,10 @@ class HogIDSearch(BaseSearch):
         except IOError as e:
             return {}
 
-    @models.LazyProperty
-    def _matched_hogs(self):
+    def get_matched_hogs(self):
+        if self._matched_hogs is not None:
+            return self._matched_hogs
+
         match = re.match(
             r"(?P<id>(?P<prefix>HOG:)?(?P<rel>[A-Z]*)(?P<fam>\d+)(?P<subid>[a-z0-9.]*))(?:_(?P<taxid>\d+))?",
             self.term,
@@ -89,6 +119,12 @@ class HogIDSearch(BaseSearch):
                         self.db.release_char, int(match.group("fam"))
                     ),
                 )
+            if self._level is not None:
+                # we have a taxon filter, search for subhogs/superhogs of ids
+                ids_to_look = ids if self.outdated_query_hog else (ids[0],)
+                for hog_id in ids_to_look:
+                    for subhog in self.db.iter_hog_at_level(hog_id, level=self._level):
+                        hogs.append(models.HOG(self.db, subhog))
             levels = [level]
             if level is not None:
                 levels.append(None)
@@ -102,23 +138,27 @@ class HogIDSearch(BaseSearch):
                         break  # not an outdated hog. break at the best candidate
                 except ValueError:
                     pass
+        self._matched_hogs = hogs
         return hogs
 
     def search_entries(self):
-        if (
-            len(self._matched_hogs) == 0
-            or max(h.nr_member_genes for h in self._matched_hogs) > 100
-        ):
+        if not self._get_protein_entries:
             return None
         return list(
-            itertools.chain.from_iterable(hog.members for hog in self._matched_hogs)
+            itertools.chain.from_iterable(
+                hog.members
+                for hog in self.get_matched_hogs()
+                if hog.level == self._level
+            )
         )
 
     def search_groups(self):
-        return self._matched_hogs
+        return self.get_matched_hogs()
 
 
 class GOSearch(BaseSearch):
+    PRIO = 30
+
     @models.LazyProperty
     def _matched_entries(self):
         try:
@@ -132,6 +172,8 @@ class GOSearch(BaseSearch):
 
 
 class ECSearch(BaseSearch):
+    PRIO = 25
+
     @models.LazyProperty
     def _matched_entries(self):
         return list(int(z) for z in self.db.entrynrs_with_ec_annotation(self.term))
@@ -141,6 +183,8 @@ class ECSearch(BaseSearch):
 
 
 class TaxSearch(BaseSearch):
+    PRIO = 10
+
     @models.LazyProperty
     def _matched_taxons(self):
         try:
@@ -179,6 +223,8 @@ class TaxSearch(BaseSearch):
 
 
 class SequenceSearch(BaseSearch):
+    PRIO = 90
+
     def __init__(
         self, pyomadb: db.Database, term: str, strategy: Union[None, str] = None,
     ):
@@ -189,7 +235,7 @@ class SequenceSearch(BaseSearch):
         self._matched_seqs = None
 
     def set_entry_nr_filter(self, filter: Union[tuple, set]):
-        if isinstance(filter, tuple) and len(filter) > 2:
+        if isinstance(filter, tuple) and len(filter) != 2:
             raise ValueError("filter parameter must be range tuple or a set")
         self.entry_filter = filter
         self._matched_seqs = None
@@ -242,23 +288,49 @@ class SequenceSearch(BaseSearch):
 
 
 class XRefSearch(BaseSearch):
+    PRIO = 85
+
     def __init__(
         self, pyomadb: db.Database, term: str, max_matches: Union[None, int] = None,
     ):
         super().__init__(pyomadb, term)
         self.max_matches = max_matches
+        self._matched_entries = None
+        self.entry_filter = None
 
     @models.LazyProperty
     def estimated_occurrences(self):
         return self.db.id_mapper["XRef"].xref_index.count(self.term)
 
-    @models.LazyProperty
-    def _matched_proteins(self):
-        return self.db.id_resolver.search_protein(self.term, limit=self.max_matches)
+    def set_entry_nr_filter(self, enr_filter: Union[tuple, set]):
+        if isinstance(enr_filter, tuple) and len(enr_filter) > 2:
+            raise ValueError("enr_filter parameter must be range tuple or a set")
+        self.entry_filter = enr_filter
+        self._matched_entries = None
+
+    def get_matched_proteins(self):
+        if self._matched_entries is None:
+            filt = None
+            rng = None
+            if self.entry_filter is not None:
+                if isinstance(self.entry_filter, tuple):
+                    rng = self.entry_filter
+                else:
+                    rng = (min(self.entry_filter), max(self.entry_filter))
+                    filt = lambda enr: enr in self.entry_filter
+
+            self._matched_entries = self.db.id_resolver.search_protein(
+                self.term, limit=self.max_matches, entrynr_range=rng
+            )
+            if filt is not None:
+                self._matched_entries = {
+                    enr: v for enr, v in self._matched_entries.items() if filt(enr)
+                }
+        return self._matched_entries
 
     def search_entries(self):
         res = []
-        for enr, xrefdata in self._matched_proteins.items():
+        for enr, xrefdata in self.get_matched_proteins().items():
             p = models.ProteinEntry(self.db, enr)
             p.xref_data = xrefdata
             res.append(p)
@@ -278,8 +350,15 @@ class SearchResult:
 
     def __and__(self, other: BaseSearch):
         assert isinstance(other, BaseSearch)
-        if hasattr(other, "set_entry_nr_filter") and self.entries is not None:
+        if self.entries is not None and hasattr(other, "set_entry_nr_filter"):
             other.set_entry_nr_filter(self.entries_set)
+        if (
+            self.ancestral_genomes_set is not None
+            and len(self.ancestral_genomes_set) == 1
+            and hasattr(other, "set_taxon_filter")
+        ):
+            ag = next(iter(self.ancestral_genomes_set))
+            other.set_taxon_filter(self.ancestral_genomes[ag])
 
         res = SearchResult()
         for aspect, key in zip(
@@ -288,6 +367,8 @@ class SearchResult:
         ):
             term_aspect_result = getattr(other, "search_" + aspect)()
             if term_aspect_result is not None:
+                if aspect == "groups" and isinstance(other, HogIDSearch):
+                    key = "hog_id"
                 if isinstance(term_aspect_result, set):
                     keyset = term_aspect_result
                     keyvals = collections.defaultdict(dict)
@@ -307,3 +388,10 @@ class SearchResult:
                 setattr(res, aspect + "_set", getattr(self, aspect + "_set"))
                 setattr(res, aspect, getattr(self, aspect))
         return res
+
+
+def search(tokens: List[BaseSearch]):
+    sorted_tokens = sorted(tokens, key=lambda t: t.PRIO)
+    res = SearchResult()
+    for token in sorted_tokens:
+        res &= token

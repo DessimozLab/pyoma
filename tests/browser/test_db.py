@@ -383,7 +383,9 @@ class XRefDatabaseMock(Database):
         xref["XRefSource"] = numpy.tile([0, 20], 5)
         xref["XRefId"] = ["XA{:03}g1.4".format(i) for i in range(10)]
         xref["Verification"] = tuple(itertools.islice(itertools.cycle([0, 2, 4]), 10))
-        f.create_table("/", "XRef", tablefmt.XRefTable, obj=xref)
+        x = f.create_table("/", "XRef", tablefmt.XRefTable, obj=xref)
+        x.colinstances["EntryNr"].create_csindex()
+        x.colinstances["XRefId"].create_csindex()
         f.create_group("/", "XRef_Index")
         for n in ("suffix", "buffer", "offset"):
             f.create_carray("/XRef_Index", n, obj=numpy.ones((5,), "i4"))

@@ -477,6 +477,10 @@ class AncestralGenome(object):
     def sciname(self):
         return self.scientific_name
 
+    @property
+    def level(self):
+        return self.scientific_name
+
     @LazyProperty
     def subtaxonomy(self):
         """the :class:`pyoma.browser.db.Taxonomy` instance of the sub taxonomy

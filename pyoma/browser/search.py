@@ -380,12 +380,12 @@ class SearchResult:
                     setattr(res, aspect, keyvals)
                     setattr(res, aspect + "_set", keyset)
                 else:
-                    setattr(
-                        res, aspect + "_set", getattr(self, aspect + "_set") & keyset
-                    )
-                    d = dict(getattr(self, aspect))
-                    d.update(keyvals)
-                    setattr(res, aspect, d)
+                    common_keys = getattr(self, aspect + "_set") & keyset
+                    setattr(res, aspect + "_set", common_keys)
+                    d = getattr(self, aspect)
+                    common_dict = {k: d[k] for k in common_keys}
+                    common_dict.update({k: keyvals[k] for k in common_keys})
+                    setattr(res, aspect, common_dict)
             else:
                 setattr(res, aspect + "_set", getattr(self, aspect + "_set"))
                 setattr(res, aspect, getattr(self, aspect))
@@ -397,3 +397,4 @@ def search(tokens: List[BaseSearch]):
     res = SearchResult()
     for token in sorted_tokens:
         res &= token
+    return res

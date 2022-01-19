@@ -230,3 +230,11 @@ class CombineTest(TestWithDbInstance):
         tax_range = s1.search_entries()
         self.assertTrue(all(p.entry_nr in tax_range for p in res.entries.values()))
         self.assertGreater(len(unfiltered_xref), len(res.entries))
+
+    def test_combine_tax_and_go(self):
+        s1 = TaxSearch(self.db, "Saccharomycetes")
+        s2 = GOSearch(self.db, "GO:0000501")
+        res = SearchResult()
+        res &= s1
+        res &= s2
+        self.assertIn(11, [p.entry_nr for p in res.entries.values()])

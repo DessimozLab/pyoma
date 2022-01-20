@@ -68,9 +68,7 @@ class LSHBuilder(object):
     def _open_hdf5(self, filename, mode="w"):
         filters = None
         if mode == "w":
-            filters = tables.Filters(
-                complevel=1, complib="blosc", shuffle=True, fletcher32=True
-            )
+            filters = tables.Filters(complevel=1, complib="blosc", shuffle=True)
         return tables.open_file(filename, mode=mode, filters=filters)
 
     def init_hash_table_file(self, hash_file):
@@ -275,9 +273,28 @@ def compare_versions(output_file, target_path, *old_path):
             tab.flush()
             dubious.flush()
             old.close()
+        # build index of Old ids
+        tab.colinstances["Old"].create_csindex()
 
 
-def build_lookup(target_db, *old_dbs, nr_procs=None):
-    compute_minhashes_for_db(target_db, target_db + ".hog-lsh.h5", nr_procs=nr_procs)
-    for old in old_dbs:
-        compute_minhashes_for_db(old, old + "hog-lsh.h5", nr_procs=nr_procs)
+def build_lookup(target_db, old_dbs, nr_procs=None):
+    def lsh_fn_from_db_path(dbpath, modif=None):
+        dbname = os.path.splitext(os.path.basename(dbpath))[0]
+        modif_str = "-{}".format(modif) if modif is not None else ""
+        lsh_fn = "{}{}.hog-lsh.h5".format(dbname, modif_str)
+        return lsh_fn
+
+    target_lsh_fn = lsh_fn_from_db_path(target_db)
+    compute_minhashes_for_db(target_db, target_lsh_fn, nr_procs=nr_procs)
+
+    old_lsh_paths = []
+    for k, dbpath in enumerate(old_dbs):
+        cached_lsh_fn = dbpath.replace(".h5", ".hog-lsh.h5")
+        if not os.path.exists(cached_lsh_fn):
+            cached_lsh_fn = lsh_fn_from_db_path(dbpath, modif=k)
+            print("computing lsh for {} - storing in {}".format(dbpath, cached_lsh_fn))
+            compute_minhashes_for_db(dbpath, cached_lsh_fn, nr_procs=nr_procs)
+        old_lsh_paths.append(cached_lsh_fn)
+
+    hogmap_name = os.path.splitext(os.path.basename(target_db))[0] + ".hogmap.h5"
+    compare_versions(hogmap_name, target_lsh_fn, old_lsh_paths)

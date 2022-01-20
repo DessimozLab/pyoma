@@ -23,6 +23,61 @@ def handler(signum, frame):
     raise KeyboardInterrupt("time is up")
 
 
+class DefaultFormater:
+    def get_header(self):
+        return [
+            "query",
+            "target",
+            "is_main_isoform",
+            "HOG",
+            "OMA_group",
+            "PAM_distance",
+            "Alignment_score",
+        ]
+
+    def get_row_data(self, map_res):
+        if map_res.target.hog_family_nr != 0:
+            hog_id = db.format_hogid(map_res.target.hog_family_nr)
+        else:
+            hog_id = "n/a"
+        if map_res.target.oma_group != 0:
+            oma_grp = "OmaGroup:{}".format(map_res.target.oma_group)
+        else:
+            oma_grp = "n/a"
+        return [
+            map_res.query,
+            map_res.target.omaid,
+            map_res.target.entry_nr == map_res.closest_entry_nr,
+            hog_id,
+            oma_grp,
+            map_res.distance,
+            map_res.score,
+        ]
+
+
+class OMAmerLikeFormatter:
+    def get_header(self):
+        return [
+            "qseqid",
+            "hogid",
+            "target",
+            "is_main_isoform",
+            "distance",
+            "alignment_score",
+        ]
+
+    def get_row_data(self, map_res):
+        hog_id = map_res.target.oma_hog if map_res.target.oma_hog != "" else "na"
+        return [
+            map_res.query,
+            hog_id,
+            map_res.target.omaid,
+            map_res.target.entry_nr == map_res.closest_entry_nr,
+            map_res.distance,
+            map_res.score,
+        ]
+
+
 signal.signal(signal.SIGUSR2, handler)
 
 if __name__ == "__main__":
@@ -51,6 +106,13 @@ if __name__ == "__main__":
         default=None,
         help="Target species. If not set, no restriction applies.",
     )
+    parser.add_argument(
+        "-f",
+        "--format",
+        choices=("default", "OMAmer-like"),
+        default="default",
+        help="output format, either the default closest seq data or a format that is similar to OMAmer output",
+    )
     conf = parser.parse_args()
     logging.basicConfig(level=30 - 10 * min(conf.v, 2))
     nr_procs = conf.nr_proc
@@ -59,6 +121,11 @@ if __name__ == "__main__":
     pInf = pyoma.hpc.detect_hpc_jobarray(nr_procs, this_proc_nr=conf.procnr)
     logger.info(pInf)
     outfn = pInf.modify_filename(conf.out)
+
+    if conf.format == "OMAmer-like":
+        formatter = OMAmerLikeFormatter()
+    else:
+        formatter = DefaultFormater()
 
     db = pyoma.browser.db.Database(conf.hdf5)
     mapper = pyoma.browser.db.ClosestSeqMapper(db)
@@ -71,17 +138,7 @@ if __name__ == "__main__":
     with auto_open(outfn, "at") as fout:
         csv_writer = csv.writer(fout, delimiter="\t")
         if last_id is None and pInf.this_proc_nr == 1:
-            csv_writer.writerow(
-                [
-                    "query",
-                    "target",
-                    "is_main_isoform",
-                    "HOG",
-                    "OMA_group",
-                    "PAM_distance",
-                    "Alignment_score",
-                ]
-            )
+            csv_writer.writerow(formatter.get_header())
 
         for infn in conf.fasta:
             with auto_open(infn, "rt") as fin:
@@ -99,25 +156,7 @@ if __name__ == "__main__":
                         if map_res.query in seen_queries:
                             continue  # we keep just the very best mapping
                         seen_queries.add(map_res.query)
-                        if map_res.target.hog_family_nr != 0:
-                            hog_id = db.format_hogid(map_res.target.hog_family_nr)
-                        else:
-                            hog_id = "n/a"
-                        if map_res.target.oma_group != 0:
-                            oma_grp = "OmaGroup:{}".format(map_res.target.oma_group)
-                        else:
-                            oma_grp = "n/a"
-                        csv_writer.writerow(
-                            [
-                                map_res.query,
-                                map_res.target.omaid,
-                                map_res.target.entry_nr == map_res.closest_entry_nr,
-                                hog_id,
-                                oma_grp,
-                                map_res.distance,
-                                map_res.score,
-                            ]
-                        )
+                        csv_writer.writerow(formatter.get_row_data(map_res))
                         last_id = map_res.query
                 except KeyboardInterrupt as e:
                     logger.info("received KeyboardInterrupt: {}".format(e))

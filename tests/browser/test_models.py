@@ -20,7 +20,7 @@ class TestDbBase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.db.get_hdf5_handle().close()
+        cls.db.close()
 
 
 class ProteinEntryTests(TestDbBase):
@@ -135,6 +135,54 @@ class GenomeModelTest(TestDbBase):
         chr_len = genome.approx_chromosome_length("I")
         self.assertGreaterEqual(chr_len, 220000)
         self.assertLessEqual(chr_len, 230218)  # actual len according to Ensembl
+
+    def test_instantiate_from_species_code(self):
+        genome = models.Genome(self.db, "YEAST")
+        self.assertEqual(genome.uniprot_species_code, "YEAST")
+
+    def test_raises_for_invalid_species(self):
+        with self.assertRaises(db.UnknownSpecies):
+            genome = models.Genome(self.db, "HUMAN")
+            genome.uniprot_species_code
+
+    def test_instantitate_from_taxid(self):
+        genome = models.Genome(self.db, 559292)
+        self.assertEqual(genome.uniprot_species_code, "YEAST")
+
+
+class AncestralGenomeModelTests(TestDbBase):
+    def test_ncbi_taxon_id_agrees(self):
+        query = 4890
+        ag = models.AncestralGenome(self.db, query)
+        self.assertEqual(query, ag.ncbi_taxon_id)
+
+    def test_retrieve_extant_genomes(self):
+        query = 4890
+        ag = models.AncestralGenome(self.db, query)
+        self.assertIn("YEAST", (g.uniprot_species_code for g in ag.extant_genomes))
+
+    def test_lineage(self):
+        query = 4890
+        ag = models.AncestralGenome(self.db, query)
+        self.assertEqual(ag.lineage[0], ag.sciname)
+        self.assertEqual("Eukaryota", ag.kingdom)
+
+    def test_raises_UnknownSpecies_for_invalid_taxid(self):
+        with self.assertRaises(db.UnknownSpecies):
+            tax66 = models.AncestralGenome(self.db, 66).ncbi_taxon_id
+
+    def test_with_luca(self):
+        query = "LUCA"
+        ag = models.AncestralGenome(self.db, query)
+        self.assertEqual(0, ag.ncbi_taxon_id)
+
+    def test_extant_genomes_of_luca(self):
+        self.assertEqual(4, len(models.AncestralGenome(self.db, 0).extant_genomes))
+
+    def test_extant_genome_of_extant_genome_taxid(self):
+        query = 559292
+        ag = models.AncestralGenome(self.db, query)
+        self.assertIn(query, [g.ncbi_taxon_id for g in ag.extant_genomes])
 
 
 class ExonStructureTest(unittest.TestCase):

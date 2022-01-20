@@ -251,11 +251,26 @@ class Genome(object):
     """Model of a genome/proteome
 
     This model provides information about a genome. It is instantiated with
-    row of the the /Genome table from the hdf5 file."""
+    row of the the /Genome table from the hdf5 file.
+    Alternatively, it can now also be instantiated with a uniprot mnemonic
+    species code or taxonomy id. Note that the validity of the parameter is
+    only checked at first propery/method access.
 
-    def __init__(self, db, g):
-        self._genome = g
+    :param db: the underlying database object
+    :type db: :class:`pyoma.browser.db.Database`
+    :param genome: the genome data or identifier to be handled. See above for details.
+    :type genome: (:class:`numpy.void`, int, str)"""
+
+    def __init__(self, db, genome):
+        self._stored_genome = genome
         self._db = db
+
+    @LazyProperty
+    def _genome(self):
+        if isinstance(self._stored_genome, (numpy.void, numpy.ndarray)):
+            return self._stored_genome
+        else:
+            return self._db.id_mapper["OMA"].identify_genome(self._stored_genome)
 
     @property
     def ncbi_taxon_id(self):
@@ -396,6 +411,98 @@ class Genome(object):
 
     def __len__(self):
         return self.nr_entries
+
+
+class AncestralGenome(object):
+    """Model of an ancestral genome/species
+
+    This model provides information about an ancestral genome. It is instantiated with
+    row of the the /Taxonomy table from the hdf5 file.
+    Alternatively, it can now also be instantiated with a taxonomic id only.
+    Note that the validity of the parameter is
+    only checked at first propery/method access.
+
+    :param db: the underlying database object
+    :type db: :class:`pyoma.browser.db.Database`
+    :param genome: the genome data or identifier to be handled. See above for details.
+    :type genome: (:class:`numpy.void`, int, str)"""
+
+    def __init__(self, db, genome):
+        self.db = db
+        self._stored_genome = genome
+
+    @LazyProperty
+    def _genome(self):
+        if isinstance(self._stored_genome, (int, str, numpy.integer)):
+            if (
+                isinstance(self._stored_genome, (int, numpy.integer))
+                and self._stored_genome == 0
+            ) or (
+                isinstance(self._stored_genome, str)
+                and self._stored_genome.lower() == "luca"
+            ):
+                data = numpy.array(
+                    [(0, -1, b"LUCA")], dtype=self.db.tax.tax_table.dtype
+                )[0]
+            else:
+                from .db import InvalidTaxonId, UnknownSpecies
+
+                try:
+                    data = self.db.tax.get_taxnode_from_name_or_taxid(
+                        self._stored_genome
+                    )[0]
+                except (InvalidTaxonId, KeyError) as e:
+                    raise UnknownSpecies(
+                        "No ancestral genome for {} exists in the database".format(
+                            self._stored_genome
+                        )
+                    )
+        else:
+            data = self._stored_genome
+        return data
+
+    @property
+    def ncbi_taxon_id(self):
+        """the ncbi taxon id of this ancestral genome"""
+        return int(self._genome["NCBITaxonId"])
+
+    @property
+    def scientific_name(self):
+        """the scientific name of this ancestral genome"""
+        return self._genome["Name"].decode()
+
+    @property
+    def sciname(self):
+        return self.scientific_name
+
+    @LazyProperty
+    def subtaxonomy(self):
+        """the :class:`pyoma.browser.db.Taxonomy` instance of the sub taxonomy
+        rooted at the node of the ancestral genome"""
+        if self.ncbi_taxon_id == 0:
+            return self.db.tax
+        return self.db.tax.get_subtaxonomy_rooted_at(self.ncbi_taxon_id)
+
+    @LazyProperty
+    def extant_genomes(self):
+        """the list of :class:`Genome` models instances representing all
+        the extant genomes originating from this ancestral genome"""
+        return [
+            Genome(self.db, taxid)
+            for taxid in self.subtaxonomy.get_taxid_of_extent_genomes()
+        ]
+
+    @property
+    def kingdom(self):
+        return self.lineage[-1]
+
+    @LazyProperty
+    def lineage(self):
+        """returns the lineage of the ancestral genome."""
+        return [
+            lev["Name"].decode()
+            for lev in self.db.tax.get_parent_taxa(self.ncbi_taxon_id)
+        ]
 
 
 class OmaGroup(object):

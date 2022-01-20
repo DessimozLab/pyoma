@@ -60,7 +60,7 @@ def search_rec(db, rec):
 def map_missing(db, missing, nr_procs=1):
     tab_ext = []
     src_enum, verif_enum = (
-        db.id_mapper["XRef"].xref_tab.get_enum(k)
+        db.get_hdf5_handle().get_node('/XRef').get_enum(k)
         for k in ("XRefSource", "Verification")
     )
     pInf = detect_hpc_jobarray(nr_procs)
@@ -74,13 +74,13 @@ def map_missing(db, missing, nr_procs=1):
                     (
                         best,
                         src_enum["UniProtKB/TrEMBL"],
-                        rec.id.encode("utf-8"),
+                        rec.id,
                         verif_enum["modified"],
                     ),
                     (
                         best,
                         src_enum["UniProtKB/SwissProt"],
-                        rec.name.encode("utf-8"),
+                        rec.name,
                         verif_enum["modified"],
                     ),
                 ]

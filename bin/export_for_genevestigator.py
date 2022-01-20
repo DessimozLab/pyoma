@@ -180,7 +180,8 @@ class PairsExtractor(object):
                 )
             )
         )
-        df["OrthologyType"] = df["RelType"].apply(tab.get_enum("RelType"))
+        enum = tab.get_enum("RelType")
+        df["OrthologyType"] = df["RelType"].apply(lambda x: enum(x))
         df["Protein1"] = df["EntryNr1"].apply(
             lambda enr: "{}{:05d}".format(
                 g1.uniprot_species_code, enr - g1.entry_nr_offset
@@ -245,6 +246,14 @@ if __name__ == "__main__":
             )
         extractor.process_per_pair(conf.out)
     else:
-        fh = sys.stdout if conf.out == "-" else open(conf.out, "w")
-        extractor.process(fh)
-        fh.close()
+        if conf.out == "-":
+            fh = sys.stdout
+        elif conf.out.endswith(".gz"):
+            fh = gzip.open(conf.out, "wt")
+        else:
+            fh = open(conf.out, "wt")
+        try:
+            extractor.process(fh)
+        finally:
+            if fh != sys.stdout:
+                fh.close()

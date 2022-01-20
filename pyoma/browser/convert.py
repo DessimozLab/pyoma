@@ -897,6 +897,8 @@ class DarwinExporter(object):
         )
         for root, dirs, filenames in os.walk(hog_path):
             for fn in filenames:
+                if fn.endswith(".augmented"):
+                    continue
                 try:
                     input_file = os.path.join(root, fn)
                     out_orthoxml = input_file + ".augmented"
@@ -907,7 +909,8 @@ class DarwinExporter(object):
                 except Exception as e:
                     self.logger.error("an error occured while processing " + fn + ":")
                     self.logger.exception(e)
-
+        # flushing index table
+        self.orthoxml_index.flush()
         hog_converter.write_hogs()
 
     def add_orthoxml(self, orthoxml_path, augmented_orthoxml_path, fam_nrs):
@@ -1147,6 +1150,8 @@ class DarwinExporter(object):
         current_protein = None
         past_proteins = set([])
         for xref in xrefs:
+            if xref["Verification"] > max_acceptable_verif_value:
+                continue
             if xref["EntryNr"] != current_protein:
                 if current_protein:
                     past_proteins.add(current_protein)
@@ -1156,8 +1161,6 @@ class DarwinExporter(object):
                 if current_protein in past_proteins:
                     raise DataImportError("Data in /XRef is not grouped w.r.t. EntryNr")
             try:
-                if xref["Verification"] > max_acceptable_verif_value:
-                    continue
                 rank = canonical_sources.index(xref["XRefSource"])
                 if rank < current_xref[0]:
                     current_xref = (rank, xref["XRefId"])
@@ -2858,67 +2861,94 @@ def main(
     domains=None,
     log_level="INFO",
     release=None,
+    phases=None,
 ):
     idx_name = (name + ".idx") if idx_name is None else idx_name
+    if phases is None:
+        phases = list(range(1, 10))
+    if (
+        not all((isinstance(z, int) for z in phases))
+        or min(phases) < 1
+        or max(phases) > 9
+    ):
+        raise ValueError("phases argument must be integers between 1 and 9")
+    phases = uniq(sorted(phases))
 
-    log = getLogger(log_level)
-    x = DarwinExporter(name, logger=log)
-    x.add_version(release_char=release)
-    x.add_species_data()
-    x.add_orthologs()
-    x.add_same_species_relations()
-    x.add_proteins()
-    x.add_hogs()
-    x.add_xrefs()
-    x.add_synteny_scores()
-    x.add_homoeology_confidence()
-    if domains is None:
-        domains = ["file://dev/null"]
-    else:
-        domains = list(
-            map(lambda url: "file://" + url if url.startswith("/") else url, domains)
-        )
-    log.info("loading domain annotations from {}".format(domains))
-    x.add_domain_info(
-        filter_duplicated_domains(
-            only_pfam_or_cath_domains(
-                itertools.chain.from_iterable(map(iter_domains, domains))
+    def phase1():
+        x.add_version(release_char=release)
+        x.add_species_data()
+        x.add_orthologs()
+        x.add_same_species_relations()
+        x.add_proteins()
+
+    def phase2():
+        x.add_sequence_suffix_array(k=k, fn=idx_name)
+
+    def phase3():
+        x.add_hogs()
+        x.add_xrefs()
+
+    def phase4():
+        x.add_synteny_scores()
+        x.add_homoeology_confidence()
+
+    def phase5():
+        if domains is None:
+            domainFiles = ["file:///dev/null"]
+        else:
+            domainFiles = list(
+                map(
+                    lambda url: "file://" + url if url.startswith("/") else url, domains
+                )
+            )
+        log.info("loading domain annotations from {}".format(domainFiles))
+        x.add_domain_info(
+            filter_duplicated_domains(
+                only_pfam_or_cath_domains(
+                    itertools.chain.from_iterable(map(iter_domains, domainFiles))
+                )
             )
         )
-    )
-    # iter_domains('file:///scratch/beegfs/monthly/aaltenho/Browser/cath/all_domains.csv.gz'),
-    # iter_domains('file:///scratch/beegfs/monthly/aaltenho/Browser/cath/additional_domains.mdas.csv.gz')
-    #    ))))
-    x.add_domainname_info(
-        itertools.chain(
-            CathDomainNameParser(
-                "http://download.cathdb.info/cath/releases/latest-release/"
-                "cath-classification-data/cath-names.txt"
-            ).parse(),
-            PfamDomainNameParser(
-                "ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz"
-            ).parse(),
+        x.add_domainname_info(
+            itertools.chain(
+                CathDomainNameParser(
+                    "http://download.cathdb.info/cath/releases/latest-release/"
+                    "cath-classification-data/cath-names.txt"
+                ).parse(),
+                PfamDomainNameParser(
+                    "ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz"
+                ).parse(),
+            )
         )
-    )
-    x.add_canonical_id()
-    x.add_group_metadata()
-    x.add_hog_domain_prevalence()
-    x.add_roothog_metadata()
-    x.close()
 
+    def phase6():
+        x.add_canonical_id()
+        x.add_group_metadata()
+        x.add_hog_domain_prevalence()
+        x.add_roothog_metadata()
+
+    def phase7():
+        x.create_indexes()
+        x.update_summary_stats()
+        x.add_per_species_aux_groupdata()
+
+    def phase8():
+        x.add_cache_of_hogs_by_level(min(os.cpu_count(), 32))
+
+    def phase9():
+        genomes_json_fname = os.path.normpath(
+            os.path.join(
+                os.path.dirname(x.h5.filename), "..", "downloads", "genomes.json"
+            )
+        )
+        augment_genomes_json_download_file(genomes_json_fname, x.h5)
+
+    log = getLogger(log_level)
+    log.info("Running the following phases: {}".format(phases))
     x = DarwinExporter(name, logger=log)
-    x.create_indexes()
-    x.add_sequence_suffix_array(k=k, fn=idx_name)
-    x.update_summary_stats()
-    x.add_per_species_aux_groupdata()
-    x.add_cache_of_hogs_by_level(min(os.cpu_count(), 32))
-    genomes_json_fname = os.path.normpath(
-        os.path.join(os.path.dirname(x.h5.filename), "..", "downloads", "genomes.json")
-    )
-    augment_genomes_json_download_file(genomes_json_fname, x.h5)
+    for phase_nr in phases:
+        phase_func = locals()["phase{}".format(phase_nr)]
+        log.info("calling phase{}".format(phase_nr))
+        phase_func()
+        log.info("done with phase{}".format(phase_nr))
     x.close()
-
-    # compute cached orthology counts
-    # compute_and_store_cached_data(
-    #    x.h5.filename, "/Protein/OrthologsCountCache", min(os.cpu_count(), 12)
-    # )

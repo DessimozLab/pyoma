@@ -10,6 +10,7 @@ import os
 import re
 import threading
 import time
+import warnings
 from bisect import bisect_left
 from builtins import chr, range, object, zip, bytes, str
 from xml.etree import ElementTree as et
@@ -37,6 +38,12 @@ from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .. import version
 
 logger = logging.getLogger(__name__)
+warnings.filterwarnings(
+    "ignore",
+    category=tables.PerformanceWarning,
+    message=".*maximum recommended rowsize.*",
+    append=True,
+)
 
 # Raise stack limit for PyOPA ~400MB
 threading.stack_size(4096 * 100000)
@@ -199,6 +206,12 @@ class Database(object):
         self.format_hogid = None
         self.mds = None
         self._set_hogid_schema()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     def register_on_close(self, callback):
         self._on_close_notify.append(callback)
@@ -492,8 +505,15 @@ class Database(object):
             cnt = 0
         return cnt
 
-    def _get_pw_data(self, entry_nr, tab, typ_filter=None, extra_cols=None):
-        query = "(EntryNr1 == {:d})".format(entry_nr)
+    def _get_pw_data(
+        self, entry_nr, tab, target_range=None, typ_filter=None, extra_cols=None
+    ):
+        if isinstance(entry_nr, tuple):
+            query = "(EntryNr1 >= {:d}) & (EntryNr1 <= {:d})".format(*entry_nr)
+        else:
+            query = "(EntryNr1 == {:d})".format(entry_nr)
+        if target_range is not None:
+            query += " & (EntryNr2 >= {:d}) & (EntryNr2 <= {:d})".format(*target_range)
         if typ_filter is not None:
             query += " & (RelType == {:d})".format(typ_filter)
         dat = tab.read_where(query)
@@ -522,6 +542,40 @@ class Database(object):
         :param int entry_nr: the numeric entry_nr of the query protein."""
         vp_tab = self._get_vptab(entry_nr)
         return self._get_pw_data(entry_nr, vp_tab)
+
+    def get_vpairs_between_species_pair(self, genome1, genome2):
+        """Returns all the pairwise orthologs between two species.
+
+        This method returns a numpy array of the same dtype as
+        :meth:`get_vpairs` does. As input, two genomes present in the
+        OMA database need to be passed, either as rows from from the
+        GenomeTable or with the UniProt mnemonic species code.
+        The pairwise orthologs are symetric, so the order of genome1
+        and genome2 does not have any impact (except of the order of
+        EntryNr1 and EntryNr2)
+
+        :param genome1: first genome
+        :type genome1: :class:`numpy.void`, :class:`pyoma.browser.models.Genome`, str
+        :param genome2: second genome
+        :type genome2: :class:`numpy.void`, :class:`pyoma.browser.models.Genome`, str
+        :returns array with pairwise orthologs between genome1 and genome2
+        :rtype: `numpy.ndarray` of dtype :class:`.tablefmt.PairwiseRelationTable`
+
+        """
+
+        def to_genome(g) -> Genome:
+            if isinstance(g, Genome):
+                return g
+            else:
+                return Genome(self, g)
+
+        g1, g2 = map(to_genome, (genome1, genome2))
+        vptab = self._get_vptab(g1.entry_nr_offset + 1)
+        return self._get_pw_data(
+            entry_nr=(g1.entry_nr_offset + 1, g1.entry_nr_offset + g1.nr_entries),
+            target_range=(g2.entry_nr_offset + 1, g2.entry_nr_offset + g2.nr_entries),
+            tab=vptab,
+        )
 
     def get_within_species_paralogs(self, entry_nr):
         """returns the within species paralogs of a given entry
@@ -1957,6 +2011,12 @@ class SequenceSearch(object):
             "ascii"
         )
 
+    def _tax_filter_range(self, en, rng):
+        return rng[0] <= en <= rng[1]
+
+    def _tax_filter_set(self, en, taxset):
+        return en in taxset
+
     def search(
         self,
         seq,
@@ -1972,10 +2032,7 @@ class SequenceSearch(object):
         search.
         """
         seq = self._sanitise_seq(seq) if not is_sanitised else seq
-        m = self.exact_search(seq, is_sanitised=True)
-        # TODO: taxonomic filtering.
-        if entrynr_range is not None:
-            m = [x for x in m if entrynr_range[0] <= x <= entrynr_range[1]]
+        m = self.exact_search(seq, is_sanitised=True, entrynr_range=entrynr_range)
         if len(m) == 0:
             # Do approximate search
             m = self.approx_search(
@@ -1991,15 +2048,18 @@ class SequenceSearch(object):
         else:
             return "exact", m
 
-    def exact_search(self, seq, only_full_length=True, is_sanitised=None):
+    def exact_search(
+        self, seq, only_full_length=True, is_sanitised=None, entrynr_range=None
+    ):
         """
         Performs an exact match search using the suffix array.
         """
-        # TODO: work out whether to just use the approximate search and then
-        # check if any are actually exact matches. Do the counting and then
-        # do an equality checking on any of the sequences that have the correct
-        # number of kmer matches.
         seq = seq if is_sanitised else self._sanitise_seq(seq)
+        filt = (
+            self._tax_filter_range
+            if isinstance(entrynr_range, tuple)
+            else self._tax_filter_set
+        )
         nn = len(seq)
         if nn > 0:
             z = KeyWrapper(
@@ -2017,8 +2077,10 @@ class SequenceSearch(object):
                 # Find entry numbers and filter to remove incorrect entries
                 return list(
                     filter(
-                        lambda e: (not only_full_length)
-                        or self.get_entry_length(e) == nn,
+                        lambda e: (
+                            ((not only_full_length) or self.get_entry_length(e) == nn)
+                            and (entrynr_range is None or filt(e, entrynr_range))
+                        ),
                         self.get_entrynr(self.seq_idx[ii:jj]),
                     )
                 )
@@ -2042,6 +2104,11 @@ class SequenceSearch(object):
         seq = seq if is_sanitised else self._sanitise_seq(seq)
         n = n if n is not None else 50
         coverage = 0.0 if coverage is None else coverage
+        tax_filt = (
+            self._tax_filter_range
+            if isinstance(entrynr_range, tuple)
+            else self._tax_filter_set
+        )
 
         # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
         c = collections.Counter()
@@ -2058,7 +2125,7 @@ class SequenceSearch(object):
             (enr, (cnts / z))
             for enr, cnts in c.items()
             if cnts >= cut_off
-            and (entrynr_range is None or entrynr_range[0] <= enr <= entrynr_range[1])
+            and (entrynr_range is None or tax_filt(enr, entrynr_range))
         ]
         c = sorted(c, reverse=True, key=lambda x: x[1])[:n] if n > 0 else c
 
@@ -2306,6 +2373,12 @@ class HogIdForwardMapper(object):
         self.h5_hogmap.close()
         self.db.unregister_on_close(self.close)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def map_hogid(self, hogid):
         hogid = hogid.encode("utf-8") if isinstance(hogid, str) else hogid
         cand_iter = self.h5_hogmap.get_node("/hogmap").where(
@@ -2451,7 +2524,7 @@ class IDResolver(object):
         for nr, res_dict in id_res.items():
             candidates[nr].update(res_dict)
         try:
-            desc_res = DescriptionSearcher(self._db).search_term(query)
+            desc_res = DescriptionSearcher(self._db).search_term(query, limit)
             for row_nr in desc_res[:limit]:
                 nr = row_nr + 1
                 candidates[nr]["Description"] = [self._db.get_description(nr).decode()]
@@ -3010,6 +3083,39 @@ class XrefIdMapper(object):
             mapped_junks.append(self.xref_tab.read_where(condition))
         return numpy.lib.recfunctions.stack_arrays(mapped_junks, usemask=False)
 
+    def map_entry_nr_range(self, start, stop):
+        """maps for a whole range the entry numbers to the xrefs
+
+        param start: the first entry nr to be mapped
+        type start: int, numpy.int
+        param stop: the first entry nr that is not included in the result (exlusive)
+        type stop: int, numpy.int
+
+        returns: all the mapped xrefs that are respecting
+                 the filtering conditions of the actual subtype of
+                 XRefIdMapper.
+        rtype: :class:`numpy.lib.recarray`"""
+        conditions = ["(EntryNr >= {:d}) & (EntryNr < {:d})".format(start, stop)]
+        if len(self.idtype) < len(self.xrefEnum):
+            source_condition = self._combine_query_values("XRefSource", self.idtype)
+            conditions.append(source_condition)
+        if self._max_verif_for_mapping_entrynrs < max(x[1] for x in self.verif_enum):
+            verif_condition = "(Verification <= {:d})".format(
+                self._max_verif_for_mapping_entrynrs
+            )
+            conditions.append(verif_condition)
+        query = " & ".join(conditions)
+        it = self.xref_tab.where(query)
+        try:
+            first = next(it)
+        except StopIteration:
+            return numpy.array([], dtype=self.xref_tab.dtype)
+        res = numpy.fromiter(
+            map(lambda row: row.fetch_all_fields(), itertools.chain([first], it)),
+            dtype=self.xref_tab.dtype,
+        )
+        return res
+
     @timethis(logging.DEBUG)
     def search_xref(self, xref, is_prefix=False, match_any_substring=False):
         """identify proteins associcated with `xref`.
@@ -3056,7 +3162,10 @@ class XrefIdMapper(object):
             term = query
 
         result = collections.defaultdict(dict)
-        for xref_row in self.xref_index.find(term):
+        high_limit = None if limit is None else 4 * limit
+        xref_rows = self.xref_index.find(term, limit=high_limit)
+        xref_rows.sort()
+        for xref_row in xref_rows:
             xref = self.xref_tab[xref_row]
             if not source_filter or xref["XRefSource"] == source_filter:
                 source = self.xrefEnum(xref["XRefSource"])
@@ -3106,6 +3215,19 @@ class XrefIdMapper(object):
                     "seq_match": self.verif_enum(row["Verification"]),
                 }
         return xrefdict
+
+
+class BestIdPerEntryOnlyMixin:
+    def filter_best_id(self, arr):
+        df = pd.DataFrame(arr)
+        order = self.canonical_source_order()
+        df["ord"] = df["XRefSource"].apply(lambda x: order.index(self.xrefEnum(x)))
+        df = df.sort_values(by=["EntryNr", "ord"]).drop_duplicates(
+            subset="EntryNr", keep="first"
+        )
+        return df.drop(columns="ord").to_records(
+            index=False, column_dtypes=dict(arr.dtype.descr)
+        )
 
 
 class XRefNoApproximateIdMapper(XrefIdMapper):
@@ -3168,6 +3290,22 @@ class LinkoutIdMapper(XrefIdMapper):
             yield xref
 
 
+class GeneNameOrSymbolIdMapper(XRefNoApproximateIdMapper):
+    def __init__(self, db):
+        super(GeneNameOrSymbolIdMapper, self).__init__(db)
+        self.order = [
+            "Gene Name",
+            "UniProtKB/SwissProt",
+            "UniProtKB/TrEMBL",
+            "HGNC",
+            "SourceID",
+        ]
+        self.idtype = frozenset(self.xrefEnum[z] for z in self.order)
+
+    def canonical_source_order(self):
+        return self.order
+
+
 class DomainNameIdMapper(object):
     def __init__(self, db):
         self.domain_src = db.get_hdf5_handle().root.Annotations.DomainDescription.read()
@@ -3196,8 +3334,8 @@ class DescriptionSearcher(object):
         )
 
     @timethis(logging.DEBUG)
-    def search_term(self, term):
-        return self.desc_index.find(term)
+    def search_term(self, term, limit=None):
+        return self.desc_index.find(term, limit=limit)
 
 
 class FastMapper(object):

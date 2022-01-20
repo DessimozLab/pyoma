@@ -1,4 +1,5 @@
 import hashlib
+import math
 import os
 import logging
 
@@ -39,7 +40,9 @@ class JobArray(object):
     def modify_filename(self, basename):
         if self.nr_procs > 1:
             base, ext = os.path.splitext(basename)
-            return "{}_{}-{}{}".format(base, self.this_proc_nr, self.nr_procs, ext)
+            nr_digits = math.floor(math.log10(self.nr_procs)) + 1
+            this_proc = f"{self.this_proc_nr}".zfill(nr_digits)
+            return f"{base}_{this_proc}-{self.nr_procs}{ext}"
         return basename
 
 

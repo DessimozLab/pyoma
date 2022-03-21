@@ -69,6 +69,11 @@ class StandaloneExporter(DarwinExporter):
                     data = self._convert_to_numpyarray(data, vp_tab)
                 self._write_to_table(vp_tab, data)
                 vp_tab.cols.EntryNr1.create_csindex()
+            if "within" not in rel_node_for_genome:
+                # we don't add data about this, but browser requires the node
+                self.h5.create_table(
+                    rel_node_for_genome, "within", tablefmt.PairwiseRelationTable
+                )
 
     def add_hogs(self, **kwargs):
         fn = "HierarchicalGroups.orthoxml"

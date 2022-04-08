@@ -233,9 +233,7 @@ def compare_versions(output_file, target_path, *old_path):
     with tables.open_file(
         output_file,
         "w",
-        filters=tables.Filters(
-            complevel=1, complib="blosc", shuffle=True, fletcher32=True
-        ),
+        filters=tables.Filters(complevel=1, complib="blosc", shuffle=True),
     ) as h5_map:
         tab = h5_map.create_table(
             "/",

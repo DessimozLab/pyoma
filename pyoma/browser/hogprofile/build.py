@@ -191,7 +191,7 @@ class Collector(BaseProfileBuilderProcess):
                 self.builder.db.get_nr_toplevel_hogs() + 1,
                 self.builder.numperm * 2,
             ),
-            filters=tables.Filters(complevel=3, complib="blosc", fletcher32=True),
+            filters=tables.Filters(complevel=3, complib="blosc"),
         )
         species = self.h5.create_carray(
             root,
@@ -202,21 +202,21 @@ class Collector(BaseProfileBuilderProcess):
                 self.builder.db.get_nr_toplevel_hogs() + 1,
                 len(self.builder.leaf_index),
             ),
-            filters=tables.Filters(complevel=3, complib="blosc", fletcher32=True),
+            filters=tables.Filters(complevel=3, complib="blosc"),
         )
         lsh_forest = self.h5.create_vlarray(
             root,
             "min_hash_lsh_forest",
             createparents=True,
             atom=tables.ObjectAtom(),
-            filters=tables.Filters(complevel=3, complib="blosc", fletcher32=True),
+            filters=tables.Filters(complevel=3, complib="blosc"),
         )
         lsh_tree = self.h5.create_vlarray(
             root,
             "species_tree",
             createparents=True,
             atom=tables.ObjectAtom(),
-            filters=tables.Filters(complevel=3, complib="blosc", fletcher32=True),
+            filters=tables.Filters(complevel=3, complib="blosc"),
         )
         lsh_tree.append(self.builder.tree)
         self.h5.set_node_attr(root, "num_perm", self.builder.numperm)

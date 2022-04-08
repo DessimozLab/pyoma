@@ -1809,7 +1809,9 @@ class RootHOGMetaDataLoader(object):
             data = self._load_data()
             encoded_data = {}
             for key in self.expected_keys:
-                encoded_data[key] = [x.encode("utf-8") for x in data[key]]
+                encoded_data[key] = [
+                    x.encode("utf-8") if isinstance(x, str) else b"-" for x in data[key]
+                ]
                 if nr_groups != len(encoded_data[key]):
                     raise DataImportError(
                         "nr of oma groups does not match the number of {}".format(key)

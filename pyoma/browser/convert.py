@@ -1438,7 +1438,7 @@ class DarwinExporter(object):
         """
         # Ensure we're run in correct order...
         assert "Protein" in self.h5.root, "Add proteins before calc. SA!"
-        idx_compr = tables.Filters(complevel=6, complib="blosc", fletcher32=True)
+        idx_compr = tables.Filters(complevel=6, complib="blosc")
 
         # Add to separate file if fn is set.
         if fn is None:

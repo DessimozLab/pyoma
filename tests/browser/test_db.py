@@ -89,6 +89,29 @@ class DatabaseTests(TestWithDbInstance):
         numpy.testing.assert_equal(expected, actual)
         self.assertLess(10 * (t2 - t1), t1 - t0, "expect at least 10x speedup")
 
+    def test_get_hoginducedpairs_between_species_is_same_as_loading_all_hoginduced(
+        self,
+    ):
+        g1, g2 = "YEAST", "SCHPO"
+        t0 = time.time()
+        rng1 = self.db.id_mapper["OMA"].genome_range(g1)
+        rng2 = self.db.id_mapper["OMA"].genome_range(g2)
+        expected = []
+        for en in range(rng1[0], rng1[1] + 1):
+            for vp in self.db.get_hog_induced_pairwise_orthologs(en):
+                if rng2[0] <= vp["EntryNr"] <= rng2[1]:
+                    expected.append((en, int(vp["EntryNr"])))
+        expected = numpy.fromiter(
+            expected, dtype=[("EntryNr1", "u4"), ("EntryNr2", "u4")]
+        )
+        t1 = time.time()
+        actual = self.db.get_hog_induced_orthologs_between_genome_pair(g1, g2)
+        actual = actual[["EntryNr1", "EntryNr2"]].copy()
+        actual.sort()
+        t2 = time.time()
+        numpy.testing.assert_equal(expected, actual)
+        self.assertLess(5 * (t2 - t1), t1 - t0, "expect at least 5x speedup")
+
     def test_neighborhood_close_to_boundary(self):
         query, window = 3, 7
         neighbors, idx = self.db.neighbour_genes(query, window)

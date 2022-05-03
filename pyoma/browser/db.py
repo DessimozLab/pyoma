@@ -20,6 +20,7 @@ import fuzzyset
 import networkx as nx
 import numpy
 import numpy.lib.recfunctions
+import pandas
 import pandas as pd
 import pyopa
 import tables
@@ -31,7 +32,7 @@ from tqdm import tqdm
 from .KmerEncoder import KmerEncoder
 from .decorators import timethis
 from .geneontology import GeneOntology, OntologyParser, GOAspect
-from .hoghelper import compare_levels
+from .hoghelper import compare_levels, are_orthologous
 from .hogprofile import Profiler
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
 from .suffixsearch import SuffixSearcher, SuffixIndexError
@@ -727,6 +728,84 @@ class Database(object):
             dtype=ext_prot_dtype,
         )
         return paralogs
+
+    def get_hog_induced_orthologs_between_genome_pair(
+        self, g1, g2, return_cardinality=False, return_omagroup=False
+    ):
+        """Returns the HOG-induced pairwise orthologs between two genomes.
+
+        The method returns a numpy structured array with EntryNr1, EntryNr2 and HogID columns.
+        If `return_cardinaltiy` is set to True, a `RelType` column is added which returns the
+        cardinality of the relation (1:1, 1:n, m:1, m:1).
+        If `return_omagroup` is set to True, the returned array also has a column `OmaGroup` the
+        contains the numeric oma group if the two proteins belong to the same oma group. Otherwise,
+        the value is set to NaN.
+
+        :param g1: first genome
+        :type g1: :class:`numpy.void`, :class:`pyoma.browser.models.Genome`, str
+        :param g2: second genome
+        :type g2: :class:`numpy.void`, :class:`pyoma.browser.models.Genome`, str
+        :param return_cardinality: whether or not to return the cardinality, i.e. 1:1, 1:n, m:1, m:n
+        :type return_cardinality: bool
+        :param return_omagroup: whether or not to return the oma group nr in case both proteins
+                                belong to the same oma group. If not, NaNs will be returned.
+        :type return_omagroup: bool
+        :returns: array with hog induced pairwise orthologs between genome1 and genome2"""
+
+        def load_prot_dataframe(g):
+            genome = g if isinstance(g, Genome) else Genome(self, g)
+            prots = pandas.DataFrame(
+                numpy.sort(
+                    self.main_isoforms(genome.uniprot_species_code), order="OmaHOG"
+                )
+            )
+            col_keep = {"EntryNr", "OmaHOG", "OmaGroup", "CanonicalId"}
+            prots.drop(columns=set(prots.columns) - col_keep, inplace=True)
+            prots["Fam"] = prots["OmaHOG"].apply(
+                lambda x: 0 if x == b"" else self.parse_hog_id(x)
+            )
+            prots.drop(
+                prots[prots.Fam == 0].index, inplace=True
+            )  # remove prots that don't belong to a hog
+            return prots
+
+        prots1 = load_prot_dataframe(g1)
+        prots2 = load_prot_dataframe(g2)
+        joined_fam = prots1.join(
+            prots2.set_index("Fam"), on="Fam", how="inner", lsuffix="1", rsuffix="2"
+        )
+        joined_fam["HogID"] = joined_fam.apply(
+            lambda row: are_orthologous(
+                row["OmaHOG1"], row["OmaHOG2"], return_group=True
+            ),
+            axis=1,
+        )
+        orthologs = joined_fam[joined_fam["HogID"] != False].copy()
+        orthologs["HogID"] = orthologs["HogID"].str.encode("ascii")
+        return_cols = ["EntryNr1", "EntryNr2", "HogID"]
+        if return_cardinality:
+            e1_cnts = orthologs["EntryNr1"].value_counts()
+            e2_cnts = orthologs["EntryNr2"].value_counts()
+            orthologs.loc[:, "RelType"] = orthologs.apply(
+                lambda r: (
+                    ("1" if e2_cnts[r.EntryNr2] == 1 else "m")
+                    + ":"
+                    + ("1" if e1_cnts[r.EntryNr1] == 1 else "n")
+                ).encode("ascii"),
+                axis=1,
+            )
+            return_cols.append("RelType")
+        if return_omagroup:
+            orthologs.loc[:, "OmaGroup"] = orthologs.apply(
+                lambda r: r.OmaGroup1 if r.OmaGroup1 == r.OmaGroup2 else numpy.nan,
+                axis=1,
+            )
+            return_cols.append("OmaGroup")
+        orthologs = orthologs[return_cols]
+        typ = orthologs.dtypes
+        return numpy.array(
+            [tuple(x) for x in orthologs.values], dtype=list(zip(typ.index, typ))
+        )
 
     def neighbour_genes(self, entry_nr, window=1):
         """Returns neighbor genes around a query gene.

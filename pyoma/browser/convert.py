@@ -1451,7 +1451,7 @@ class DarwinExporter(object):
         """
         # Ensure we're run in correct order...
         assert "Protein" in self.h5.root, "Add proteins before calc. SA!"
-        idx_compr = tables.Filters(complevel=6, complib="blosc", fletcher32=True)
+        idx_compr = tables.Filters(complevel=6, complib="blosc")
 
         # Add to separate file if fn is set.
         if fn is None:
@@ -1822,7 +1822,9 @@ class RootHOGMetaDataLoader(object):
             data = self._load_data()
             encoded_data = {}
             for key in self.expected_keys:
-                encoded_data[key] = [x.encode("utf-8") for x in data[key]]
+                encoded_data[key] = [
+                    x.encode("utf-8") if isinstance(x, str) else b"-" for x in data[key]
+                ]
                 if nr_groups != len(encoded_data[key]):
                     raise DataImportError(
                         "nr of oma groups does not match the number of {}".format(key)

@@ -178,6 +178,10 @@ class ProteinEntry(object):
     def omaid(self):
         return self._db.id_mapper["OMA"].map_entry_nr(self._entry["EntryNr"])
 
+    @property
+    def oma_id(self):
+        return self.omaid
+
     @LazyProperty
     def cdna(self):
         return self._db.get_cdna(self._entry).decode()

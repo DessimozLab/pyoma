@@ -3096,7 +3096,7 @@ class XrefIdMapper(object):
 
         :param entry_nr: the numeric id of the query protein.
         :returns: list of dicts with 'source' and 'xref' keys."""
-        it = self._iter_xref_for_entrynr(entry_nr)
+        it = self._iter_xref_for_entry_nr(entry_nr)
         res = [
             {
                 "source": self.xrefEnum(row["XRefSource"]),
@@ -3514,7 +3514,8 @@ class FastMapper(object):
 
                         if go_df is not None:
                             go_df["With"] = "Approx:{}:{}".format(
-                                self.db.id_mapper["Oma"].map_entry_nr(enr), score,
+                                self.db.id_mapper["Oma"].map_entry_nr(enr),
+                                score,
                             )
                             break
                 if go_df is not None:

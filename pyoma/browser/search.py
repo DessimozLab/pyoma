@@ -182,6 +182,17 @@ class ECSearch(BaseSearch):
         return [models.ProteinEntry(self.db, en) for en in self._matched_entries]
 
 
+class DomainSearch(BaseSearch):
+    PRIO = 40
+
+    @models.LazyProperty
+    def _matched_entries(self):
+        return list(int(z) for z in self.db.entrynrs_with_domain_id(self.term))
+
+    def search_entries(self):
+        return [models.ProteinEntry(self.db, en) for en in self._matched_entries]
+
+
 class TaxSearch(BaseSearch):
     PRIO = 10
 
@@ -226,7 +237,10 @@ class SequenceSearch(BaseSearch):
     PRIO = 90
 
     def __init__(
-        self, pyomadb: db.Database, term: str, strategy: Union[None, str] = None,
+        self,
+        pyomadb: db.Database,
+        term: str,
+        strategy: Union[None, str] = None,
     ):
         super().__init__(pyomadb, term)
         self.strategy = strategy.lower() if strategy else "mixed"
@@ -291,7 +305,10 @@ class XRefSearch(BaseSearch):
     PRIO = 85
 
     def __init__(
-        self, pyomadb: db.Database, term: str, max_matches: Union[None, int] = None,
+        self,
+        pyomadb: db.Database,
+        term: str,
+        max_matches: Union[None, int] = None,
     ):
         super().__init__(pyomadb, term)
         self.max_matches = max_matches

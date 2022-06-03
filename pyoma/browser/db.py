@@ -1479,7 +1479,7 @@ class Database(object):
         return members
 
     def resolve_oma_group(self, group_id):
-        if isinstance(group_id, int) and 0 < group_id <= self.get_nr_oma_groups():
+        if isinstance(group_id, int) and 0 < group_id <= self._nr_oma_groups:
             return group_id
         elif isinstance(group_id, numpy.integer):
             return self.resolve_oma_group(int(group_id))
@@ -1562,6 +1562,10 @@ class Database(object):
 
     def get_nr_oma_groups(self):
         """returns the number of OMA Groups in the database"""
+        return self._nr_oma_groups
+
+    @LazyProperty
+    def _nr_oma_groups(self):
         tab = self.db.get_node("/Protein/Entries")
         try:
             idx = tab.colindexes["OmaGroup"][-1]

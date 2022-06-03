@@ -538,6 +538,10 @@ class OmaGroup(object):
     def group_nbr(self):
         """numeric representation of the OmaGroup"""
         if isinstance(self._stored_group, (int, numpy.integer)):
+            if not 0 < self._stored_group <= self._db.get_nr_oma_groups():
+                from .db import InvalidId
+
+                raise InvalidId("{} is an invalid oma group".format(self._stored_group))
             return int(self._stored_group)
         return int(self._group["group_nr"])
 

@@ -84,6 +84,11 @@ class TaxSearchTest(TestWithDbInstance):
             expected_entries.update({nr for nr in range(a, b + 1)})
         self.assertSetEqual(expected_entries, s.search_entries())
 
+    def test_from_lowercase_5lettercode(self):
+        query = "SchPo"
+        s = TaxSearch(self.db, query)
+        self.assertIn(284812, [z.ncbi_taxon_id for z in s.search_species()])
+
 
 class SeqSearchTest(TestWithDbInstance):
     def test_search_example(self):

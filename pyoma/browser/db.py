@@ -2370,7 +2370,7 @@ class OmaIdMapper(object):
         else:
             if len(code) == 5:
                 try:
-                    return self.genome_from_UniProtCode(code)
+                    return self.genome_from_UniProtCode(code.upper())
                 except UnknownSpecies:
                     pass
             return self.genome_from_SciName(code)

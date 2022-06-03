@@ -119,6 +119,14 @@ AGGAQRPRGP QRGKDIKHEI SASLEELYKG RTAKLALNKQ ILCKECEGRG
         s = SequenceSearch(self.db, query)
         self.assertIn(17, [g.group_nbr for g in s.search_groups()])
 
+    def test_approx_search_contains_extra_info(self):
+        query = "EIKKAYRKCKLKYHPAKNPSEEAAEKFKEAAYEILSDP"
+        s = SequenceSearch(self.db, query)
+        res = s.search_entries()
+        self.assertTrue(hasattr(res[0], "alignment"))
+        self.assertTrue(hasattr(res[0], "mode"))
+        self.assertFalse(hasattr(res[0], "pvaluescore"))
+
 
 class XRefSearchTest(TestWithDbInstance):
     def test_existing_example(self):

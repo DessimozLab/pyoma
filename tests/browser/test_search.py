@@ -61,7 +61,7 @@ class ECSearchTest(TestWithDbInstance):
 
 class TaxSearchTest(TestWithDbInstance):
     def test_existing_tax_of_internal_node(self):
-        for query in ("Ascomycota", 4890, "Ascomicotta"):
+        for query in ("Ascomycota", 4890, "Ascomicotta", "4890"):
             with self.subTest("existing internal node", query=query):
                 s = TaxSearch(self.db, query)
                 self.assertIn(

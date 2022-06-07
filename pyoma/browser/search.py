@@ -227,10 +227,15 @@ class TaxSearch(BaseSearch):
         return [models.AncestralGenome(self.db, tax) for tax in self._matched_taxons]
 
     def search_species(self):
-        sp_set = set([])
+        extant_species = {}
         for tax in self._matched_taxons:
-            sp_set |= set(models.AncestralGenome(self.db, tax).extant_genomes)
-        return list(sp_set)
+            extant_species.update(
+                {
+                    z.ncbi_taxon_id: z
+                    for z in models.AncestralGenome(self.db, tax).extant_genomes
+                }
+            )
+        return list(extant_species.values())
 
 
 class SequenceSearch(BaseSearch):

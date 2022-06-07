@@ -1,3 +1,4 @@
+import collections
 import unittest
 import logging
 import time
@@ -88,6 +89,13 @@ class TaxSearchTest(TestWithDbInstance):
         query = "SchPo"
         s = TaxSearch(self.db, query)
         self.assertIn(284812, [z.ncbi_taxon_id for z in s.search_species()])
+
+    def test_species_only_once_also_after_inexact_match(self):
+        query = "sacchar"
+        s = TaxSearch(self.db, query)
+        res = s.search_species()
+        c = collections.Counter((z.ncbi_taxon_id for z in res))
+        self.assertEqual(1, max(c.values()))
 
 
 class SeqSearchTest(TestWithDbInstance):

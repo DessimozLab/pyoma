@@ -29,6 +29,22 @@ class BaseSearch(metaclass=abc.ABCMeta):
     def search_ancestral_genomes(self):
         pass
 
+    def count_entries(self):
+        nr_entries = self.search_entries()
+        return 0 if nr_entries is None else len(nr_entries)
+
+    def count_groups(self):
+        nr_groups = self.search_groups()
+        return 0 if nr_groups is None else len(nr_groups)
+
+    def count_species(self):
+        nr_species = self.search_species()
+        return 0 if nr_species is None else len(nr_species)
+
+    def count_ancestral_genomes(self):
+        nr_ancestral_genomes = self.search_ancestral_genomes()
+        return 0 if nr_ancestral_genomes is None else len(nr_ancestral_genomes)
+
 
 class OmaGroupSearch(BaseSearch):
     PRIO = 50
@@ -252,12 +268,14 @@ class SequenceSearch(BaseSearch):
         self.seq = self.db.seq_search._sanitise_seq(self.term)
         self.entry_filter = None
         self._matched_seqs = None
+        self._nr_kmer_hits = None
 
     def set_entry_nr_filter(self, filter: Union[tuple, set]):
         if isinstance(filter, tuple) and len(filter) != 2:
             raise ValueError("filter parameter must be range tuple or a set")
         self.entry_filter = filter
         self._matched_seqs = None
+        self._nr_kmer_hits = None
 
     def get_matched_seqs(self):
         if self._matched_seqs is not None:
@@ -284,8 +302,11 @@ class SequenceSearch(BaseSearch):
                 pe.alignment = self.seq
                 res[en] = pe
         if self.strategy == "approx" or self.strategy == "mixed" and len(res) == 0:
-            approx = self.db.seq_search.approx_search(
-                self.seq, is_sanitised=True, entrynr_range=self.entry_filter
+            approx, kmer_hits = self.db.seq_search.approx_search(
+                self.seq,
+                is_sanitised=True,
+                entrynr_range=self.entry_filter,
+                return_kmer_hits=True,
             )
             for en, align_res in approx:
                 pe = models.ProteinEntry(self.db, en)
@@ -294,6 +315,7 @@ class SequenceSearch(BaseSearch):
                 pe.alignment = align_res["alignment"]
                 res[en] = pe
         self._matched_seqs = res
+        self._nr_kmer_hits = len(kmer_hits)
         return res
 
     def search_entries(self):
@@ -304,6 +326,14 @@ class SequenceSearch(BaseSearch):
             p.oma_group for p in self.get_matched_seqs().values() if p.oma_group != 0
         )
         return [models.OmaGroup(self.db, grp) for grp, cnt in grps.most_common(10)]
+
+    def count_entries(self):
+        if self._matched_seqs is None:
+            self.get_matched_seqs()
+        if self._nr_kmer_hits is None:
+            return len(self._matched_seqs)
+        else:
+            return self._nr_kmer_hits
 
 
 class XRefSearch(BaseSearch):
@@ -323,6 +353,9 @@ class XRefSearch(BaseSearch):
     @models.LazyProperty
     def estimated_occurrences(self):
         return self.db.id_mapper["XRef"].xref_index.count(self.term)
+
+    def count_entries(self):
+        return self.estimated_occurrences
 
     def set_entry_nr_filter(self, enr_filter: Union[tuple, set]):
         if isinstance(enr_filter, tuple) and len(enr_filter) > 2:

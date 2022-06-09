@@ -934,8 +934,8 @@ class Database(object):
                                     member and are thus not of limited interest
                                     in most situations
 
-        :returns generator of HOG instances
-        :rtype :class:`models.HOG`
+        :returns: generator of HOG instances
+        :rtype: :class:`models.HOG`
 
         :see_also: :meth:`get_hog` that returns a single HOG instance
             for a specific level or the root level one for a specific HOG id.
@@ -986,12 +986,11 @@ class Database(object):
         and for
         get_subhogids_at_level(1, 'Metazoa') --> ['HOG:0000001.1a', 'HOG:0000001.1b']
 
-        :note:
-        There is also the method :method:`get_subhogs_at_level` which returns all
+        :note::
+        There is also the method :meth:`get_subhogs_at_level` which returns all
         information stored in the HogLevel table, not only the HOG id.
 
-        :see_also:
-        get_subhogs_at_level
+        :see_also:: :meth:`get_subhogs_at_level`
 
         :param fam_nr: the numeric family id
         :param level: the taxonomic level of interest"""

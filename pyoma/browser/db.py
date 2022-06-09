@@ -2171,22 +2171,24 @@ class SequenceSearch(object):
         # Nothing found.
         return []
 
-    def approx_search(
-        self,
-        seq,
-        n=None,
-        is_sanitised=None,
-        coverage=None,
-        compute_distance=False,
-        entrynr_range=None,
+    def approx_search_no_align(
+        self, seq, is_sanitised=False, coverage=0.0, entrynr_range=None
     ):
-        """
-        Performs an exact match search using the suffix array.
-        :param entrynr_range:
+        """Performs a quick ranking of the best matches based on kmer index.
+        The method does not compute an alignment, but just reports the
+        entry number with the fraction of kmer matching better than the set coverage
+
+        :param seq: the sequence to be searched
+        :type seq: str, bytes
+        :param is_sanitised: whether or not the sequence is already sanitised. defaults to false.
+        :type is_sanitised: bool
+        :param coverage: the minimum fraction of covered kmers by the target sequence
+        :type coverage: float
+        :param entrynr_range: target entry number range as a tuple (min, max) or set for filtering
+        :type entrynr_range: set[int], tuple[int, int]
+        :returns: A list of tuples with (entry_nr, fraction_of_matched_kmers)
         """
         seq = seq if is_sanitised else self._sanitise_seq(seq)
-        n = n if n is not None else 50
-        coverage = 0.0 if coverage is None else coverage
         tax_filt = (
             self._tax_filter_range
             if isinstance(entrynr_range, tuple)
@@ -2204,17 +2206,61 @@ class SequenceSearch(object):
         # 2. Filter to top n if necessary
         z = len(seq) - self.k + 1
         cut_off = coverage * z
-        c = [
+        entries = [
             (enr, (cnts / z))
             for enr, cnts in c.items()
             if cnts >= cut_off
             and (entrynr_range is None or tax_filt(enr, entrynr_range))
         ]
-        c = sorted(c, reverse=True, key=lambda x: x[1])[:n] if n > 0 else c
+        return entries
+
+    def approx_search(
+        self,
+        seq,
+        n=None,
+        is_sanitised=None,
+        coverage=None,
+        compute_distance=False,
+        entrynr_range=None,
+        return_kmer_hits=False,
+    ):
+        """
+        Performs an approximate match search using the kmer index.
+        For the n best matching candidates based on kmer lookup, a
+        Smith-Waterman alignment is computed.
+
+        If compute_distance is set to True, an ML distance estimate
+        of the alignment is returned as part of the resulting dictionary
+
+        :param seq: the query sequence to be searched
+        :type seq: str, bytes
+        :param int n: number of maximum returned entries that match query
+        :param bool is_sanitised: whether or not the sequence is already sanitised. defaults to false.
+        :param float coverage: the minimum fraction of covered kmers by the target sequence
+        :param entrynr_range: target entry number range as a tuple (min, max) or set for filtering
+        :type entrynr_range: set[int], tuple[int, int]
+        :param bool return_kmer_hits: whether or not the full list of matched kmer entries should be
+        returned. if set to True, the return value will be a tuple instead of a single list
+
+        :returns: list of matched entries, each element is a tuple with the entry_nr and a dictionary
+        containing the score, alignment and distance estimates.
+        If return_kmer_hits is set to True, also the full list of matching entries is returned.
+        """
+        seq = seq if is_sanitised else self._sanitise_seq(seq)
+        n = n if n is not None else 50
+        coverage = 0.0 if coverage is None else coverage
+
+        kmer_hits = self.approx_search_no_align(
+            seq, is_sanitised=True, coverage=coverage, entrynr_range=entrynr_range
+        )
+        c = sorted(kmer_hits, reverse=True, key=lambda x: x[1])
+        if n > 0:
+            c = c[:n]
 
         # 3. Do local alignments and return count / score / alignment
+        res = []
         if len(c) > 0:
-            return sorted(
+            res = sorted(
                 [
                     (
                         m[0],
@@ -2231,7 +2277,10 @@ class SequenceSearch(object):
                 key=lambda q: q[1]["score"],
                 reverse=True,
             )
-        return []
+        if return_kmer_hits:
+            return res, kmer_hits
+        else:
+            return res
 
     def _align_entries(self, seq, matches, compute_distance=False):
         # Does the alignment for the approximate search

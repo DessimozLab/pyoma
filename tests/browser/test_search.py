@@ -261,11 +261,13 @@ class CombineTest(TestWithDbInstance):
         res &= s2
         self.assertIn(11, [p.entry_nr for p in res.entries.values()])
 
-    def test_combine_tax_and_seq(self):
+    def test_combine_tax_and_approx_seq(self):
         s1 = TaxSearch(self.db, "Saccharomycetes")
         s2 = SequenceSearch(self.db, "EIKKAYRKCKLKYHPAKNPSEEAAEKFKEAAYEILSDP")
         res = search([s1, s2])
         self.assertGreaterEqual(len(res.entries), 1)
-        fnd1 = res.entries.pop()
-        self.assertEqual(fnd1.mode, "approx")
-        self.assertTrue(hasattr(fnd1, "alignment"))
+        for pe in res.entries.values():
+            self.assertEqual(pe.mode, "approx")
+            self.assertTrue(hasattr(pe, "alignment"))
+            self.assertTrue(hasattr(pe, "score"))
+        self.assertGreaterEqual(s2.count_entries(), len(res.entries))

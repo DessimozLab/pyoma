@@ -301,6 +301,9 @@ class SequenceSearch(BaseSearch):
                 pe.score = 5 * len(self.seq)
                 pe.alignment = self.seq
                 res[en] = pe
+
+            self._nr_kmer_hits = len(exact_matches)
+
         if self.strategy == "approx" or self.strategy == "mixed" and len(res) == 0:
             approx, kmer_hits = self.db.seq_search.approx_search(
                 self.seq,
@@ -314,8 +317,10 @@ class SequenceSearch(BaseSearch):
                 pe.score = align_res["score"]
                 pe.alignment = align_res["alignment"]
                 res[en] = pe
+
+            self._nr_kmer_hits = len(kmer_hits)
+
         self._matched_seqs = res
-        self._nr_kmer_hits = len(kmer_hits)
         return res
 
     def search_entries(self):

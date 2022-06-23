@@ -2626,6 +2626,7 @@ class Taxonomy(object):
         self.tax_table = data
         self.taxid_key = self.tax_table.argsort(order=("NCBITaxonId"))
         self.parent_key = self.tax_table.argsort(order=("ParentTaxonId"))
+        self._add_luca_if_needed()
         self.all_hog_levels = _valid_levels
         self._approx_matcher = None
         if _valid_levels is None:
@@ -2677,6 +2678,19 @@ class Taxonomy(object):
         else:
             res = numpy.array([(0, -1, b"LUCA")], dtype=self.tax_table.dtype)[0]
         return res
+
+    def _add_luca_if_needed(self):
+        i1 = self.tax_table["ParentTaxonId"].searchsorted(0, sorter=self.parent_key)
+        i2 = self.tax_table["ParentTaxonId"].searchsorted(
+            0, sorter=self.parent_key, side="right"
+        )
+        if i2 - i1 > 1:
+            self.tax_table = numpy.append(
+                self.tax_table,
+                numpy.array([(0, -1, b"LUCA")], dtype=self.tax_table.dtype),
+            )
+            self.taxid_key = self.tax_table.argsort(order=("NCBITaxonId"))
+            self.parent_key = self.tax_table.argsort(order=("ParentTaxonId"))
 
     def _taxon_from_numeric(self, tid):
         idx = self._table_idx_from_numeric(tid)
@@ -3482,7 +3496,8 @@ class FastMapper(object):
 
                         if go_df is not None:
                             go_df["With"] = "Approx:{}:{}".format(
-                                self.db.id_mapper["Oma"].map_entry_nr(enr), score,
+                                self.db.id_mapper["Oma"].map_entry_nr(enr),
+                                score,
                             )
                             break
                 if go_df is not None:

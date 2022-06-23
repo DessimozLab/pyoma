@@ -707,6 +707,126 @@ class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
         self.assertIn(30, phylo.tax_table["NCBITaxonId"])
 
 
+class LucaBasedTaxonomyTests(unittest.TestCase):
+    def setUp(self):
+        # a random sample of 30 species from a production OMA release
+        taxtab = numpy.array(
+            [
+                (2, 0, b"Bacteria"),
+                (633, 1649845, b"Yersinia pseudotuberculosis"),
+                (1224, 2, b"Proteobacteria"),
+                (1236, 1224, b"Gammaproteobacteria"),
+                (2759, 0, b"Eukaryota"),
+                (5204, 451864, b"Basidiomycota"),
+                (5334, 5204, b"Schizophyllum commune"),
+                (5660, 2759, b"Leishmania braziliensis"),
+                (5786, 2759, b"Dictyostelium purpureum"),
+                (5794, 2698737, b"Apicomplexa"),
+                (5807, 5794, b"Cryptosporidium parvum"),
+                (5864, 5794, b"Babesia"),
+                (5866, 5864, b"Babesia bigemina"),
+                (6412, 33317, b"Helobdella robusta"),
+                (6960, 33317, b"Hexapoda"),
+                (7263, 6960, b"Drosophila arizonae"),
+                (9813, 32524, b"Procavia capensis"),
+                (13735, 32524, b"Pelodiscus sinensis"),
+                (28211, 1224, b"Alphaproteobacteria"),
+                (29760, 2759, b"Vitis vinifera"),
+                (32524, 33213, b"Amniota"),
+                (33154, 2759, b"Opisthokonta"),
+                (33213, 33154, b"Bilateria"),
+                (33317, 33213, b"Protostomia"),
+                (37360, 2698737, b"Plasmodiophora brassicae"),
+                (55529, 2759, b"Guillardia theta"),
+                (91347, 1236, b"Enterobacterales"),
+                (119060, 1224, b"Burkholderiaceae"),
+                (158441, 6960, b"Folsomia candida"),
+                (164328, 2698737, b"Phytophthora ramorum"),
+                (214092, 1649845, b"Yersinia pestis CO92"),
+                (
+                    264198,
+                    119060,
+                    b"Cupriavidus pinatubonensis (strain JMP 134 / LMG 1197)",
+                ),
+                (
+                    273123,
+                    633,
+                    b"Yersinia pseudotuberculosis serotype I (strain IP32953)",
+                ),
+                (
+                    284812,
+                    451864,
+                    b"Schizosaccharomyces pombe (strain 972 / ATCC 24843)",
+                ),
+                (
+                    323261,
+                    1236,
+                    b"Nitrosococcus oceani (strain ATCC 19707 / BCRC 17464 / NCIMB 11848 / C-107)",
+                ),
+                (338187, 1236, b"Vibrio campbellii (strain ATCC BAA-1116 / BB120)"),
+                (347255, 28211, b"Rickettsia africae (strain ESF-5)"),
+                (353152, 5807, b"Cryptosporidium parvum (strain Iowa II)"),
+                (
+                    355278,
+                    2,
+                    b"Leptospira biflexa serovar Patoc (strain Patoc 1 / Ames)",
+                ),
+                (391774, 1224, b"Desulfovibrio vulgaris subsp. vulgaris (strain DP4)"),
+                (451864, 33154, b"Dikarya"),
+                (
+                    502801,
+                    633,
+                    b"Yersinia pseudotuberculosis serotype IB (strain PB1/+)",
+                ),
+                (578458, 5334, b"Schizophyllum commune (strain H4-8 / FGSC 9210)"),
+                (626418, 119060, b"Burkholderia glumae (strain BGR1)"),
+                (640131, 91347, b"Klebsiella variicola (strain At-22)"),
+                (
+                    713600,
+                    91347,
+                    b"Buchnera aphidicola subsp. Acyrthosiphon pisum (strain JF98)",
+                ),
+                (
+                    754035,
+                    28211,
+                    b"Mesorhizobium australicum (strain HAMBI 3006 / LMG 24608 / WSM2073)",
+                ),
+                (905079, 55529, b"Guillardia theta (strain CCMP2712)"),
+                (1133968, 5864, b"Babesia microti (strain RI)"),
+                (1230383, 5204, b"Malassezia sympodialis (strain ATCC 42132)"),
+                (1649845, 91347, b"Yersinia pseudotuberculosis complex"),
+                (2698737, 2759, b"Sar"),
+            ],
+            dtype=tables.dtype_from_descr(tablefmt.TaxonomyTable),
+        )
+        self.tax = Taxonomy(taxtab)
+        self.nr_species = 30
+
+    def test_root_is_luca(self):
+        self.assertEqual(self.tax._get_root_taxon()["Name"], b"LUCA")
+
+    def test_search_luca(self):
+        node = self.tax.get_taxnode_from_name_or_taxid("LUCA")
+        self.assertEqual(len(node), 1)
+        self.assertEqual(node["Name"], b"LUCA")
+
+    def test_extend_genomes(self):
+        self.assertEqual(len(self.tax.get_taxid_of_extent_genomes()), self.nr_species)
+
+    def test_search_approx_luca(self):
+        self.assertIn("LUCA", [x[1] for x in self.tax.approx_search("luca")])
+
+    def test_numeric_luca_is_found(self):
+        self.assertEqual(self.tax.get_taxnode_from_name_or_taxid(0)["Name"], b"LUCA")
+
+    def test_subtaxonomy_does_not_contain_luca_anymore(self):
+        # subset of only eukaryotes
+        subtax = self.tax.get_induced_taxonomy(
+            [451864, 55529, 158441], collapse=True, augment_parents=True
+        )
+        self.assertNotIn(b"LUCA", subtax._get_root_taxon()["Name"])
+
+
 class DBMock(object):
     def __init__(self, h5):
         self.h5 = h5

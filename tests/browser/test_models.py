@@ -184,6 +184,11 @@ class AncestralGenomeModelTests(TestDbBase):
         ag = models.AncestralGenome(self.db, query)
         self.assertIn(query, [g.ncbi_taxon_id for g in ag.extant_genomes])
 
+    def test_nr_genes(self):
+        query_level = "Eukaryota"
+        ag = models.AncestralGenome(self.db, query_level)
+        self.assertLess(100, ag.nr_genes)
+
 
 class ExonStructureTest(unittest.TestCase):
     def get_exons(self):

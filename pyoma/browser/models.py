@@ -514,6 +514,10 @@ class AncestralGenome(object):
             for lev in self.db.tax.get_parent_taxa(self.ncbi_taxon_id)
         ]
 
+    @LazyProperty
+    def nr_genes(self):
+        return self.db.count_hogs_at_level(self.scientific_name)
+
 
 class OmaGroup(object):
     """OmaGroup object model

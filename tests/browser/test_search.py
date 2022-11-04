@@ -271,3 +271,14 @@ class CombineTest(TestWithDbInstance):
             self.assertTrue(hasattr(pe, "alignment"))
             self.assertTrue(hasattr(pe, "score"))
         self.assertGreaterEqual(s2.count_entries(), len(res.entries))
+
+    def test_combine_xref_and_inexisting_tax(self):
+        s1 = TaxSearch(self.db, "HUMAN")
+        s2 = XRefSearch(self.db, "K")
+        unfiltered_xref = s2.search_entries()
+        res = SearchResult() & s1 & s2
+        self.assertIsNotNone(s2.entry_filter)
+        tax_range = s1.search_entries()
+        self.assertEqual(0, len(tax_range))
+        self.assertTrue(all(p.entry_nr in tax_range for p in res.entries.values()))
+        self.assertGreater(len(unfiltered_xref), len(res.entries))

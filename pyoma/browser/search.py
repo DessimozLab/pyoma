@@ -376,6 +376,14 @@ class XRefSearch(BaseSearch):
                 if isinstance(self.entry_filter, tuple):
                     rng = self.entry_filter
                 else:
+                    if len(self.entry_filter) == 0:
+                        logger.info(
+                            "short-circuit XRefSearch as entry_filter is empty: {}".format(
+                                self.entry_filter
+                            )
+                        )
+                        self._matched_entries = {}
+                        return self._matched_entries
                     rng = (min(self.entry_filter), max(self.entry_filter))
                     filt = lambda enr: enr in self.entry_filter
 

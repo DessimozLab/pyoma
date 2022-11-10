@@ -319,11 +319,21 @@ class Genome(object):
 
     @property
     def url(self):
-        return self._genome["Url"].decode()
+        try:
+            return self._genome["Url"].decode()
+        except ValueError:
+            if self._db.db_schema_version < (3.2):
+                return ""
+            raise
 
     @property
     def source(self):
-        return self._genome["Source"].decode()
+        try:
+            return self._genome["Source"].decode()
+        except ValueError:
+            if self._db.db_schema_version < (3.2):
+                return ""
+            raise
 
     @property
     def release(self):

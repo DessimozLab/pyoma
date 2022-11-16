@@ -165,6 +165,18 @@ class XRefSearchTest(TestWithDbInstance):
                 self.assertGreater(len(res_ref), len(res_limit))
                 self.assertGreater(t1 - t0, t2 - t1, "limited search took longer")
 
+    def test_inexisting_term(self):
+        for query in ("lksjfewlsd", "Kgop524fslkAA2fnb"):
+            with self.subTest(query=query):
+                s = XRefSearch(self.db, query)
+                hits = 0
+                for p in s.search_entries():
+                    for source, val in p.xref_data.items():
+                        for el in val:
+                            self.assertIn(query.lower(), el.lower())
+                            hits += 1
+                self.assertEqual(hits, 0)
+
 
 class HogIDSearchTest(TestWithDbInstance):
     def test_existing_hog_with_level(self):

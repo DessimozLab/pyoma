@@ -76,10 +76,15 @@ class BaseProfileBuilderProcess(mp.Process):
         signal.signal(signal.SIGUSR2, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
+        nr_empty_cnt = 0
         while not self.quit_req and self.outstanding_dones.value > 0:
             try:
                 item = self.in_queue.get(timeout=1)
+                nr_empty_cnt = 0
             except queue.Empty:
+                nr_empty_cnt += 1
+                if nr_empty_cnt > 10:
+                    logger.info("input queue seems to be empty ({}x), but expecting still some chunks".format(nr_empty_cnt))
                 continue
 
             if item is None:

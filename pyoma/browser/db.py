@@ -2668,6 +2668,7 @@ class IDResolver(object):
             candidates[nr].update(res_dict)
         try:
             desc_res = DescriptionSearcher(self._db).search_term(query, limit)
+            desc_res.sort()
             for row_nr in desc_res[:limit]:
                 nr = row_nr + 1
                 if entrynr_range is None or entrynr_range[0] <= nr <= entrynr_range[1]:

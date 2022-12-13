@@ -84,9 +84,10 @@ class ImportIntegrationBase(ImportDummyBase):
         super(ImportIntegrationBase, cls).setUpClass()
         test_data_available = False
         for folder in (
-            "/pub/projects/cbrg-oma-browser",
+            "/work/FAC/FBM/DBC/cdessim2/oma/oma-browser",
             "/cs/research/biosciences/oma/oma-server",
-            "/scratch/ul/projects/cdessimo/oma-browser",
+            "/mnt/oma-browser",
+            "/Volumes/oma-browser",
         ):
             if os.path.isdir(folder):
                 test_data_available = True

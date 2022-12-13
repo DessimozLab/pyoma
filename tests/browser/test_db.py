@@ -49,10 +49,11 @@ def find_path_to_test_db(dbfn="TestDb.h5"):
 
 class TestWithDbInstance(unittest.TestCase):
     db = None
+    db_file_name = "TestDb.h5"
 
     @classmethod
     def setUpClass(cls):
-        path = find_path_to_test_db("TestDb.h5")
+        path = find_path_to_test_db(cls.db_file_name)
         logger.info("Loading {} for DatabaseTests".format(path))
         cls.db = Database(path)
 

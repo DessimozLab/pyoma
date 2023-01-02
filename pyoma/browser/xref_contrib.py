@@ -19,7 +19,7 @@ class GeneEntries:
         self.enrs = enrs
 
     def entrynr_slices(self):
-        if self.enrs[-1] - self.enrs[0] == len(self.enrs):
+        if self.enrs[-1] - self.enrs[0] == len(self.enrs) - 1:
             return (slice(self.enrs[0], self.enrs[-1] + 1, 1),)
         slices, i0 = [], 0
         for i in range(len(self.enrs)):

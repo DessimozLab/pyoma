@@ -46,7 +46,7 @@ with hooks():
     import urllib.request
 
 hog_re = re.compile(
-    br"((?P<prefix>HOG):)?(?P<rel>[A-Z]?)(?P<fam>\d+)(\.(?P<subfamid>[0-9a-z.]+))?$"
+    rb"((?P<prefix>HOG):)?(?P<rel>[A-Z]?)(?P<fam>\d+)(\.(?P<subfamid>[0-9a-z.]+))?$"
 )
 
 
@@ -2016,7 +2016,7 @@ class DescriptionManager(object):
 
     def _store_description(self):
         buf = "; ".join(self.cur_desc).encode("utf-8")
-        buf = buf[0 : 2 ** 16 - 1]  # limit to max value of buffer length field
+        buf = buf[0 : 2**16 - 1]  # limit to max value of buffer length field
         len_buf = len(buf)
         idx = self.cur_eNr - 1
         self.buf_index[idx]["DescriptionOffset"] = len(self.desc_buf)
@@ -2781,9 +2781,12 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
         genomes = json.load(fh)
     os.rename(fpath, fpath + ".bak")
 
-    def traverse(node, parent_hogs=None):
+    def traverse(node, parent_hogs=None, parent_hogs_support=None):
         if parent_hogs is None:
             parent_hogs = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
+        if parent_hogs_support is None:
+            parent_hogs_support = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
+
         try:
             n = node["name"].encode("utf-8")
             idx = numpy.searchsorted(tax["Name"], n, sorter=sorter)
@@ -2798,40 +2801,58 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
             else:
                 node["nr_hogs"] = 0
                 raise ValueError("not in taxonomy: {}".format(n))
-            hog_level = h5.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()
-            node["nr_hogs"] = len(hog_level)
-            diff_parent, dupl_events = hoghelper.compare_levels(
-                parent_hogs, hog_level, return_duplication_events=True
-            )
-            changes = collections.defaultdict(int)
-            for x in diff_parent["Event"]:
-                changes[x.decode()] += 1
-            changes["duplications"] = dupl_events
-            if "children" not in node:
-                # dealing with an extend species, special way to assess gains, based on
-                # HOG singletons that are main isoforms
-                assert changes["gained"] == 0
-                g = numpy.extract(
-                    gs["UniProtSpeciesCode"] == node["id"].encode("utf-8"), gs
-                )[0]
-                query_main_iso_of_genome = "(EntryNr > {}) & (EntryNr <= {}) & ((AltSpliceVariant == 0) | (AltSpliceVariant == EntryNr))".format(
-                    g["EntryOff"], g["EntryOff"] + g["TotEntries"]
+
+            for modif, completeness, parent in zip(
+                ["", "_support"], [0.0, 0.2], [parent_hogs, parent_hogs_support]
+            ):
+                hogs = h5.get_node("/Hogs_per_Level/tax{}".format(taxid)).read_where(
+                    "CompletenessScore > completeness"
                 )
-                nr_genes, nr_gains = 0, 0
-                for p in pe.where(query_main_iso_of_genome):
-                    nr_genes += 1
-                    if p["OmaHOG"] == b"":
-                        nr_gains += 1
-                changes["gained"] = nr_gains
-                node["nr_genes"] = nr_genes
-            node["evolutionaryEvents"] = changes
+                if modif == "":
+                    hog_level = hogs
+                else:
+                    hog_level_support = hogs
+                node["nr_hogs{}".format(modif)] = len(hogs)
+                diff_parent, dupl_events = hoghelper.compare_levels(
+                    parent, hogs, return_duplication_events=True
+                )
+                changes = collections.defaultdict(int)
+                for x in diff_parent["Event"]:
+                    changes[x.decode()] += 1
+                changes["duplications"] = dupl_events
+                if "children" not in node and modif != "_support":
+                    # dealing with an extend species, special way to assess gains, based on
+                    # HOG singletons that are main isoforms
+                    assert changes["gained"] == 0
+                    g = numpy.extract(
+                        gs["UniProtSpeciesCode"] == node["id"].encode("utf-8"), gs
+                    )[0]
+                    query_main_iso_of_genome = "(EntryNr > {}) & (EntryNr <= {}) & ((AltSpliceVariant == 0) | (AltSpliceVariant == EntryNr))".format(
+                        g["EntryOff"], g["EntryOff"] + g["TotEntries"]
+                    )
+                    nr_genes, nr_gains = 0, 0
+                    for p in pe.where(query_main_iso_of_genome):
+                        nr_genes += 1
+                        if p["OmaHOG"] == b"":
+                            nr_gains += 1
+                    changes["gained"] = nr_gains
+                    node["nr_genes{}".format(modif)] = nr_genes
+                node["evolutionaryEvents{}".format(modif)] = changes
+            common.package_logger.info(
+                "node: {}: events: {}; events_support: {}".format(
+                    n, node["evolutionaryEvents"], node["evolutionaryEvents_support"]
+                )
+            )
         except Exception:
             common.package_logger.exception("Cannot identify taxonomy id")
             hog_level = parent_hogs.copy()
+            hog_level_support = parent_hogs_support.copy()
 
         if "children" in node:
             for child in node["children"]:
-                traverse(child, parent_hogs=hog_level)
+                traverse(
+                    child, parent_hogs=hog_level, parent_hogs_support=hog_level_support
+                )
 
     traverse(genomes)
     with open(fpath, "wt") as fh:

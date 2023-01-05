@@ -1,4 +1,5 @@
 import collections
+import io
 import multiprocessing
 import itertools
 import re
@@ -213,13 +214,16 @@ class XRefReducer(BaseProfileBuilderProcess):
 
     def setup(self):
         self.h5 = tables.open_file(self.h5_path)
-        self.xref_eof = self.h5.get_node("/XRef_EntryNr_offset").read()
         self.xref_tab = self.h5.get_node("/XRef")
+        try:
+            self.xref_eof = self.h5.get_node("/XRef_EntryNr_offset").read()
+        except tables.NoSuchNodeError:
+            pass
 
     def finalize(self):
         self.h5.close()
 
-    def handle_input(self, gene):
+    def _load_xrefs_with_entry_offset(self, gene):
         xrefs = pandas.DataFrame(
             numpy.hstack(
                 list(
@@ -240,6 +244,28 @@ class XRefReducer(BaseProfileBuilderProcess):
                 )
             )
         )
+        return xrefs
+
+    def _load_xrefs_with_where_cond(self, gene):
+        query = " | ".join(
+            [
+                "((EntryNr >= {}) & (EntryNr < {}))".format(s.start, s.stop)
+                for s in gene.entrynr_slices()
+            ]
+        )
+        dtype = [("xref_row", "i8")] + self.xref_tab.dtype.descr
+        buf = io.BytesIO()
+        for row in self.xref_tab.where(query):
+            buf.write(row.nrow.tobytes())
+            buf.write(row.fetch_all_fields().tobytes())
+        data = numpy.frombuffer(buf.getbuffer(), dtype=dtype)
+        return pandas.DataFrame(data)
+
+    def handle_input(self, gene):
+        if self.xref_eof is None:
+            xrefs = self._load_xrefs_with_where_cond(gene)
+        else:
+            xrefs = self._load_xrefs_with_entry_offset(gene)
         xrefs["is_main"] = xrefs["EntryNr"] == gene.main
 
         # transformations

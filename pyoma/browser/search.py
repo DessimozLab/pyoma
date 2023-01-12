@@ -5,6 +5,8 @@ import logging
 import re
 from typing import Union, List
 from dataclasses import dataclass
+
+from .exceptions import InvalidId, UnknownSpecies, InvalidTaxonId, AmbiguousID
 from . import db, models
 
 logger = logging.getLogger(__name__)
@@ -53,9 +55,9 @@ class OmaGroupSearch(BaseSearch):
     def _matched_groups(self):
         try:
             grps = [self.db.resolve_oma_group(self.term)]
-        except db.AmbiguousID as e:
+        except AmbiguousID as e:
             grps = e.candidates
-        except db.InvalidId:
+        except InvalidId:
             grps = []
         return grps
 
@@ -87,7 +89,7 @@ class HogIDSearch(BaseSearch):
         if level is not None:
             try:
                 self.set_taxon_level(models.AncestralGenome(self.db, level))
-            except db.UnknownSpecies:
+            except UnknownSpecies:
                 pass
 
     def set_taxon_filter(self, taxon):
@@ -121,7 +123,7 @@ class HogIDSearch(BaseSearch):
                 try:
                     n = self.db.tax.get_taxnode_from_name_or_taxid(match.group("taxid"))
                     level = n[0]["Name"].decode()
-                except (db.InvalidTaxonId, KeyError):
+                except (InvalidTaxonId, KeyError):
                     pass
             new_hogs = {}
             if match.group("rel") != self.db.release_char and match.group("prefix"):
@@ -179,7 +181,7 @@ class GOSearch(BaseSearch):
     def _matched_entries(self):
         try:
             res = list(self.db.entrynrs_with_go_annotation(self.term))
-        except db.InvalidId:
+        except InvalidId:
             res = []
         return res
 
@@ -221,7 +223,7 @@ class TaxSearch(BaseSearch):
             try:
                 genome = self.db.id_mapper["OMA"].identify_genome(self.term)
                 tax = [int(genome["NCBITaxonId"])]
-            except db.UnknownSpecies:
+            except UnknownSpecies:
                 # fuzzy match of all taxonomic names in OMA.
                 approx_matches = self.db.tax.approx_search(self.term)
                 logger.debug(

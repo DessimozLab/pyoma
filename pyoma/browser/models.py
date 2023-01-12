@@ -3,6 +3,8 @@ from __future__ import division
 import collections
 import numpy
 import time
+from .exceptions import UnknownSpecies, InvalidTaxonId, InvalidId
+from .exceptions import Singleton as HOGSingleton
 
 
 def format_sciname(sci, short=False):
@@ -217,8 +219,6 @@ class ProteinEntry(object):
 
     @LazyProperty
     def hog_family_nr(self):
-        from .db import Singleton as HOGSingleton
-
         try:
             fam = self._db.hog_family(self._entry)
         except HOGSingleton:
@@ -461,8 +461,6 @@ class AncestralGenome(object):
                     [(0, -1, b"LUCA")], dtype=self.db.tax.tax_table.dtype
                 )[0]
             else:
-                from .db import InvalidTaxonId, UnknownSpecies
-
                 try:
                     data = self.db.tax.get_taxnode_from_name_or_taxid(
                         self._stored_genome
@@ -553,8 +551,6 @@ class OmaGroup(object):
         """numeric representation of the OmaGroup"""
         if isinstance(self._stored_group, (int, numpy.integer)):
             if not 0 < self._stored_group <= self._db.get_nr_oma_groups():
-                from .db import InvalidId
-
                 raise InvalidId("{} is an invalid oma group".format(self._stored_group))
             return int(self._stored_group)
         return int(self._group["group_nr"])

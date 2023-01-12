@@ -17,6 +17,7 @@ from queue import Empty
 from .db import Database
 from .models import ProteinEntry
 from .tablefmt import ProteinCacheInfo
+from .exceptions import DBConsistencyError
 from os.path import commonprefix, split
 
 logger = logging.getLogger(__name__)
@@ -188,10 +189,6 @@ class CacheBuilderWorker(mp.Process):
         return json.dumps(final_json_output)
 
 
-class ConsistenceyError(Exception):
-    pass
-
-
 class ResultHandler:
     def __init__(self, cache_file):
         self.cache_file = cache_file
@@ -292,7 +289,7 @@ class ResultHandler:
             a.append(self.jobs)
             h5.flush()
             if len(buf) != self.buffer_offset:
-                raise ConsistenceyError(
+                raise DBConsistencyError(
                     "buffer has unexpeced length: {}vs{}".format(
                         len(buf), self.buffer_offset
                     )
@@ -440,7 +437,7 @@ def update_hdf5_from_cachefile(db_fpath, tmp_cache):
         tab = h5.root.RootHOG.MetaData.read()
         for fam, off, length in json_off:
             if tab[fam - 1]["FamNr"] != fam:
-                raise ConsistenceyError("table not properly ordered")
+                raise DBConsistencyError("table not properly ordered")
             tab[fam - 1]["FamDataJsonOffset"] = off
             tab[fam - 1]["FamDataJsonLength"] = length
         h5.root.RootHOG.MetaData.modify_column(

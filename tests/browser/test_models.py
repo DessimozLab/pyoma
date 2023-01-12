@@ -2,6 +2,8 @@ from __future__ import unicode_literals, division, absolute_import
 from builtins import bytes, range, str
 
 import numpy
+
+import pyoma.browser.exceptions
 from pyoma.browser import models, db, tablefmt
 from future.utils import with_metaclass
 import sys
@@ -100,7 +102,7 @@ class OmaGroupModelTest(TestDbBase):
 
     def test_raises_invalid_id_for_invalid_group_nrs(self):
         for invalid_grp_nr in (-1, 0, 5421):
-            with self.assertRaises(db.InvalidId):
+            with self.assertRaises(pyoma.browser.exceptions.InvalidId):
                 grp = models.OmaGroup(self.db, invalid_grp_nr)
                 grp.group_nbr
 
@@ -141,7 +143,7 @@ class GenomeModelTest(TestDbBase):
         self.assertEqual(genome.uniprot_species_code, "YEAST")
 
     def test_raises_for_invalid_species(self):
-        with self.assertRaises(db.UnknownSpecies):
+        with self.assertRaises(pyoma.browser.exceptions.UnknownSpecies):
             genome = models.Genome(self.db, "HUMAN")
             genome.uniprot_species_code
 
@@ -168,7 +170,7 @@ class AncestralGenomeModelTests(TestDbBase):
         self.assertEqual("Eukaryota", ag.kingdom)
 
     def test_raises_UnknownSpecies_for_invalid_taxid(self):
-        with self.assertRaises(db.UnknownSpecies):
+        with self.assertRaises(pyoma.browser.exceptions.UnknownSpecies):
             tax66 = models.AncestralGenome(self.db, 66).ncbi_taxon_id
 
     def test_with_luca(self):

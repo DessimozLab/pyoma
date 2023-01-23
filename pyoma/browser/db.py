@@ -2663,6 +2663,7 @@ class IDResolver(object):
             nr = (nr, False)
         return nr
 
+    @timethis(logging.DEBUG)
     def search_protein(self, query: str, limit=None, entrynr_range=None):
         candidates = collections.defaultdict(dict)
         try:
@@ -2682,18 +2683,22 @@ class IDResolver(object):
         )
         for nr, res_dict in id_res.items():
             candidates[nr].update(res_dict)
-        try:
-            desc_res = DescriptionSearcher(self._db).search_term(query, limit)
-            desc_res.sort()
-            for row_nr in desc_res[:limit]:
-                nr = row_nr + 1
-                if entrynr_range is None or entrynr_range[0] <= nr <= entrynr_range[1]:
-                    candidates[nr]["Description"] = [
-                        self._db.get_description(nr).decode()
-                    ]
-        except SuffixIndexError as e:
-            logger.warning(e)
-            logger.warning("No Descriptions searched")
+        if len(id_res) < 5 and self._db.desc_search is not None:
+            try:
+                desc_res = self._db.desc_searcher.search_term(query, limit)
+                desc_res.sort()
+                for row_nr in desc_res[:limit]:
+                    nr = row_nr + 1
+                    if (
+                        entrynr_range is None
+                        or entrynr_range[0] <= nr <= entrynr_range[1]
+                    ):
+                        candidates[nr]["Description"] = [
+                            self._db.get_description(nr).decode()
+                        ]
+            except SuffixIndexError as e:
+                logger.warning(e)
+                logger.warning("No Descriptions searched")
         return candidates
 
 

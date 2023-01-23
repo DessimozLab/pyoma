@@ -359,7 +359,7 @@ class XRefSearch(BaseSearch):
 
     @models.LazyProperty
     def estimated_occurrences(self):
-        return self.db.id_mapper["XRef"].xref_index.count(self.term)
+        return self.db.id_mapper["XRef"].search_helper.count(self.term)
 
     def count_entries(self):
         return self.estimated_occurrences

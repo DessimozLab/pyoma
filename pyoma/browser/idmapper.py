@@ -2,13 +2,206 @@ from __future__ import division, print_function, unicode_literals
 import collections
 import itertools
 import logging
+import re
+
 import numpy
 import pandas as pd
 import tables
 from .decorators import timethis
 from .suffixsearch import SuffixSearcher, SuffixIndexError
+from .exceptions import TooUnspecificQuery
 
 logger = logging.getLogger(__name__)
+
+
+class GeneNamesLookup:
+    def __init__(self, h5: tables.File):
+        tab = h5.get_node("/XRefIndex/GeneNames").read()
+        self.gene_names = {x["XRefId"]: x for x in tab}
+        self.lookup_tab = h5.get_node("/XRefIndex/GeneNames_lookup")
+
+    def _low(self, item):
+        if isinstance(item, str):
+            item = item.encode("utf-8")
+        return item.lower()
+
+    def __contains__(self, item):
+        return self._low(item) in self.gene_names
+
+    def count(self, term):
+        term = self._low(term)
+        try:
+            v = self.gene_names[term]
+            return int(v["Length"])
+        except KeyError:
+            return 0
+
+    def get_matching_xref_row_nrs(self, term, entrynr_range=None):
+        term = self._low(term)
+        v = self.gene_names[term]
+        lookup = self.lookup_tab[v["Offset"] : v["Offset"] + v["Length"]]
+        if entrynr_range is not None:
+            lookup = lookup[
+                numpy.where(
+                    numpy.logical_and(
+                        lookup["EntryNr"] >= entrynr_range[0],
+                        lookup["EntryNr"] < entrynr_range[1],
+                    )
+                )
+            ]
+        return lookup["XRefRow"]
+
+
+class XRefSearchHelper:
+    def __init__(self, h5):
+        self.gene_name_lookup = None
+        self.reduced_xref_tab = None
+        self._re_version = re.compile(r"(?P<base>[\w-]+)\.\d{1,2}$")
+        try:
+            self.gene_name_lookup = GeneNamesLookup(h5)
+            self.reduced_xref_tab = h5.get_node("/XRefIndex/XRef_reduced")
+        except tables.NoSuchNodeError:
+            logger.warning("No reduced XRef Index and GeneName lookup found")
+            pass
+        self._use_reduced = self.reduced_xref_tab is not None
+
+        self.xref_tab = h5.get_node("/XRef")
+        try:
+            self.fulltext_index = SuffixSearcher.from_tablecolumn(
+                self.xref_tab, "XRefId"
+            )
+        except SuffixIndexError:
+            # compability mode
+            idx_node = h5.get_node("/XRef_Index")
+            self.fulltext_index = SuffixSearcher.from_index_node(idx_node)
+        try:
+            self._xref_entry_offset = h5.get_node("/XRef_Entry_offset")
+        except tables.NoSuchNodeError:
+            self._xref_entry_offset = None
+
+    def _version_free_query(self, query: str):
+        m = self._re_version.match(query)
+        if m is not None:
+            return m.group("base")
+        return query
+
+    def _query_prefix(self, query: bytes, entrynr_range=None, exact_match=False):
+        if exact_match:
+            stmt = "(XRefId == {!r})".format(query)
+        else:
+            low = query
+            high = query[:-1] + bytes([query[-1] + 1])
+            stmt = "(XRefId >= {!r}) & (XRefId < {!r})".format(low, high)
+        if entrynr_range is not None:
+            stmt += "& (EntryNr >= {}) & (EntryNr < {})".format(*entrynr_range)
+        return stmt
+
+    def _prefix_reduced_search(self, query, entrynr_range, limit=None, exact=False):
+        query = self._version_free_query(query).lower().encode("utf-8")
+        if query in self.gene_name_lookup:
+            return self.gene_name_lookup.get_matching_xref_row_nrs(query, entrynr_range)
+        red_tab_it = self.reduced_xref_tab.where(
+            self._query_prefix(query, entrynr_range, exact)
+        )
+        xref_rows = numpy.fromiter(
+            itertools.islice((row["XRefRow"] for row in red_tab_it), limit), dtype="i4"
+        )
+        return xref_rows
+
+    def _prefix_reducecd_count(self, query, entrynr_range=None):
+        from .db import count_elements
+
+        query = self._version_free_query(query).lower().encode("utf-8")
+        cnts = self.gene_name_lookup.count(query)
+        if cnts == 0:
+            cnts = count_elements(
+                self.reduced_xref_tab.where(self._query_prefix(query, entrynr_range))
+            )
+        return cnts
+
+    def _suffix_search(self, query, limit=None, unspecific_exception=50000):
+        cnts = self.fulltext_index.count(query)
+        if cnts > unspecific_exception:
+            raise TooUnspecificQuery(query, cnts)
+        conservative_limit = None if limit is None else 4 * limit
+        return self.fulltext_index.find(query, limit=conservative_limit)
+
+    def _suffix_count(self, query):
+        return self.fulltext_index.count(query)
+
+    def _search_reduced(self, query, mode, entrynr_range, limit):
+        exact = mode == "exact"
+        if mode in ("prefix", "suffix_if_no_prefix", "exact"):
+            xref_rows = self._prefix_reduced_search(query, entrynr_range, limit, exact)
+            xref_rows.sort()
+        if mode == "suffix" or len(xref_rows) == 0 and mode == "suffix_if_no_prefix":
+            xref_rows = self._search_suffix_with_constrains(query, entrynr_range, limit)
+        return self.xref_tab[xref_rows]
+
+    def _search_suffix_with_constrains(self, query, entrynr_range, limit):
+        args = {}
+        if limit is not None:
+            args = {"limit": limit, "unspecific_exception": max(1000, 10 * limit)}
+        xref_rows = self._suffix_search(query, **args)
+        xref_rows.sort()
+        if entrynr_range is not None and self._xref_entry_offset is not None:
+            row_low = self._xref_entry_offset[entrynr_range[0]]
+            row_high = self._xref_entry_offset[entrynr_range[1] + 1]
+            xref_rows = xref_rows[
+                numpy.where(
+                    numpy.logical_and(xref_rows >= row_low, xref_rows < row_high)
+                )
+            ]
+        return xref_rows
+
+    def _search_direct(self, query, mode, entrynr_range, limit):
+        query = query.encode("utf-8")
+        exact = mode == "exact"
+        if mode in ("prefix", "suffix_if_no_prefix", "exact"):
+            print(self.xref_tab)
+            print(self.xref_tab.nrows)
+            it = self.xref_tab.where(
+                self._query_prefix(query, entrynr_range, exact_match=exact)
+            )
+            xrefs = numpy.fromiter(
+                (row.fetch_all_fields() for row in itertools.islice(it, limit)),
+                dtype=self.xref_tab.dtype,
+            )
+        if mode == "suffix" or len(xrefs) == 0 and mode == "suffix_if_no_prefix":
+            xref_rows = self._search_suffix_with_constrains(query, entrynr_range, limit)
+            xrefs = self.xref_tab[xref_rows]
+        return xrefs
+
+    def _prefix_direct_count(self, query, entrynr_range=None):
+        from .db import count_elements
+
+        query = query.encode("utf-8")
+        it = self.xref_tab.where(self._query_prefix(query, entrynr_range))
+        return count_elements(it)
+
+    def search(self, query, mode=None, entrynr_range=None, limit=None):
+        if mode is None:
+            mode = "suffix_if_no_prefix"
+        if mode not in ("suffix", "prefix", "suffix_if_no_prefix", "exact"):
+            raise ValueError("invalid search mode: {}".format(mode))
+        if self._use_reduced:
+            return self._search_reduced(query, mode, entrynr_range, limit)
+        else:
+            return self._search_direct(query, mode, entrynr_range, limit)
+
+    def count(self, query, mode=None):
+        cnts = 0
+        if self._use_reduced:
+            if mode is None or mode in ("prefix", "suffix_if_no_prefix"):
+                cnts = self._prefix_reducecd_count(query)
+            if mode == "suffix" or cnts == 0 and mode in (None, "suffix_if_no_prefix"):
+                cnts = self._suffix_count(query)
+        else:
+            if mode is None or mode in ("prefix", "suffix_if_no_prefix"):
+                cnts = self._prefix_direct_count(query)
+            if mode == "suffix" or cnts == 0 and mode in (None, "suffix_if_no_prefix"):
+                cnts = self._suffix_count(query)
+        return cnts
 
 
 class XrefIdMapper(object):
@@ -19,12 +212,7 @@ class XrefIdMapper(object):
         self.idtype = frozenset(list(self.xrefEnum._values.keys()))
         self.verif_enum = self.xref_tab.get_enum("Verification")
         self._max_verif_for_mapping_entrynrs = 1000  # allow all verification values
-        try:
-            self.xref_index = SuffixSearcher.from_tablecolumn(self.xref_tab, "XRefId")
-        except SuffixIndexError:
-            # compability mode
-            idx_node = db.get_hdf5_handle().get_node("/XRef_Index")
-            self.xref_index = SuffixSearcher.from_index_node(idx_node)
+        self.search_helper = XRefSearchHelper(db.get_hdf5_handle())
         try:
             self._xref_entry_offset = db.get_hdf5_handle().get_node(
                 "/XRef_EntryNr_offset"
@@ -179,24 +367,23 @@ class XrefIdMapper(object):
 
         :param str xref: an xref to be located
         :param bool is_prefix: treat xref as a prefix and return
-                     potentially several matching xrefs"""
+                     potentially several matching xrefs
+        :param bool match_any_substring: use a suffix index to find
+                     any occurrence of the query xref (not limited
+                     to the beginning)"""
+
         if match_any_substring:
-            query = xref.encode("utf-8").lower()
-            res = self.xref_tab[self.xref_index.find(query)]
+            mode = "suffix"
+        elif is_prefix:
+            mode = "prefix"
         else:
-            if is_prefix:
-                up = xref[:-1] + chr(ord(xref[-1]) + 1)
-                cond = "(XRefId >= {!r}) & (XRefId < {!r})".format(
-                    xref.encode("utf-8"), up.encode("utf-8")
-                )
-            else:
-                cond = "XRefId=={!r}".format(xref.encode("utf-8"))
-            res = self.xref_tab.read_where(cond)
+            mode = "exact"
+        res = self.search_helper.search(xref, mode=mode)
         if len(res) > 0 and len(self.idtype) < len(self.xrefEnum):
             res = res[numpy.in1d(res["XRefSource"], list(self.idtype))]
-
         return res
 
+    @timethis(logging.INFO)
     def search_id(self, query, limit=None, entrynr_range=None):
         source_filter = None
         try:
@@ -209,20 +396,9 @@ class XrefIdMapper(object):
             term = query
 
         result = collections.defaultdict(dict)
-        high_limit = None if limit is None else 4 * limit
-        xref_rows = self.xref_index.find(term, limit=high_limit)
-        xref_rows.sort()
-        if entrynr_range is not None and self._db.db_schema_version >= (3, 5):
-            row_low = self._xref_entry_offset[entrynr_range[0]]
-            row_high = self._xref_entry_offset[entrynr_range[1] + 1]
-            xref_rows = xref_rows[
-                numpy.where(
-                    numpy.logical_and(xref_rows >= row_low, xref_rows < row_high)
-                )
-            ]
-
-        for xref_row in xref_rows:
-            xref = self.xref_tab[xref_row]
+        for xref in self.search_helper.search(
+            term, entrynr_range=entrynr_range, limit=limit
+        ):
             if entrynr_range is not None and not (
                 entrynr_range[0] <= xref["EntryNr"] <= entrynr_range[1]
             ):

@@ -414,6 +414,8 @@ class XRefDatabaseMock(Database):
         for n in ("suffix", "buffer", "offset"):
             f.create_carray("/XRef_Index", n, obj=numpy.ones((5,), "i4"))
         self.db = f
+        self._on_close_notify = []
+        self._close_fh = True
 
 
 class XRefIdMapperTest(unittest.TestCase):
@@ -423,7 +425,7 @@ class XRefIdMapperTest(unittest.TestCase):
         self.xrefmapper = XrefIdMapper(patch_db)
 
     def tearDown(self):
-        self.xrefmapper._db.db.close()
+        self.xrefmapper._db.close()
 
     def test_multiple_xrefs_per_entry(self):
         xref_e1 = self.xrefmapper.map_entry_nr(1)
@@ -484,7 +486,7 @@ class IdResolverTests(unittest.TestCase):
         patch_db.id_mapper = {"XRef": self.xrefmapper}
 
     def tearDown(self):
-        self.xrefmapper._db.db.close()
+        self.xrefmapper._db.close()
 
     def test_search_of_modified_xref(self):
         xref = "XA002g1.4"

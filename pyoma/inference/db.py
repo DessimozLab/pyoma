@@ -1,10 +1,7 @@
 import tables
 import numpy as np
 
-try:
-    from functools import lru_cache
-except ImportError:
-    from functools32 import lru_cache
+from functools import lru_cache
 from builtins import filter
 
 
@@ -50,30 +47,30 @@ class RelationsOfEntry(object):
         elif not isinstance(value, np.ndarray):
             raise ValueError("Parameter not expected")
 
-        if value.dtype == np.int:
+        if value.dtype == int:
             value_idx = self.data["EntryNr2"].searchsorted(value)
             if not (self.data["EntryNr2"][value_idx] == value).all():
                 missing_matches = value[self.data["EntryNr2"][value_idx] != value]
                 raise ValueError(
-                    u"Not all entries found in Matches: {0!r:s}".format(missing_matches)
+                    "Not all entries found in Matches: {0!r:s}".format(missing_matches)
                 )
         elif value.dtype == self.data.dtype:
-            raise NotImplementedError(u"setitem with replacement view not implemented")
+            raise NotImplementedError("setitem with replacement view not implemented")
         else:
             raise ValueError(
-                u"Unexpected dtype in parameter: {0!:s}".format(value.dtype)
+                "Unexpected dtype in parameter: {0!:s}".format(value.dtype)
             )
         self._set_relationflags_on_rows(value_idx)
 
     def _set_relationflags_on_rows(self, row_indexes):
         """method which sets the column flags to the appropriate
         relation type for the indexes of the data buffer. The base
-        class does not change any flags. """
+        class does not change any flags."""
         pass
 
 
 class CanonicalBestMatchesOfEntry(RelationsOfEntry):
-    """"variant that only looks at the main splicing variant"""
+    """ "variant that only looks at the main splicing variant"""
 
     @staticmethod
     def filter(row):
@@ -130,7 +127,7 @@ class RelationManager(object):
         elif key == "ALL":
             res = RelationsOfEntry(self.data)
         else:
-            raise KeyError(u"Unexpected key: {0!r:s}".format(key))
+            raise KeyError("Unexpected key: {0!r:s}".format(key))
         return res
 
     def __setitem__(self, key, value):
@@ -150,17 +147,17 @@ class GenomePair(object):
 
     def __getitem__(self, item):
         if not isinstance(item, int):
-            raise IndexError(u"Invalid index or slice: {0!r:s}".format(item))
+            raise IndexError("Invalid index or slice: {0!r:s}".format(item))
         if item < 0:
-            raise IndexError(u"Invalid index or slice: {0!r:s}".format(item))
+            raise IndexError("Invalid index or slice: {0!r:s}".format(item))
         if item < 0:
-            raise IndexError(u"Invalid index or slice: {0!r:s}".format(item))
+            raise IndexError("Invalid index or slice: {0!r:s}".format(item))
         if item < 0:
             item += len(self.entry_offset)
         else:
             item -= 1
         if item >= len(self.entry_offset):
-            raise IndexError(u"Index is out of bound: {}".format(item))
+            raise IndexError("Index is out of bound: {}".format(item))
         if not self.rels[item] is None:
             return self.rels[item]
 
@@ -204,11 +201,11 @@ class OmaDB(object):
                 "/Matches/{}/{}/ProteinIndex".format(genome1, genome2)
             )
         except tables.NoSuchNodeError:
-            raise KeyError(u"genome pair does not exist in database")
+            raise KeyError("genome pair does not exist in database")
         gs = self.genome_data.read_where("UniProtSpeciesCode==b'{}'".format(genome1))
         if len(itab) != gs["TotEntries"]:
             raise OmaDBError(
-                u"Nr of Protein does not match: {} vs {}".format(
+                "Nr of Protein does not match: {} vs {}".format(
                     len(itab), gs["TotEntries"]
                 )
             )

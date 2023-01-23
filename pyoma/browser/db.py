@@ -65,8 +65,7 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings(
     "ignore",
     category=tables.PerformanceWarning,
-    message=".*maximum recommended rowsize.*",
-    append=True,
+    message=r".*maximum recommended rowsize.*",
 )
 
 # Raise stack limit for PyOPA ~400MB

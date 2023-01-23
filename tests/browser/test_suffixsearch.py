@@ -29,13 +29,13 @@ class StringGenerator(object):
         self.fill_buffer()
 
     def fill_buffer(self):
-        self.buffer = numpy.random.choice(CHARS, 2 ** 20)
+        self.buffer = numpy.random.choice(CHARS, 2**20)
         self.pos = 0
 
     def get_string(self, length):
         if self.pos + length > len(self.buffer):
             self.fill_buffer()
-        res = self.buffer[self.pos : self.pos + length].tostring()
+        res = self.buffer[self.pos : self.pos + length].tobytes()
         self.pos += length
         return res
 
@@ -212,7 +212,7 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
         for row in tab:
             from_buf = buf[
                 row["VarCharOff"] : (row["VarCharOff"] + row["VarCharLen"])
-            ].tostring()
+            ].tobytes()
             self.assertEqual(row["CharCol"], from_buf)
 
     def test_existance_of_auxillary_buffers(self):

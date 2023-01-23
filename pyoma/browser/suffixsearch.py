@@ -373,7 +373,7 @@ class SuffixSearcher(object):
             offset_arr = offset if offset else index_node._f_get_child("offset")
             return cls(suffix_arr, buffer_arr, offset_arr, ignore_case=True)
         except tables.NoSuchNodeError as e:
-            raise SuffixIndexInconsitency("suffix array data missing: {}".formate(e))
+            raise SuffixIndexInconsitency("suffix array data missing: {}".format(e))
 
     def __init__(self, suffix, buffer, offset, ignore_case):
         self.suffix_arr = suffix

@@ -2683,7 +2683,7 @@ class IDResolver(object):
         )
         for nr, res_dict in id_res.items():
             candidates[nr].update(res_dict)
-        if len(id_res) < 5 and self._db.desc_search is not None:
+        if len(id_res) < 5 and self._db.desc_searcher is not None:
             try:
                 desc_res = self._db.desc_searcher.search_term(query, limit)
                 desc_res.sort()

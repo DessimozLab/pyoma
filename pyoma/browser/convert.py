@@ -357,7 +357,7 @@ def create_and_store_fast_famhoglevel_lookup(h5, hoglevtab, array_path):
 
 
 class DarwinExporter(object):
-    DB_SCHEMA_VERSION = "3.4"
+    DB_SCHEMA_VERSION = "3.5"
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
 
     def __init__(self, path, logger=None, mode=None):
@@ -755,6 +755,7 @@ class DarwinExporter(object):
             )
 
             cnt_missmatch_locus = 0
+            cnt_genes = 0
             for nr in range(gs["TotEntries"]):
                 eNr = data["off"] + nr + 1
                 protTab.row["EntryNr"] = eNr
@@ -771,6 +772,11 @@ class DarwinExporter(object):
                 protTab.row["AltSpliceVariant"] = data["alts"][nr]
                 protTab.row["OmaHOG"] = b" "  # will be assigned later
                 protTab.row["CanonicalId"] = b" "  # will be assigned later
+                if (
+                    protTab.row["AltSpliceVariant"] == 0
+                    or protTab.row["AltSpliceVariant"] == protTab.row["EntryNr"]
+                ):
+                    cnt_genes += 1  # main isoforms of gene
 
                 locus_str = data["locs"][nr]
                 try:
@@ -794,6 +800,8 @@ class DarwinExporter(object):
                 protTab.row.append()
             protTab.flush()
             seqArr.flush()
+            gs["TotGenes"] = cnt_genes
+            gs.update()
             if cnt_missmatch_locus > 0:
                 self.logger.warning(
                     "{} missmatches in exon-lengths compared to locus info".format(

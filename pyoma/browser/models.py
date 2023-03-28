@@ -349,7 +349,12 @@ class Genome(object):
     @LazyProperty
     def nr_genes(self):
         """returns the number of genes of the genome in the database"""
-        return self._db.count_main_isoforms(self.uniprot_species_code)
+        try:
+            return int(self._genome["TotGenes"])
+        except ValueError:
+            if self._db.db_schema_version < (3, 6):
+                return self._db.count_main_isoforms(self.uniprot_species_code)
+            raise
 
     @property
     def entry_nr_offset(self):

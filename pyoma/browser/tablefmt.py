@@ -181,6 +181,7 @@ class GenomeTable(tables.IsDescription):
     Source = tables.StringCol(255, pos=10)
     Date = tables.Time32Col(pos=11)
     IsPolyploid = tables.BoolCol(pos=12)
+    TotGenes = tables.UInt32Col(pos=13, dflt=0)
 
 
 class TaxonomyTable(tables.IsDescription):

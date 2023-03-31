@@ -648,7 +648,7 @@ class Database(object):
             [is_orthologous(entry, hog_member[i]) for i in range(len(hog_member))],
             dtype="i4",
         )
-        mask = numpy.asarray(query_genome_genes_cnt, numpy.bool)
+        mask = numpy.asarray(query_genome_genes_cnt, bool)
         target_genomes = [
             self.id_mapper["OMA"].genome_of_entry_nr(o["EntryNr"])["NCBITaxonId"]
             for o in hog_member[mask]
@@ -1119,7 +1119,7 @@ class Database(object):
                     )["Name"]
                     for enr in members["EntryNr"]
                 ],
-                dtype=numpy.bool,
+                dtype=bool,
             )
             members = members[keep]
         return members

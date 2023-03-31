@@ -1482,7 +1482,7 @@ class DarwinExporter(object):
         # Create lookup table for fa2go
         dtype = numpy.uint32 if (n < numpy.iinfo(numpy.uint32).max) else numpy.uint64
         idx = numpy.zeros(sa.shape, dtype=dtype)
-        mask = numpy.zeros(sa.shape, dtype=numpy.bool)
+        mask = numpy.zeros(sa.shape, dtype=bool)
 
         # Compute mask and entry index for sequence buff
         for i in range(n):

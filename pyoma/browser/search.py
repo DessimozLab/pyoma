@@ -19,6 +19,9 @@ class BaseSearch(metaclass=abc.ABCMeta):
         self.db = pyomadb
         self.term = term
 
+    def set_max_entries(self, max_nr: int):
+        pass
+
     def search_entries(self):
         pass
 
@@ -357,6 +360,9 @@ class XRefSearch(BaseSearch):
         self._matched_entries = None
         self.entry_filter = None
 
+    def set_max_entries(self, max_nr: int):
+        self.max_matches = max_nr
+
     @models.LazyProperty
     def estimated_occurrences(self):
         return self.db.id_mapper["XRef"].search_helper.count(self.term)
@@ -462,8 +468,10 @@ class SearchResult:
         return res
 
 
-def search(tokens: List[BaseSearch]):
+def search(tokens: List[BaseSearch], entry_limit=None):
     sorted_tokens = sorted(tokens, key=lambda t: t.PRIO)
+    if entry_limit is not None:
+        sorted_tokens[-1].set_max_entries(entry_limit)
     res = SearchResult()
     for token in sorted_tokens:
         res &= token

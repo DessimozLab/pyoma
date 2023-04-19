@@ -274,6 +274,7 @@ class SequenceSearch(BaseSearch):
         self.entry_filter = None
         self._matched_seqs = None
         self._nr_kmer_hits = None
+        self._max_entries = None
 
     def set_entry_nr_filter(self, filter: Union[tuple, set]):
         if isinstance(filter, tuple) and len(filter) != 2:
@@ -281,6 +282,9 @@ class SequenceSearch(BaseSearch):
         self.entry_filter = filter
         self._matched_seqs = None
         self._nr_kmer_hits = None
+
+    def set_max_entries(self, max_nr: int):
+        self._max_entries = max_nr
 
     def get_matched_seqs(self):
         if self._matched_seqs is not None:
@@ -312,6 +316,7 @@ class SequenceSearch(BaseSearch):
         if self.strategy == "approx" or self.strategy == "mixed" and len(res) == 0:
             approx, kmer_hits = self.db.seq_search.approx_search(
                 self.seq,
+                n=self._max_entries,
                 is_sanitised=True,
                 entrynr_range=self.entry_filter,
                 return_kmer_hits=True,

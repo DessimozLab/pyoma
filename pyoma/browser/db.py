@@ -1575,6 +1575,12 @@ class Database(object):
         try:
             e = next(meta_tab.where("GroupNr == {:d}".format(group_nr)))
             kw_buf = self.db.get_node("/OmaGroups/KeywordBuffer")
+            try:
+                grp_size = int(e["NrMembers"])
+            except KeyError:
+                # fallback if not stored in DB yet
+                grp_size = -1
+
             res = {
                 "fingerprint": e["Fingerprint"].decode(),
                 "group_nr": int(e["GroupNr"]),
@@ -1583,7 +1589,7 @@ class Database(object):
                 ]
                 .tobytes()
                 .decode(),
-                "size": int(e["NrMembers"]) if "NrMembers" in e else -1,
+                "size": grp_size,
             }
             return res
         except StopIteration:

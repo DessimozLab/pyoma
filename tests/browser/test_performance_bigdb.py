@@ -1,15 +1,8 @@
-from unittest import mock
+from unittest import mock, SkipTest
 import time
 import os
 from .test_db import TestWithDbInstance
-from pyoma.browser.search import (
-    OmaGroupSearch,
-    GOSearch,
-    TaxSearch,
-    SequenceSearch,
-    ECSearch,
-    XRefSearch,
-)
+from pyoma.browser.search import XRefSearch
 
 
 class TestWithBigOmaDB(TestWithDbInstance):
@@ -20,7 +13,12 @@ class TestWithBigOmaDB(TestWithDbInstance):
         with mock.patch.dict(
             os.environ, {"PYOMA_DB_PATH": "/Volumes/TOSHIBA EXT/browser"}
         ):
-            super().setUpClass()
+            try:
+                super().setUpClass()
+            except IOError:
+                raise SkipTest(
+                    "Big database '{}' is not available".format(cls.db_file_name)
+                )
 
 
 class XRefSearchTest(TestWithBigOmaDB):

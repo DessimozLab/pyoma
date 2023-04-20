@@ -3,6 +3,8 @@ from __future__ import division
 import collections
 import numpy
 import time
+from .exceptions import UnknownSpecies, InvalidTaxonId, InvalidId
+from .exceptions import Singleton as HOGSingleton
 
 
 def format_sciname(sci, short=False):
@@ -121,6 +123,8 @@ class ProteinEntry(object):
 
     @property
     def entry_nr(self):
+        if isinstance(self._stored_entry, (int, numpy.integer)):
+            return int(self._stored_entry)
         return int(self._entry["EntryNr"])
 
     @property
@@ -215,8 +219,6 @@ class ProteinEntry(object):
 
     @LazyProperty
     def hog_family_nr(self):
-        from .db import Singleton as HOGSingleton
-
         try:
             fam = self._db.hog_family(self._entry)
         except HOGSingleton:
@@ -317,11 +319,21 @@ class Genome(object):
 
     @property
     def url(self):
-        return self._genome["Url"].decode()
+        try:
+            return self._genome["Url"].decode()
+        except ValueError:
+            if self._db.db_schema_version < (3.2):
+                return ""
+            raise
 
     @property
     def source(self):
-        return self._genome["Source"].decode()
+        try:
+            return self._genome["Source"].decode()
+        except ValueError:
+            if self._db.db_schema_version < (3.2):
+                return ""
+            raise
 
     @property
     def release(self):
@@ -454,8 +466,6 @@ class AncestralGenome(object):
                     [(0, -1, b"LUCA")], dtype=self.db.tax.tax_table.dtype
                 )[0]
             else:
-                from .db import InvalidTaxonId, UnknownSpecies
-
                 try:
                     data = self.db.tax.get_taxnode_from_name_or_taxid(
                         self._stored_genome
@@ -482,6 +492,10 @@ class AncestralGenome(object):
 
     @property
     def sciname(self):
+        return self.scientific_name
+
+    @property
+    def level(self):
         return self.scientific_name
 
     @LazyProperty
@@ -513,6 +527,10 @@ class AncestralGenome(object):
             for lev in self.db.tax.get_parent_taxa(self.ncbi_taxon_id)
         ]
 
+    @LazyProperty
+    def nr_genes(self):
+        return self.db.count_hogs_at_level(self.scientific_name)
+
 
 class OmaGroup(object):
     """OmaGroup object model
@@ -536,6 +554,10 @@ class OmaGroup(object):
     @property
     def group_nbr(self):
         """numeric representation of the OmaGroup"""
+        if isinstance(self._stored_group, (int, numpy.integer)):
+            if not 0 < self._stored_group <= self._db.get_nr_oma_groups():
+                raise InvalidId("{} is an invalid oma group".format(self._stored_group))
+            return int(self._stored_group)
         return int(self._group["group_nr"])
 
     @property

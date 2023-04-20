@@ -31,19 +31,41 @@ from tqdm import tqdm
 
 from .KmerEncoder import KmerEncoder
 from .decorators import timethis
+from .exceptions import (
+    InvalidTaxonId,
+    DBVersionError,
+    DBConsistencyError,
+    DBOutdatedError,
+    InvalidId,
+    InvalidOmaId,
+    UnknownIdType,
+    UnknownSpecies,
+    OutdatedHogId,
+    Singleton,
+    NoReprEntry,
+    AmbiguousID,
+    TooUnspecificQuery,
+)
 from .geneontology import GeneOntology, OntologyParser, GOAspect
 from .hoghelper import compare_levels, are_orthologous
 from .hogprofile import Profiler
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
 from .suffixsearch import SuffixSearcher, SuffixIndexError
+from .idmapper import (
+    XRefNoApproximateIdMapper,
+    XrefIdMapper,
+    LinkoutIdMapper,
+    GeneNameOrSymbolIdMapper,
+    UniProtIdMapper,
+    DomainNameIdMapper,
+)
 from .. import version
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings(
     "ignore",
     category=tables.PerformanceWarning,
-    message=".*maximum recommended rowsize.*",
-    append=True,
+    message=r".*maximum recommended rowsize.*",
 )
 
 # Raise stack limit for PyOPA ~400MB
@@ -132,7 +154,7 @@ class Database(object):
     will typically be issued by methods of this object. Typically
     the result of queries will be :py:class:`numpy.recarray` objects."""
 
-    EXPECTED_DB_SCHEMA = "3.4"
+    EXPECTED_DB_SCHEMA = "3.5"
 
     def __init__(self, db):
         if isinstance(db, str):
@@ -934,8 +956,8 @@ class Database(object):
                                     member and are thus not of limited interest
                                     in most situations
 
-        :returns generator of HOG instances
-        :rtype :class:`models.HOG`
+        :returns: generator of HOG instances
+        :rtype: :class:`models.HOG`
 
         :see_also: :meth:`get_hog` that returns a single HOG instance
             for a specific level or the root level one for a specific HOG id.
@@ -986,12 +1008,11 @@ class Database(object):
         and for
         get_subhogids_at_level(1, 'Metazoa') --> ['HOG:0000001.1a', 'HOG:0000001.1b']
 
-        :note:
-        There is also the method :method:`get_subhogs_at_level` which returns all
+        :note::
+        There is also the method :meth:`get_subhogs_at_level` which returns all
         information stored in the HogLevel table, not only the HOG id.
 
-        :see_also:
-        get_subhogs_at_level
+        :see_also:: :meth:`get_subhogs_at_level`
 
         :param fam_nr: the numeric family id
         :param level: the taxonomic level of interest"""
@@ -1253,9 +1274,17 @@ class Database(object):
         except StopIteration:
             raise ValueError(
                 'HOG-ID/Level combination "{}/{:s}" unknown'.format(
-                    hog_id.decode(), level
+                    hog_id.decode(), level if level is not None else "Root"
                 )
             )
+
+    def count_hogs_at_level(self, level):
+        """returns the number of HOGs at the requested taxonomic level"""
+        taxid = self.taxid_from_level(level)
+        try:
+            return len(self.db.get_node("/Hogs_per_Level/tax{}".format(taxid)))
+        except tables.NoSuchNodeError:
+            return len(self.get_all_hogs_at_level(level))
 
     def get_all_hogs_at_level(self, level, compare_with=None):
         """returns a :class:`numpy.array` instance with all hogs at the requested level"""
@@ -1479,7 +1508,7 @@ class Database(object):
         return members
 
     def resolve_oma_group(self, group_id):
-        if isinstance(group_id, int) and 0 < group_id <= self.get_nr_oma_groups():
+        if isinstance(group_id, int) and 0 < group_id <= self._nr_oma_groups:
             return group_id
         elif isinstance(group_id, numpy.integer):
             return self.resolve_oma_group(int(group_id))
@@ -1546,6 +1575,12 @@ class Database(object):
         try:
             e = next(meta_tab.where("GroupNr == {:d}".format(group_nr)))
             kw_buf = self.db.get_node("/OmaGroups/KeywordBuffer")
+            try:
+                grp_size = int(e["NrMembers"])
+            except KeyError:
+                # fallback if not stored in DB yet
+                grp_size = -1
+
             res = {
                 "fingerprint": e["Fingerprint"].decode(),
                 "group_nr": int(e["GroupNr"]),
@@ -1554,7 +1589,7 @@ class Database(object):
                 ]
                 .tobytes()
                 .decode(),
-                "size": int(e["NrMembers"]) if "NrMembers" in e else -1,
+                "size": grp_size,
             }
             return res
         except StopIteration:
@@ -1562,6 +1597,10 @@ class Database(object):
 
     def get_nr_oma_groups(self):
         """returns the number of OMA Groups in the database"""
+        return self._nr_oma_groups
+
+    @LazyProperty
+    def _nr_oma_groups(self):
         tab = self.db.get_node("/Protein/Entries")
         try:
             idx = tab.colindexes["OmaGroup"][-1]
@@ -2153,7 +2192,7 @@ class SequenceSearch(object):
                 if (jj < len(self.seq_idx) and z[jj] == seq) or z[jj - 1] != seq:
                     raise RuntimeError("suffix index broken. should not happen")
 
-                # Find entry numbers and filter to remove incorrect entries
+                # Find entry numbers and enr_filter to remove incorrect entries
                 return list(
                     filter(
                         lambda e: (
@@ -2167,22 +2206,24 @@ class SequenceSearch(object):
         # Nothing found.
         return []
 
-    def approx_search(
-        self,
-        seq,
-        n=None,
-        is_sanitised=None,
-        coverage=None,
-        compute_distance=False,
-        entrynr_range=None,
+    def approx_search_no_align(
+        self, seq, is_sanitised=False, coverage=0.0, entrynr_range=None
     ):
-        """
-        Performs an exact match search using the suffix array.
-        :param entrynr_range:
+        """Performs a quick ranking of the best matches based on kmer index.
+        The method does not compute an alignment, but just reports the
+        entry number with the fraction of kmer matching better than the set coverage
+
+        :param seq: the sequence to be searched
+        :type seq: str, bytes
+        :param is_sanitised: whether or not the sequence is already sanitised. defaults to false.
+        :type is_sanitised: bool
+        :param coverage: the minimum fraction of covered kmers by the target sequence
+        :type coverage: float
+        :param entrynr_range: target entry number range as a tuple (min, max) or set for filtering
+        :type entrynr_range: set[int], tuple[int, int]
+        :returns: A list of tuples with (entry_nr, fraction_of_matched_kmers)
         """
         seq = seq if is_sanitised else self._sanitise_seq(seq)
-        n = n if n is not None else 50
-        coverage = 0.0 if coverage is None else coverage
         tax_filt = (
             self._tax_filter_range
             if isinstance(entrynr_range, tuple)
@@ -2200,17 +2241,61 @@ class SequenceSearch(object):
         # 2. Filter to top n if necessary
         z = len(seq) - self.k + 1
         cut_off = coverage * z
-        c = [
+        entries = [
             (enr, (cnts / z))
             for enr, cnts in c.items()
             if cnts >= cut_off
             and (entrynr_range is None or tax_filt(enr, entrynr_range))
         ]
-        c = sorted(c, reverse=True, key=lambda x: x[1])[:n] if n > 0 else c
+        return entries
+
+    def approx_search(
+        self,
+        seq,
+        n=None,
+        is_sanitised=None,
+        coverage=None,
+        compute_distance=False,
+        entrynr_range=None,
+        return_kmer_hits=False,
+    ):
+        """
+        Performs an approximate match search using the kmer index.
+        For the n best matching candidates based on kmer lookup, a
+        Smith-Waterman alignment is computed.
+
+        If compute_distance is set to True, an ML distance estimate
+        of the alignment is returned as part of the resulting dictionary
+
+        :param seq: the query sequence to be searched
+        :type seq: str, bytes
+        :param int n: number of maximum returned entries that match query
+        :param bool is_sanitised: whether or not the sequence is already sanitised. defaults to false.
+        :param float coverage: the minimum fraction of covered kmers by the target sequence
+        :param entrynr_range: target entry number range as a tuple (min, max) or set for filtering
+        :type entrynr_range: set[int], tuple[int, int]
+        :param bool return_kmer_hits: whether or not the full list of matched kmer entries should be
+        returned. if set to True, the return value will be a tuple instead of a single list
+
+        :returns: list of matched entries, each element is a tuple with the entry_nr and a dictionary
+        containing the score, alignment and distance estimates.
+        If return_kmer_hits is set to True, also the full list of matching entries is returned.
+        """
+        seq = seq if is_sanitised else self._sanitise_seq(seq)
+        n = n if n is not None else 50
+        coverage = 0.0 if coverage is None else coverage
+
+        kmer_hits = self.approx_search_no_align(
+            seq, is_sanitised=True, coverage=coverage, entrynr_range=entrynr_range
+        )
+        c = sorted(kmer_hits, reverse=True, key=lambda x: x[1])
+        if n > 0:
+            c = c[:n]
 
         # 3. Do local alignments and return count / score / alignment
+        res = []
         if len(c) > 0:
-            return sorted(
+            res = sorted(
                 [
                     (
                         m[0],
@@ -2227,7 +2312,10 @@ class SequenceSearch(object):
                 key=lambda q: q[1]["score"],
                 reverse=True,
             )
-        return []
+        if return_kmer_hits:
+            return res, kmer_hits
+        else:
+            return res
 
     def _align_entries(self, seq, matches, compute_distance=False):
         # Does the alignment for the approximate search
@@ -2366,7 +2454,7 @@ class OmaIdMapper(object):
         else:
             if len(code) == 5:
                 try:
-                    return self.genome_from_UniProtCode(code)
+                    return self.genome_from_UniProtCode(code.upper())
                 except UnknownSpecies:
                     pass
             return self.genome_from_SciName(code)
@@ -2518,12 +2606,6 @@ class FuzzyMatcher(object):
         return matches
 
 
-class AmbiguousID(Exception):
-    def __init__(self, message, candidates):
-        super(AmbiguousID, self).__init__(message, candidates)
-        self.candidates = candidates
-
-
 class IDResolver(object):
     def __init__(self, db):
         entry_nr_col = db.get_hdf5_handle().root.Protein.Entries.cols.EntryNr
@@ -2587,29 +2669,42 @@ class IDResolver(object):
             nr = (nr, False)
         return nr
 
-    def search_protein(self, query: str, limit=None):
+    @timethis(logging.DEBUG)
+    def search_protein(self, query: str, limit=None, entrynr_range=None):
         candidates = collections.defaultdict(dict)
         try:
             nr = self._from_numeric(query)
-            candidates[nr]["numeric_id"] = [query]
+            if entrynr_range is None or entrynr_range[0] <= nr <= entrynr_range[1]:
+                candidates[nr]["numeric_id"] = [query]
         except ValueError:
             pass
         try:
             nr = self._from_omaid(query)
-            candidates[nr]["omaid"] = [query]
+            if entrynr_range is None or entrynr_range[0] <= nr <= entrynr_range[1]:
+                candidates[nr]["omaid"] = [query]
         except (InvalidOmaId, UnknownSpecies) as e:
             pass
-        id_res = self._db.id_mapper["XRef"].search_id(query, limit)
+        id_res = self._db.id_mapper["XRef"].search_id(
+            query, limit=limit, entrynr_range=entrynr_range
+        )
         for nr, res_dict in id_res.items():
             candidates[nr].update(res_dict)
-        try:
-            desc_res = DescriptionSearcher(self._db).search_term(query, limit)
-            for row_nr in desc_res[:limit]:
-                nr = row_nr + 1
-                candidates[nr]["Description"] = [self._db.get_description(nr).decode()]
-        except SuffixIndexError as e:
-            logger.warning(e)
-            logger.warning("No Descriptions searched")
+        if len(id_res) < 5 and self._db.desc_searcher is not None:
+            try:
+                desc_res = self._db.desc_searcher.search_term(query, limit)
+                desc_res.sort()
+                for row_nr in desc_res[:limit]:
+                    nr = row_nr + 1
+                    if (
+                        entrynr_range is None
+                        or entrynr_range[0] <= nr <= entrynr_range[1]
+                    ):
+                        candidates[nr]["Description"] = [
+                            self._db.get_description(nr).decode()
+                        ]
+            except SuffixIndexError as e:
+                logger.warning(e)
+                logger.warning("No Descriptions searched")
         return candidates
 
 
@@ -2996,62 +3091,6 @@ class Taxonomy(object):
         return et.tostring(root, encoding="utf-8")
 
 
-class PyOmaException(Exception):
-    pass
-
-
-class IdException(PyOmaException):
-    pass
-
-
-class InvalidTaxonId(IdException):
-    pass
-
-
-class DBVersionError(PyOmaException):
-    pass
-
-
-class DBConsistencyError(PyOmaException):
-    pass
-
-
-class DBOutdatedError(PyOmaException):
-    pass
-
-
-class InvalidId(IdException):
-    pass
-
-
-class InvalidOmaId(InvalidId):
-    pass
-
-
-class UnknownIdType(IdException):
-    pass
-
-
-class UnknownSpecies(IdException):
-    pass
-
-
-class OutdatedHogId(InvalidId):
-    def __init__(self, hog_id):
-        super().__init__("Outdated HOG ID: {}".format(hog_id), hog_id)
-        self.outdated_hog_id = hog_id
-
-
-class Singleton(Exception):
-    def __init__(self, entry, msg=None):
-        super(Singleton, self).__init__(msg)
-        self.entry = entry
-
-
-class NoReprEntry(Exception):
-    pass
-
-
 class IdMapperFactory(object):
     def __init__(self, db_obj):
         self.db = db_obj
@@ -3072,244 +3111,6 @@ class IdMapperFactory(object):
         return mapper
 
 
-class XrefIdMapper(object):
-    def __init__(self, db):
-        self._db = db
-        self.xref_tab = db.get_hdf5_handle().get_node("/XRef")
-        self.xrefEnum = self.xref_tab.get_enum("XRefSource")
-        self.idtype = frozenset(list(self.xrefEnum._values.keys()))
-        self.verif_enum = self.xref_tab.get_enum("Verification")
-        self._max_verif_for_mapping_entrynrs = 1000  # allow all verification values
-        try:
-            self.xref_index = SuffixSearcher.from_tablecolumn(self.xref_tab, "XRefId")
-        except SuffixIndexError:
-            # compability mode
-            idx_node = db.get_hdf5_handle().get_node("/XRef_Index")
-            self.xref_index = SuffixSearcher.from_index_node(idx_node)
-
-    def map_entry_nr(self, entry_nr):
-        """returns the XRef entries associated with the query protein.
-
-        The types of XRefs that are returned depends on the idtype
-        class member variable. In the base-class, idtype contains
-        all valid xref types. Typically, subclasses of XrefIdMapper
-        will change this set.
-
-        :param entry_nr: the numeric id of the query protein.
-        :returns: list of dicts with 'source' and 'xref' keys."""
-        res = [
-            {
-                "source": self.xrefEnum(row["XRefSource"]),
-                "xref": row["XRefId"].decode(),
-                "seq_match": self.verif_enum(row["Verification"]),
-            }
-            for row in self.xref_tab.where(
-                "(EntryNr=={:d}) & (Verification <= {:d})".format(
-                    entry_nr, self._max_verif_for_mapping_entrynrs
-                )
-            )
-            if row["XRefSource"] in self.idtype
-        ]
-        return res
-
-    def canonical_source_order(self):
-        """returns the list of xref sources in order of their importance.
-
-        Most important source - in the base class for example UniProtKB/SwissProt
-        are first. The canonical order is defined in the enum definition.
-
-        :returns: list of source strings"""
-        return [self.xrefEnum(z) for z in sorted(self.idtype)]
-
-    def iter_xrefs_for_entry_nr(self, entry_nr):
-        """Iterate over the xrefs of a given entry number.
-
-        This method returns a dict with 'source' and 'xref' fields
-        (both str) holding the information of the xref record.
-
-        :param entry_nr: the numeric id of the query protein"""
-        for row in self.xref_tab.where(
-            "(EntryNr=={:d}) & (Verification <= {:d})".format(
-                entry_nr, self._max_verif_for_mapping_entrynrs
-            )
-        ):
-            if row["XRefSource"] in self.idtype:
-                yield {
-                    "source": self.xrefEnum._values[row["XRefSource"]],
-                    "xref": row["XRefId"].decode(),
-                }
-
-    def _combine_query_values(self, field, values):
-        parts = ["({}=={})".format(field, z) for z in values]
-        return "(" + "|".join(parts) + ")"
-
-    def map_many_entry_nrs(self, entry_nrs):
-        """map several entry_nrs with as few db queries as possible
-        to their cross-references. The function returns a
-        :class:`numpy.recarray` containing all fields as defined in
-        the table.
-
-        :param entry_nrs: a list with numeric protein entry ids"""
-        mapped_junks = []
-        chunk_size = 32
-        source_condition = None
-        verif_condition = None
-        if len(self.idtype) < len(self.xrefEnum):
-            chunk_size -= len(self.idtype)  # respect max number of condition variables.
-            source_condition = self._combine_query_values("XRefSource", self.idtype)
-        if self._max_verif_for_mapping_entrynrs < max(x[1] for x in self.verif_enum):
-            chunk_size -= 1
-            verif_condition = "(Verification <= {:d})".format(
-                self._max_verif_for_mapping_entrynrs
-            )
-        for start in range(0, len(entry_nrs), chunk_size):
-            condition_list = [
-                self._combine_query_values(
-                    "EntryNr", entry_nrs[start : start + chunk_size]
-                )
-            ]
-            if source_condition:
-                condition_list.append(source_condition)
-            if verif_condition:
-                condition_list.append(verif_condition)
-            condition = " & ".join(condition_list)
-            mapped_junks.append(self.xref_tab.read_where(condition))
-        return numpy.lib.recfunctions.stack_arrays(mapped_junks, usemask=False)
-
-    def map_entry_nr_range(self, start, stop):
-        """maps for a whole range the entry numbers to the xrefs
-
-        param start: the first entry nr to be mapped
-        type start: int, numpy.int
-        param stop: the first entry nr that is not included in the result (exlusive)
-        type stop: int, numpy.int
-
-        returns: all the mapped xrefs that are respecting
-                 the filtering conditions of the actual subtype of
-                 XRefIdMapper.
-        rtype: :class:`numpy.lib.recarray`"""
-        conditions = ["(EntryNr >= {:d}) & (EntryNr < {:d})".format(start, stop)]
-        if len(self.idtype) < len(self.xrefEnum):
-            source_condition = self._combine_query_values("XRefSource", self.idtype)
-            conditions.append(source_condition)
-        if self._max_verif_for_mapping_entrynrs < max(x[1] for x in self.verif_enum):
-            verif_condition = "(Verification <= {:d})".format(
-                self._max_verif_for_mapping_entrynrs
-            )
-            conditions.append(verif_condition)
-        query = " & ".join(conditions)
-        it = self.xref_tab.where(query)
-        try:
-            first = next(it)
-        except StopIteration:
-            return numpy.array([], dtype=self.xref_tab.dtype)
-        res = numpy.fromiter(
-            map(lambda row: row.fetch_all_fields(), itertools.chain([first], it)),
-            dtype=self.xref_tab.dtype,
-        )
-        return res
-
-    @timethis(logging.DEBUG)
-    def search_xref(self, xref, is_prefix=False, match_any_substring=False):
-        """identify proteins associcated with `xref`.
-
-        The crossreferences are limited to the types in the class
-        member `idtype`. In the base class, all types are valid
-        xrefs. The method returns a :class:`numpy.recarry` defined
-        for the XRef table with all entries pointing to `xref`.
-
-        The method by default returns only exact matches. By setting
-        `is_prefix` to True, one can indicated that the requested xref
-        should be interpreted as a prefix and all entries matching this
-        prefix should be returned.
-
-        :param str xref: an xref to be located
-        :param bool is_prefix: treat xref as a prefix and return
-                     potentially several matching xrefs"""
-        if match_any_substring:
-            query = xref.encode("utf-8").lower()
-            res = self.xref_tab[self.xref_index.find(query)]
-        else:
-            if is_prefix:
-                up = xref[:-1] + chr(ord(xref[-1]) + 1)
-                cond = "(XRefId >= {!r}) & (XRefId < {!r})".format(
-                    xref.encode("utf-8"), up.encode("utf-8")
-                )
-            else:
-                cond = "XRefId=={!r}".format(xref.encode("utf-8"))
-            res = self.xref_tab.read_where(cond)
-        if len(res) > 0 and len(self.idtype) < len(self.xrefEnum):
-            res = res[numpy.in1d(res["XRefSource"], list(self.idtype))]
-
-        return res
-
-    def search_id(self, query, limit=None):
-        source_filter = None
-        try:
-            prefix, term = query.split(":", maxsplit=1)
-            if prefix in self.xrefEnum:
-                source_filter = self.xrefEnum[prefix]
-            else:
-                term = query
-        except ValueError:
-            term = query
-
-        result = collections.defaultdict(dict)
-        high_limit = None if limit is None else 4 * limit
-        xref_rows = self.xref_index.find(term, limit=high_limit)
-        xref_rows.sort()
-        for xref_row in xref_rows:
-            xref = self.xref_tab[xref_row]
-            if not source_filter or xref["XRefSource"] == source_filter:
-                source = self.xrefEnum(xref["XRefSource"])
-                try:
-                    result[xref["EntryNr"]][source].append(xref["XRefId"].decode())
-                except KeyError:
-                    result[xref["EntryNr"]][source] = [xref["XRefId"].decode()]
-            if limit is not None and len(result) >= limit:
-                break
-        return result
-
-    def source_as_string(self, source):
-        """string representation of xref source enum value
-
-        this auxiliary method converts the numeric value of
-        a xref source into a string representation.
-
-        :param int source: numeric value of xref source"""
-        try:
-            return self.xrefEnum._values[source]
-        except KeyError:
-            raise ValueError("'{}' is not a valid xref source value".format(source))
-
-    def verification_as_string(self, verif):
-        """string representation of xref verifiction enum value"""
-        return self.verif_enum(verif)
-
-    def xreftab_to_dict(self, tab):
-        """convert a xreftable to a dictionary per entry_nr.
-
-        All rows in `tab` are converted into a nested dictionary
-        where the outer key is a protein entry number and the
-        inner key the xref source type.
-
-        :param tab: a :class:`numpy.recarray` corresponding to XRef
-            table definition to be converted"""
-        xrefdict = collections.defaultdict(dict)
-        for row in tab:
-            try:
-                typ = self.xrefEnum(row["XRefSource"])
-            except IndexError:
-                logger.warning("invalid XRefSource value in {}".format(row))
-                continue
-            if typ not in xrefdict[row["EntryNr"]]:
-                xrefdict[row["EntryNr"]][typ] = {
-                    "id": row["XRefId"],
-                    "seq_match": self.verif_enum(row["Verification"]),
-                }
-        return xrefdict
-
-
 class BestIdPerEntryOnlyMixin:
     def filter_best_id(self, arr):
         df = pd.DataFrame(arr)
@@ -3321,102 +3122,6 @@ class BestIdPerEntryOnlyMixin:
         return df.drop(columns="ord").to_records(
             index=False, column_dtypes=dict(arr.dtype.descr)
         )
-
-
-class XRefNoApproximateIdMapper(XrefIdMapper):
-    def __init__(self, db):
-        super(XRefNoApproximateIdMapper, self).__init__(db)
-        self._max_verif_for_mapping_entrynrs = self.verif_enum["unchecked"]
-
-
-class UniProtIdMapper(XrefIdMapper):
-    def __init__(self, db):
-        super(UniProtIdMapper, self).__init__(db)
-        self.idtype = frozenset(
-            [self.xrefEnum[z] for z in ["UniProtKB/SwissProt", "UniProtKB/TrEMBL"]]
-        )
-
-
-class LinkoutIdMapper(XrefIdMapper):
-    def __init__(self, db):
-        super(LinkoutIdMapper, self).__init__(db)
-        self.idtype = frozenset(
-            [
-                self.xrefEnum[z]
-                for z in [
-                    "UniProtKB/SwissProt",
-                    "UniProtKB/TrEMBL",
-                    "Ensembl Protein",
-                    "Ensembl Gene",
-                    "EntrezGene",
-                ]
-            ]
-        )
-
-    def url(self, typ, id_):
-        # TODO: improve url generator in external module with all xrefs
-        url = None
-        try:
-            id_ = id_.decode()
-        except AttributeError:
-            pass
-
-        if typ.startswith("UniProtKB"):
-            url = "http://uniprot.org/uniprot/{}".format(id_)
-        elif typ == "EntrezGene":
-            url = "http://www.ncbi.nlm.nih.gov/gene/{}".format(id_)
-        elif typ.startswith("Ensembl"):
-            url = "http://ensembl.org/id/{}".format(id_)
-        return url
-
-    def xreftab_to_dict(self, tab):
-        xref = super(LinkoutIdMapper, self).xreftab_to_dict(tab)
-        for d in list(xref.values()):
-            for typ, elem in list(d.items()):
-                elem["url"] = self.url(typ, elem["id"])
-        return xref
-
-    def iter_xrefs_for_entry_nr(self, entry_nr):
-        """same as base clase but includes also the url as a field"""
-        for xref in super(LinkoutIdMapper, self).iter_xrefs_for_entry_nr(entry_nr):
-            xref["url"] = self.url(xref["source"], xref["xref"])
-            yield xref
-
-
-class GeneNameOrSymbolIdMapper(XRefNoApproximateIdMapper):
-    def __init__(self, db):
-        super(GeneNameOrSymbolIdMapper, self).__init__(db)
-        self.order = [
-            "Gene Name",
-            "UniProtKB/SwissProt",
-            "UniProtKB/TrEMBL",
-            "HGNC",
-            "SourceID",
-        ]
-        self.idtype = frozenset(self.xrefEnum[z] for z in self.order)
-
-    def canonical_source_order(self):
-        return self.order
-
-
-class DomainNameIdMapper(object):
-    def __init__(self, db):
-        self.domain_src = db.get_hdf5_handle().root.Annotations.DomainDescription.read()
-        self.domain_src.sort(order="DomainId")
-
-    def _get_dominfo(self, domain_id):
-        idx = self.domain_src["DomainId"].searchsorted(domain_id)
-        if self.domain_src[idx]["DomainId"] != domain_id:
-            raise KeyError("no domain info available for {}".format(domain_id))
-        return self.domain_src[idx]
-
-    def get_info_dict_from_domainid(self, domain_id):
-        info = self._get_dominfo(domain_id)
-        return {
-            "name": info["Description"].decode(),
-            "source": info["Source"].decode(),
-            "domainid": domain_id.decode(),
-        }
 
 
 class DescriptionSearcher(object):

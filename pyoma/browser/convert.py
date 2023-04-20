@@ -1066,6 +1066,19 @@ class DarwinExporter(object):
             db_parser.parse_entrytags(dbs_iter)
             xref_importer.flush_buffers()
 
+        # create /XRef_EntryNr_offset array
+        enr_col = xref_tab.col("EntryNr")
+        if not (enr_col[:-1] <= enr_col[1:]).all():
+            raise DataImportError("EntryNr column is not sorted in /XRef")
+        enrs = numpy.arange(enr_col[-1] + 2)
+        idx = numpy.searchsorted(enr_col, enrs).astype("i4")
+        self.h5.create_carray(
+            "/",
+            "XRef_EntryNr_offset",
+            obj=idx,
+            title="Array containing the row index in the XRef table at entry_nr: XRef[a[enr]] = first row of EntryNr",
+        )
+
     def add_group_metadata(self):
         m = OmaGroupMetadataLoader(self.h5)
         m.add_data()
@@ -2469,46 +2482,6 @@ class XRefImporter(object):
 
     def add_approx_xrefs(self, enr):
         self.xrefs.extend(self.approx_adder.iter_approx_xrefs_for(enr))
-
-    def build_suffix_index(self, force=False):
-        parent, name = os.path.split(self.xref_tab._v_pathname)
-        file_ = self.xref_tab._v_file
-        idx_node = get_or_create_tables_node(
-            file_, os.path.join(parent, "{}_Index".format(name))
-        )
-        for arr_name, typ in (
-            ("buffer", tables.StringAtom(1)),
-            ("offset", tables.UInt32Atom()),
-        ):
-            try:
-                n = idx_node._f_get_child(arr_name)
-                if not force:
-                    raise tables.NodeError(
-                        "Suffix index for xrefs does already exist. Use 'force' to overwrite"
-                    )
-                n.remove()
-            except tables.NoSuchNodeError:
-                pass
-            file_.create_earray(idx_node, arr_name, typ, (0,), expectedrows=100e6)
-        buf, off = (idx_node._f_get_child(node) for node in ("buffer", "offset"))
-        self._build_lowercase_xref_buffer(buf, off)
-        sa = sais(buf)
-        try:
-            idx_node._f_get_child("suffix").remove()
-        except tables.NoSuchNodeError:
-            pass
-        file_.create_carray(idx_node, "suffix", obj=sa)
-
-    def _build_lowercase_xref_buffer(self, buf, off):
-        cur_pos = 0
-        for xref_row in tqdm(self.xref_tab):
-            lc_ref = xref_row["XRefId"].lower()
-            ref = numpy.ndarray(
-                (len(lc_ref),), buffer=lc_ref, dtype=tables.StringAtom(1)
-            )
-            buf.append(ref)
-            off.append([cur_pos])
-            cur_pos += len(lc_ref)
 
 
 class UniProtAdditionalXRefImporter(object):

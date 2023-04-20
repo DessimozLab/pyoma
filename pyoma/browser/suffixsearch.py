@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class SuffixIndexBuilderStringCol(object):
-    MEM_PER_CHUNK = 50 * 2 ** 20
+    MEM_PER_CHUNK = 50 * 2**20
 
     def __init__(self, tab, col, index_group, ignore_case):
         if not isinstance(tab, tables.Table):
@@ -223,7 +223,7 @@ class SuffixIndexBuilderVarStringCol(SuffixIndexBuilderStringCol):
             stops = numpy.roll(off_data, -1)
             stops[-1] = len(self.orig_buffer)
             buf_arr = self.get_aux_array_handle("buffer")
-            CHUNKSIZE = 2 ** 22  # 4MB
+            CHUNKSIZE = 2**22  # 4MB
             tmp_buf = numpy.zeros(CHUNKSIZE, dtype="S1")
             tmp_buf_idx = 0
             for i in range(len(off_data)):
@@ -373,7 +373,7 @@ class SuffixSearcher(object):
             offset_arr = offset if offset else index_node._f_get_child("offset")
             return cls(suffix_arr, buffer_arr, offset_arr, ignore_case=True)
         except tables.NoSuchNodeError as e:
-            raise SuffixIndexInconsitency("suffix array data missing: {}".formate(e))
+            raise SuffixIndexInconsitency("suffix array data missing: {}".format(e))
 
     def __init__(self, suffix, buffer, offset, ignore_case):
         self.suffix_arr = suffix
@@ -410,7 +410,7 @@ class SuffixSearcher(object):
     def find(self, query, limit=None):
         index_range = self._get_index_range(query)
         if index_range.stop - index_range.start == 0:
-            return []
+            return numpy.array([], self.offset_arr.dtype)
 
         if limit is not None:
             index_range = slice(

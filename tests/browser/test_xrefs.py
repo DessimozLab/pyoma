@@ -130,13 +130,16 @@ class XRefParsingTest(unittest.TestCase):
         args, kwargs = self.importer.xref_tab.append.call_args_list[0]
         buffer = args[0]
         self.assertIn(
-            (5, enum.SourceAC, b"NV21158-PA", verif.exact), buffer,
+            (5, enum.SourceAC, b"NV21158-PA", verif.exact),
+            buffer,
         )
         self.assertIn(
-            (5, enum.SourceAC, b"NV21158-RA", verif.exact), buffer,
+            (5, enum.SourceAC, b"NV21158-RA", verif.exact),
+            buffer,
         )
         self.assertIn(
-            (5, enum.EnsemblGenomes, b"NV21158-RA", verif.exact), buffer,
+            (5, enum.EnsemblGenomes, b"NV21158-RA", verif.exact),
+            buffer,
         )
 
     def test_disambiguate(self, mock_up):
@@ -226,7 +229,7 @@ class DescriptionManagerTest(unittest.TestCase):
         entry_tab = self.h5.get_node("/Entries")
         numpy.array_equal(exp_lens, entry_tab.col("DescriptionLength"))
         numpy.array_equal(exp_offs, entry_tab.col("DescriptionOffset"))
-        txt = self.h5.get_node("/Descr").read().tostring()
+        txt = self.h5.get_node("/Descr").read().tobytes()
         self.assertEqual("".join(descs).encode("utf-8"), txt)
 
     def test_add_one_desc_per_entry(self):
@@ -244,7 +247,7 @@ class DescriptionManagerTest(unittest.TestCase):
                 for desc in per_entry_set:
                     dm.add_description(i + 1, desc)
         exp_txt = "".join(["; ".join(z) for z in descs])
-        txt_in_db = self.h5.get_node("/Descr").read().tostring()
+        txt_in_db = self.h5.get_node("/Descr").read().tobytes()
         self.assertEqual(exp_txt.encode("utf-8"), txt_in_db)
 
 

@@ -49,10 +49,11 @@ def find_path_to_test_db(dbfn="TestDb.h5"):
 
 class TestWithDbInstance(unittest.TestCase):
     db = None
+    db_file_name = "TestDb.h5"
 
     @classmethod
     def setUpClass(cls):
-        path = find_path_to_test_db("TestDb.h5")
+        path = find_path_to_test_db(cls.db_file_name)
         logger.info("Loading {} for DatabaseTests".format(path))
         cls.db = Database(path)
 
@@ -406,11 +407,15 @@ class XRefDatabaseMock(Database):
         xref["XRefSource"] = numpy.tile([0, 20], 5)
         xref["XRefId"] = ["XA{:03}g1.4".format(i) for i in range(10)]
         xref["Verification"] = tuple(itertools.islice(itertools.cycle([0, 2, 4]), 10))
-        f.create_table("/", "XRef", tablefmt.XRefTable, obj=xref)
+        x = f.create_table("/", "XRef", tablefmt.XRefTable, obj=xref)
+        x.colinstances["EntryNr"].create_csindex()
+        x.colinstances["XRefId"].create_csindex()
         f.create_group("/", "XRef_Index")
         for n in ("suffix", "buffer", "offset"):
             f.create_carray("/XRef_Index", n, obj=numpy.ones((5,), "i4"))
         self.db = f
+        self._on_close_notify = []
+        self._close_fh = True
 
 
 class XRefIdMapperTest(unittest.TestCase):
@@ -420,7 +425,7 @@ class XRefIdMapperTest(unittest.TestCase):
         self.xrefmapper = XrefIdMapper(patch_db)
 
     def tearDown(self):
-        self.xrefmapper._db.db.close()
+        self.xrefmapper._db.close()
 
     def test_multiple_xrefs_per_entry(self):
         xref_e1 = self.xrefmapper.map_entry_nr(1)
@@ -481,7 +486,7 @@ class IdResolverTests(unittest.TestCase):
         patch_db.id_mapper = {"XRef": self.xrefmapper}
 
     def tearDown(self):
-        self.xrefmapper._db.db.close()
+        self.xrefmapper._db.close()
 
     def test_search_of_modified_xref(self):
         xref = "XA002g1.4"

@@ -1,10 +1,7 @@
 import tables
 import numpy as np
 
-try:
-    from functools import lru_cache
-except ImportError:
-    from functools32 import lru_cache
+from functools import lru_cache
 from builtins import filter
 
 

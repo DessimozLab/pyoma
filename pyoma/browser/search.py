@@ -51,6 +51,19 @@ class BaseSearch(metaclass=abc.ABCMeta):
         return 0 if nr_ancestral_genomes is None else len(nr_ancestral_genomes)
 
 
+class BaseWithEntryFilter(BaseSearch):
+    def __init__(self, pyomadb: db.Database, term: Union[int, str]):
+        super().__init__(pyomadb, term)
+        self._max_entries = None
+        self._entry_nr_filter = None
+
+    def set_max_entries(self, max_nr: int):
+        self._max_entries = max_nr
+
+    def set_entry_nr_filter(self, entry_filter: Union[set, tuple]):
+        self._entry_nr_filter = entry_filter
+
+
 class OmaGroupSearch(BaseSearch):
     PRIO = 50
 
@@ -91,7 +104,7 @@ class HogIDSearch(BaseSearch):
         self._matched_hogs = None
         if level is not None:
             try:
-                self.set_taxon_level(models.AncestralGenome(self.db, level))
+                self.set_taxon_filter(models.AncestralGenome(self.db, level))
             except UnknownSpecies:
                 pass
 
@@ -177,13 +190,19 @@ class HogIDSearch(BaseSearch):
         return self.get_matched_hogs()
 
 
-class GOSearch(BaseSearch):
+class GOSearch(BaseWithEntryFilter):
     PRIO = 30
 
     @models.LazyProperty
     def _matched_entries(self):
         try:
-            res = list(self.db.entrynrs_with_go_annotation(self.term))
+            res = list(
+                self.db.entrynrs_with_go_annotation(
+                    self.term,
+                    limit=self._max_entries,
+                    entrynr_filter=self._entry_nr_filter,
+                )
+            )
         except InvalidId:
             res = []
         return res
@@ -192,23 +211,33 @@ class GOSearch(BaseSearch):
         return [models.ProteinEntry(self.db, en) for en in self._matched_entries]
 
 
-class ECSearch(BaseSearch):
+class ECSearch(BaseWithEntryFilter):
     PRIO = 25
 
     @models.LazyProperty
     def _matched_entries(self):
-        return list(int(z) for z in self.db.entrynrs_with_ec_annotation(self.term))
+        return list(
+            int(z)
+            for z in self.db.entrynrs_with_ec_annotation(
+                self.term, limit=self._max_entries, entrynr_filter=self._entry_nr_filter
+            )
+        )
 
     def search_entries(self):
         return [models.ProteinEntry(self.db, en) for en in self._matched_entries]
 
 
-class DomainSearch(BaseSearch):
+class DomainSearch(BaseWithEntryFilter):
     PRIO = 40
 
     @models.LazyProperty
     def _matched_entries(self):
-        return list(int(z) for z in self.db.entrynrs_with_domain_id(self.term))
+        return list(
+            int(z)
+            for z in self.db.entrynrs_with_domain_id(
+                self.term, limit=self._max_entries, entrynr_filter=self._entry_nr_filter
+            )
+        )
 
     def search_entries(self):
         return [models.ProteinEntry(self.db, en) for en in self._matched_entries]

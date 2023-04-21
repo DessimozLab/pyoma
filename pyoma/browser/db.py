@@ -14,6 +14,7 @@ import warnings
 from bisect import bisect_left
 from builtins import chr, range, object, zip, bytes, str
 from xml.etree import ElementTree as et
+from typing import Union, Tuple, Optional, AnyStr, Set, Generator
 
 import dateutil
 import fuzzyset
@@ -1791,26 +1792,84 @@ class Database(object):
         except KeyError:
             return None
 
-    def entrynrs_with_ec_annotation(self, ec):
+    def entrynrs_with_ec_annotation(
+        self,
+        ec: AnyStr,
+        limit: Optional[int] = None,
+        entrynr_filter: Union[Tuple[int, int], Set[int], None] = None,
+    ) -> Set[int]:
+        """Search for protein entries with a certain EC annotation.
+
+        The option arguments limit and entrynr_filter can be used to
+        limit the amount of entries that are returned and to speed
+        up the search time.
+
+        :param ec: EC identifier to be searched
+        :type ec: (str, bytes)
+        :param limit: maximum number of entries to be returned.
+        :type limit: int
+        :param entrynr_filter: range (low, high) or set of entry numbers that should be considered
+        :type entrynr_filter: Union[Tuple[int, int], Set[int], None]
+        :return: Entry numbers of proteins that contain the domain id.
+        :rtype: set[int]
+        """
         if isinstance(ec, str):
             ec = ec.encode("utf-8")
+        query = "(ECacc == {!r})".format(ec)
         ectab = self.get_hdf5_handle().get_node("/Annotations/EC")
-        entrynrs = {row["EntryNr"] for row in ectab.where("(ECacc == {!r})".format(ec))}
-        return entrynrs
+        return self._fetch_entry_nrs(
+            self._iter_rows_with_entrynr_filter(ectab, query, entrynr_filter), limit
+        )
 
-    def entrynrs_with_domain_id(self, domain_id):
+    def entrynrs_with_domain_id(
+        self,
+        domain_id: AnyStr,
+        limit: Optional[int] = None,
+        entrynr_filter: Union[Tuple[int, int], Set[int], None] = None,
+    ) -> Set[int]:
+        """Search for protein entries with a certain domain_id.
+
+        The option arguments limit and entrynr_filter can be used to
+        limit the amount of entries that are returned and to speed
+        up the search time.
+
+        :param domain_id: domain identifier to be searched
+        :type domain_id: (str, bytes)
+        :param limit: maximum number of entries to be returned.
+        :type limit: int
+        :param entrynr_filter: range (low, high) or set of entry numbers that should be considered
+        :type entrynr_filter:  Union[Tuple[int, int], Set[int], None]
+        :return: Entry numbers of proteins that contain the domain id.
+        :rtype: set[int]"""
+
         if isinstance(domain_id, str):
             domain_id = domain_id.encode("utf-8")
+        query = "(DomainId == {!r})".format(domain_id)
         domtab = self.get_hdf5_handle().get_node("/Annotations/Domains")
-        entrynrs = {
-            row["EntryNr"] for row in domtab.where("DomainId =={!r}".format(domain_id))
-        }
-        return entrynrs
+        return self._fetch_entry_nrs(
+            self._iter_rows_with_entrynr_filter(domtab, query, entrynr_filter), limit
+        )
 
-    def entrynrs_with_go_annotation(self, term, evidence=None):
+    def entrynrs_with_go_annotation(
+        self,
+        term: Union[AnyStr, int],
+        evidence: Optional[AnyStr] = None,
+        limit: Optional[int] = None,
+        entrynr_filter: Union[Tuple[int, int], Set[int], None] = None,
+    ) -> Set[int]:
         """Retrieve protein entry numbers that have a certain GO annotation term
 
-        :param term: numeric term or GO-identifier"""
+        :param term: numeric term or GO-identifier
+        :type term: (int, str, bytes)
+        :param evidence: evidence code which is required
+        :type evidence: (str, bytes)
+        :param limit: maximum number of entries to be returned.
+        :type limit: int
+        :param entrynr_filter: range (low, high) or set of entry numbers that should be considered
+        :type entrynr_filter: Union[Tuple[int, int], Set[int], None]
+        :return: Entry numbers of proteins that contain the domain id.
+        :rtype: set[int]
+        """
         if (isinstance(term, str) and term.startswith("GO:")) or (
             isinstance(term, bytes) and term.startswith(b"GO:")
         ):
@@ -1824,9 +1883,36 @@ class Database(object):
         gotab = self.get_hdf5_handle().get_node("/Annotations/GeneOntology")
         query = "(TermNr == {})".format(term)
         if evidence is not None:
-            query += "& (Evidence == {!r})".format(evidence.encode("utf-8"))
-        entrynrs = {row["EntryNr"] for row in gotab.where(query)}
+            query += " & (Evidence == {!r})".format(evidence.encode("utf-8"))
+
+        return self._fetch_entry_nrs(
+            self._iter_rows_with_entrynr_filter(gotab, query, entrynr_filter), limit
+        )
+
+    def _fetch_entry_nrs(self, row_iter, limit: Optional[int] = None) -> Set[int]:
+        entrynrs = set([])
+        for row in row_iter:
+            entrynrs.add(int(row["EntryNr"]))
+            if limit is not None and len(entrynrs) >= limit:
+                break
         return entrynrs
+
+    def _iter_rows_with_entrynr_filter(
+        self,
+        tab: tables.Table,
+        query_stub: str,
+        entrynr_filter: Union[Tuple[int, int], Set[int], None] = None,
+    ) -> Generator:
+        query = query_stub
+        cond = lambda row: True
+        if entrynr_filter is not None:
+            rng = min(entrynr_filter), max(entrynr_filter)
+            query += " & (EntryNr >= {}) & (EntryNr <= {})".format(*rng)
+            if isinstance(entrynr_filter, set):
+                cond = lambda row: row["EntryNr"] in entrynr_filter
+        for row in tab.where(query):
+            if cond(row):
+                yield row
 
     def get_gene_ontology_annotations(
         self, entry_nr, stop=None, as_dataframe=False, as_gaf=False

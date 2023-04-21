@@ -46,6 +46,23 @@ class GOSearchTest(TestWithDbInstance):
         s = GOSearch(self.db, query)
         res = [e.omaid for e in s.search_entries()]
         self.assertIn("YEAST00011", res)
+        self.assertEqual(5, len(res))
+
+    def test_go_term_limit(self):
+        query = "GO:0000501"
+        s = GOSearch(self.db, query)
+        s.set_max_entries(2)
+        res = [e.omaid for e in s.search_entries()]
+        self.assertIn("YEAST00011", res)
+        self.assertEqual(2, len(res))
+
+    def test_go_term_entrynr_filter(self):
+        query = "GO:0000501"
+        s = GOSearch(self.db, query)
+        s.set_entry_nr_filter({1, 2, 11, 102, 103, 3076})
+        res = [e.omaid for e in s.search_entries()]
+        self.assertIn("YEAST00103", res)
+        self.assertEqual(3, len(res))
 
     def test_invalid_term_does_list_nothing(self):
         s = GOSearch(self.db, "GO:000000")

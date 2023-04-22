@@ -13,6 +13,7 @@ from pyoma.browser.search import (
     TaxSearch,
     SequenceSearch,
     ECSearch,
+    DomainSearch,
     XRefSearch,
     SearchResult,
     search,
@@ -46,6 +47,23 @@ class GOSearchTest(TestWithDbInstance):
         s = GOSearch(self.db, query)
         res = [e.omaid for e in s.search_entries()]
         self.assertIn("YEAST00011", res)
+        self.assertEqual(5, len(res))
+
+    def test_go_term_limit(self):
+        query = "GO:0000501"
+        s = GOSearch(self.db, query)
+        s.set_max_entries(2)
+        res = [e.omaid for e in s.search_entries()]
+        self.assertIn("YEAST00011", res)
+        self.assertEqual(2, len(res))
+
+    def test_go_term_entrynr_filter(self):
+        query = "GO:0000501"
+        s = GOSearch(self.db, query)
+        s.set_entry_nr_filter({1, 2, 11, 102, 103, 3076})
+        res = [e.omaid for e in s.search_entries()]
+        self.assertIn("YEAST00103", res)
+        self.assertEqual(3, len(res))
 
     def test_invalid_term_does_list_nothing(self):
         s = GOSearch(self.db, "GO:000000")
@@ -59,6 +77,21 @@ class ECSearchTest(TestWithDbInstance):
             mocked.return_value = [12, 4364]  # testdb has no ec annotations
             s = ECSearch(self.db, query)
             self.assertEqual([12, 4364], [p.entry_nr for p in s.search_entries()])
+
+
+class DomainSearchTest(TestWithDbInstance):
+    def test_domain_search_called_with_good_query(self):
+        query = b"2.30.29.30"
+        with patch.object(
+            self.db.db.get_node("/Annotations/Domains"), "where"
+        ) as mocked:
+            mocked.return_value = [{"EntryNr": 19}]
+            s = DomainSearch(self.db, query)
+            s.set_entry_nr_filter({5, 511, 19})
+            s.search_entries()
+            mocked.assert_called_with(
+                "(DomainId == {!r}) & (EntryNr >= 5) & (EntryNr <= 511)".format(query)
+            )
 
 
 class TaxSearchTest(TestWithDbInstance):

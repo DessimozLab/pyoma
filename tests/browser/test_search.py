@@ -13,6 +13,7 @@ from pyoma.browser.search import (
     TaxSearch,
     SequenceSearch,
     ECSearch,
+    DomainSearch,
     XRefSearch,
     SearchResult,
     search,
@@ -76,6 +77,21 @@ class ECSearchTest(TestWithDbInstance):
             mocked.return_value = [12, 4364]  # testdb has no ec annotations
             s = ECSearch(self.db, query)
             self.assertEqual([12, 4364], [p.entry_nr for p in s.search_entries()])
+
+
+class DomainSearchTest(TestWithDbInstance):
+    def test_domain_search_called_with_good_query(self):
+        query = b"2.30.29.30"
+        with patch.object(
+            self.db.db.get_node("/Annotations/Domains"), "where"
+        ) as mocked:
+            mocked.return_value = [{"EntryNr": 19}]
+            s = DomainSearch(self.db, query)
+            s.set_entry_nr_filter({5, 511, 19})
+            s.search_entries()
+            mocked.assert_called_with(
+                "(DomainId == {!r}) & (EntryNr >= 5) & (EntryNr <= 511)".format(query)
+            )
 
 
 class TaxSearchTest(TestWithDbInstance):

@@ -150,6 +150,14 @@ _tables_file._open_files = ThreadsafeFileRegistry()
 ####
 
 
+def count_rows_of_index_column_with_value(
+    tab: Union[str, tables.Table], col: str, start, end=None
+):
+    idx = tab.colindexes[col]
+    stop = end if end is not None else start
+    return idx.search((start, stop))
+
+
 class Database(object):
     """This is the main interface to the oma database. Queries
     will typically be issued by methods of this object. Typically
@@ -773,7 +781,8 @@ class Database(object):
         :param return_omagroup: whether or not to return the oma group nr in case both proteins
                                 belong to the same oma group. If not, NaNs will be returned.
         :type return_omagroup: bool
-        :returns: array with hog induced pairwise orthologs between genome1 and genome2"""
+        :returns: array with hog induced pairwise orthologs between genome1 and genome2
+        """
 
         def load_prot_dataframe(g):
             genome = g if isinstance(g, Genome) else Genome(self, g)
@@ -1821,6 +1830,20 @@ class Database(object):
             self._iter_rows_with_entrynr_filter(ectab, query, entrynr_filter), limit
         )
 
+    def count_ec_annotations(self, ec: AnyStr) -> int:
+        """
+        Count the number of EC annoations of a certain term in the database.
+
+        :param ec: EC identifier, e.g. "GO:0003676", 50, b"GO:0003674"
+        :type ec: (str, bytes)
+        :return number of annotations
+        :rtype int
+        """
+        if isinstance(ec, str):
+            ec = ec.encode("utf-8")
+        ecTab = self.get_hdf5_handle().get_node("/Annotations/EC")
+        return count_rows_of_index_column_with_value(ecTab, "ECacc", ec)
+
     def entrynrs_with_domain_id(
         self,
         domain_id: AnyStr,
@@ -1849,6 +1872,20 @@ class Database(object):
         return self._fetch_entry_nrs(
             self._iter_rows_with_entrynr_filter(domtab, query, entrynr_filter), limit
         )
+
+    def count_domain_id_annotations(self, domain_id: AnyStr) -> int:
+        """
+        Count the number of Domain annoations of a certain id in the database.
+
+        :param domain_id: Domain identifier, e.g. "2.60.10.60"
+        :type domain_id: (str, bytes)
+        :return number of annotations
+        :rtype int
+        """
+        if isinstance(domain_id, str):
+            domain_id = domain_id.encode("utf-8")
+        ecTab = self.get_hdf5_handle().get_node("/Annotations/Domains")
+        return count_rows_of_index_column_with_value(ecTab, "DomainId", domain_id)
 
     def entrynrs_with_go_annotation(
         self,
@@ -1888,6 +1925,29 @@ class Database(object):
         return self._fetch_entry_nrs(
             self._iter_rows_with_entrynr_filter(gotab, query, entrynr_filter), limit
         )
+
+    def count_go_annotations(self, term: Union[AnyStr, int]) -> int:
+        """
+        Count the number of GeneOntology annoations of a certain term in the database.
+        Annotations are counted multiple time if several evidences or references are
+        recorded.
+
+        :param term: numeric term or GO-identifier, e.g. "GO:0003676", 50, b"GO:0003674"
+        :type term: (int, str, bytes)
+        :return number of annotations
+        :rtype int
+        """
+        if (isinstance(term, str) and term.startswith("GO:")) or (
+            isinstance(term, bytes) and term.startswith(b"GO:")
+        ):
+            term = term[3:]
+
+        try:
+            term = int(term)
+        except ValueError:
+            raise InvalidId("Invalid GO ID: {}".format(term))
+        gotab = self.get_hdf5_handle().get_node("/Annotations/GeneOntology")
+        return count_rows_of_index_column_with_value(gotab, "TermNr", term)
 
     def _fetch_entry_nrs(self, row_iter, limit: Optional[int] = None) -> Set[int]:
         entrynrs = set([])

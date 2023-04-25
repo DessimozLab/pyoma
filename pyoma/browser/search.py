@@ -196,6 +196,8 @@ class GOSearch(BaseWithEntryFilter):
     @models.LazyProperty
     def _matched_entries(self):
         try:
+            if self._max_entries is None and self.estimated_occurrences > 1000:
+                self.set_max_entries(1000)
             res = list(
                 self.db.entrynrs_with_go_annotation(
                     self.term,
@@ -210,12 +212,21 @@ class GOSearch(BaseWithEntryFilter):
     def search_entries(self):
         return [models.ProteinEntry(self.db, en) for en in self._matched_entries]
 
+    @models.LazyProperty
+    def estimated_occurrences(self):
+        return self.db.count_go_annotations(self.term)
+
+    def count_entries(self):
+        return self.estimated_occurrences
+
 
 class ECSearch(BaseWithEntryFilter):
     PRIO = 25
 
     @models.LazyProperty
     def _matched_entries(self):
+        if self._max_entries is None and self.estimated_occurrences > 1000:
+            self.set_max_entries(1000)
         return list(
             int(z)
             for z in self.db.entrynrs_with_ec_annotation(
@@ -226,12 +237,21 @@ class ECSearch(BaseWithEntryFilter):
     def search_entries(self):
         return [models.ProteinEntry(self.db, en) for en in self._matched_entries]
 
+    @models.LazyProperty
+    def estimated_occurrences(self):
+        return self.db.count_ec_annotations(self.term)
+
+    def count_entries(self):
+        return self.estimated_occurrences
+
 
 class DomainSearch(BaseWithEntryFilter):
     PRIO = 40
 
     @models.LazyProperty
     def _matched_entries(self):
+        if self._max_entries is None and self.estimated_occurrences > 1000:
+            self.set_max_entries(1000)
         return list(
             int(z)
             for z in self.db.entrynrs_with_domain_id(
@@ -241,6 +261,13 @@ class DomainSearch(BaseWithEntryFilter):
 
     def search_entries(self):
         return [models.ProteinEntry(self.db, en) for en in self._matched_entries]
+
+    @models.LazyProperty
+    def estimated_occurrences(self):
+        return self.db.count_domain_id_annotations(self.term)
+
+    def count_entries(self):
+        return self.estimated_occurrences
 
 
 class TaxSearch(BaseSearch):

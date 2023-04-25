@@ -48,6 +48,7 @@ class GOSearchTest(TestWithDbInstance):
         res = [e.omaid for e in s.search_entries()]
         self.assertIn("YEAST00011", res)
         self.assertEqual(5, len(res))
+        self.assertGreaterEqual(s.count_entries(), len(res))
 
     def test_go_term_limit(self):
         query = "GO:0000501"
@@ -56,6 +57,7 @@ class GOSearchTest(TestWithDbInstance):
         res = [e.omaid for e in s.search_entries()]
         self.assertIn("YEAST00011", res)
         self.assertEqual(2, len(res))
+        self.assertGreater(s.count_entries(), len(res))
 
     def test_go_term_entrynr_filter(self):
         query = "GO:0000501"
@@ -64,6 +66,7 @@ class GOSearchTest(TestWithDbInstance):
         res = [e.omaid for e in s.search_entries()]
         self.assertIn("YEAST00103", res)
         self.assertEqual(3, len(res))
+        self.assertGreater(s.count_entries(), len(res))
 
     def test_invalid_term_does_list_nothing(self):
         s = GOSearch(self.db, "GO:000000")
@@ -77,6 +80,7 @@ class ECSearchTest(TestWithDbInstance):
             mocked.return_value = [12, 4364]  # testdb has no ec annotations
             s = ECSearch(self.db, query)
             self.assertEqual([12, 4364], [p.entry_nr for p in s.search_entries()])
+            self.assertEqual(0, s.count_entries())  # check that count is indeed 0
 
 
 class DomainSearchTest(TestWithDbInstance):

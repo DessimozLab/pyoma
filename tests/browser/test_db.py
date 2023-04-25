@@ -121,6 +121,20 @@ class DatabaseTests(TestWithDbInstance):
         expected_entry_nrs = numpy.arange(1, query + window + 1, dtype="i4")
         self.assertTrue(numpy.array_equal(expected_entry_nrs, neighbors["EntryNr"]))
 
+    def test_count_rows_of_index_column_with_value(self):
+        entrynr = 12
+        vps = self.db.get_vpairs(entrynr)
+        vp_tab = self.db._get_vptab(entrynr)
+        self.assertEqual(
+            len(vps), count_rows_of_index_column_with_value(vp_tab, "EntryNr1", entrynr)
+        )
+
+        # check that it raises KeyError if operated on a column that is not indexed
+        with self.assertRaises(
+            KeyError, msg="Operating on non-indexed column should raise KeyError"
+        ):
+            count_rows_of_index_column_with_value(vp_tab, "EntryNr2", entrynr)
+
     def test_hog_family(self):
         entry = numpy.zeros(1, dtype=tables.dtype_from_descr(tablefmt.ProteinTable))
         entry["OmaHOG"] = b""
@@ -711,7 +725,6 @@ class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
 
 
 def _get_taxtab():
-
     # a random sample of 30 species from a production OMA release
     taxtab = numpy.array(
         [

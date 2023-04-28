@@ -31,7 +31,7 @@ from datasketch import MinHash
 from tqdm import tqdm
 
 from .KmerEncoder import KmerEncoder
-from .decorators import timethis
+from .decorators import timethis, outdated_database_warning
 from .exceptions import (
     InvalidTaxonId,
     DBVersionError,
@@ -158,6 +158,32 @@ def count_rows_of_index_column_with_value(
     return idx.search((start, stop))
 
 
+def _get_limited_synteny_graph(
+    edges_data: Generator[Tuple[int, int, dict], None, None],
+    ref_hog_idx: int,
+    hog_tab: tables.Table,
+    steps: int = 2,
+):
+    G = nx.Graph()
+    G.add_edges_from(edges_data)
+    try:
+        neighbors = [ref_hog_idx] + [
+            v for u, v in nx.bfs_edges(G, source=ref_hog_idx, depth_limit=steps)
+        ]
+    except nx.exception.NetworkXError as e:
+        logger.error(
+            "Trying to access a non-stored HOG in the ancestral synteny graph: "
+            "hog_row: {}, Size of Graph: N={}, E={}".format(
+                ref_hog_idx, len(G), len(G.edges)
+            )
+        )
+        raise DBConsistencyError(
+            "Cannot find HogIdx {}  in Ancestral synteny graph".format(ref_hog_idx)
+        )
+    S = G.subgraph(neighbors)
+    return nx.relabel_nodes(S, lambda x: hog_tab[x]["ID"].decode())
+
+
 class Database(object):
     """This is the main interface to the oma database. Queries
     will typically be issued by methods of this object. Typically
@@ -222,7 +248,7 @@ class Database(object):
             logger.exception(
                 "Cannot load SequenceSearch. Any future call to seq_search will fail!"
             )
-            self.seq_search = object()
+            self.seq_search = None
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
         genomes = [Genome(self, g) for g in self.db.root.Genome.read()]
@@ -1245,7 +1271,7 @@ class Database(object):
             elif hog["ID"].startswith(hog_id):
                 yield hog.fetch_all_fields()
 
-    def get_hog(self, hog_id, level=None, field=None):
+    def get_hog(self, hog_id, level=None, field=None, tab=None):
         """Retrieve the one relevant HOG for a certain hog-id.
 
         If a level is provided, returns the (sub)hog at this level, otherwise
@@ -1257,7 +1283,8 @@ class Database(object):
 
         :see_also: :meth:`iter_hogs_at_level`, :meth:`get_subhogs_at_level`
 
-        :param (bytes,str) hog_id: the query hog id
+        :param hog_id: the query hog id
+        :type hog_id: (bytes, str)
         :param str level: the taxonomic level of interest, defaults to None
         :param field: the attribute of the HogLevel table to be returned. Defaults
                       to all attributes of the table.
@@ -1266,16 +1293,15 @@ class Database(object):
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
         query_fam = self.parse_hog_id(hog_id)
-        if level is None:
-            query = "(Fam == {}) & (ID == {!r}) & (IsRoot == True)".format(
-                query_fam, hog_id
-            )
-        else:
-            query = "(Fam == {:d}) & (ID == {!r}) & (Level == {!r})".format(
-                query_fam, hog_id, level.encode("ascii")
-            )
+        query = "(Fam == {}) & (ID == {!r})".format(query_fam, hog_id)
+        if tab is None:
+            tab = self.db.get_node("/HogLevel")
+            if level is None:
+                query += " & (IsRoot == True)"
+            else:
+                query += " & (Level == {!r})".format(level.encode("ascii"))
         try:
-            row = next(self.db.root.HogLevel.where(query))
+            row = next(tab.where(query))
             if field is not None:
                 if field == "_NROW":
                     return row.nrow
@@ -1420,7 +1446,7 @@ class Database(object):
             (hog_str[0:-1] + chr(1 + ord(hog_str[-1]))).encode("ascii"),
         )
 
-    def get_syntentic_hogs(self, hog_id, level, steps=2):
+    def get_syntentic_hogs(self, level, hog_id=None, evidence=None, steps=2):
         """Returns a graph of the ancestral synteny
 
         This method returns a networkx.Graph object with HOGs as nodes
@@ -1431,6 +1457,38 @@ class Database(object):
         :param int step: number of breadth-first steps to take to get the local
                          neighborhood of the query HOG.
         """
+        if self.db_schema_version < (3, 5):
+            logger.warning(
+                "ancestral synteny: ignoring evidence and enforcing step-2 as outdated database"
+            )
+            return self._get_syntenic_hogs_obsolete_data(hog_id, level, steps=2)
+        ancestral_node = self._ancestral_node(level)
+        if evidence is None:
+            evidence = "parsimonious"
+        evidence = ancestral_node.Synteny.get_enum("Evidence")[evidence]
+        edge_data = ancestral_node.Synteny.read_where("Evidence <= {}".format(evidence))
+        if hog_id is not None:
+            hog_row = self.get_hog(hog_id, tab=ancestral_node.Hogs, field="_NROW")
+            edges = (
+                (e[0], e[1], {"weight": e[2], "evidence": e[3]}) for e in edge_data
+            )
+            return _get_limited_synteny_graph(
+                edges, hog_row, ancestral_node.Hogs, steps
+            )
+        else:
+            all_hogs = ancestral_node.Hogs.read(field="ID")
+            g = nx.Graph()
+            g.add_nodes_from((h.decode() for h in all_hogs))
+            g.add_edges_from(
+                (
+                    (all_hogs[e[0]], all_hogs[e[1]], {"weight": e[2], "evidence": e[3]})
+                    for e in edge_data
+                )
+            )
+            return g
+
+    @outdated_database_warning()
+    def _get_syntenic_hogs_obsolete_data(self, hog_id, level, steps=2):
         hl_tab = self.db.get_node("/HogLevel")
         hog_row = self.get_hog(hog_id, level, "_NROW")
         taxid_of_level = self.taxid_from_level(level)
@@ -1445,27 +1503,8 @@ class Database(object):
                 )
             )
             edge_data = []
-        G = nx.Graph()
-        G.add_weighted_edges_from(edge_data)
-        try:
-            neighbors = [hog_row] + [
-                v for u, v in nx.bfs_edges(G, source=hog_row, depth_limit=steps)
-            ]
-        except nx.exception.NetworkXError as e:
-            logger.error(
-                "Trying to access a non-stored HOG in the ancestral synteny graph: "
-                "HOG: {}, Level: {}, taxid: {}, hog_row: {}, Size of Graph: N={}, E={}".format(
-                    hog_id, level, taxid_of_level, hog_row, len(G), len(G.edges)
-                )
-            )
-            raise DBConsistencyError(
-                'Cannot find HOG "{}/{}" in Ancestral synteny graph'.format(
-                    hog_id, level
-                )
-            )
-
-        S = G.subgraph(neighbors)
-        return nx.relabel_nodes(S, lambda x: hl_tab[x]["ID"].decode())
+        edges = ((e[0], e[1], {"weight": e[2]}) for e in edge_data)
+        return _get_limited_synteny_graph(edges, hog_row, hl_tab, steps)
 
     def taxid_from_level(self, level):
         try:
@@ -1570,10 +1609,10 @@ class Database(object):
         )
 
     def oma_group_metadata(self, group_nr):
-        """get the meta data associated with a OMA Group
+        """get the metadata associated with an OMA Group
 
-        The meta data contains the fingerprint and the keywords infered for this group.
-        The method retuns this information as a dictionary. The parameter must be
+        The metadata contains the fingerprint and the keywords inferred for this group.
+        The method returns this information as a dictionary. The parameter must be
         the numeric oma group nr.
 
         :param int group_nr: a numeric oma group id."""

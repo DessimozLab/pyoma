@@ -35,6 +35,12 @@ class AncestralSyntenyRels(tables.IsDescription):
     HogRow1 = tables.UInt32Col(pos=0)
     HogRow2 = tables.UInt32Col(pos=1)
     Weight = tables.Float16Col(pos=2)
+    Evidence = tables.EnumCol(
+        tables.Enum({"linearized": 1, "parsimonious": 2, "any": 4}),
+        pos=3,
+        dflt="any",
+        base="uint8",
+    )
 
 
 class ProteinTable(tables.IsDescription):

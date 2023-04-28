@@ -406,6 +406,12 @@ class DatabaseTests(TestWithDbInstance):
             orthologs["DivergenceLevel"],
         )
 
+    def test_ancestral_synteny_graph(self):
+        query_hog = "HOG:0000005"
+        query_level = "Fungi"
+        graph = self.db.get_syntentic_hogs(query_level, query_hog, steps=2)
+        self.assertIn(query_hog, graph)
+
 
 class XRefDatabaseMock(Database):
     def __init__(self, name=None):

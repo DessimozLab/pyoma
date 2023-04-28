@@ -1527,7 +1527,7 @@ class Database(object):
         :param level: the taxonomic level of the ancestral genome
         :returns dict: hog_id -> edge_weight of the neighboring hogs
         """
-        G = self.get_syntentic_hogs(hog_id, level, 1)
+        G = self.get_syntentic_hogs(hog_id=hog_id, level=level, steps=1)
         try:
             neighbors = {nbr: edg["weight"] for nbr, edg in G[hog_id]}
         except KeyError:

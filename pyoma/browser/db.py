@@ -186,7 +186,7 @@ def _get_limited_synteny_graph(
 
 class Database(object):
     """This is the main interface to the oma database. Queries
-    will typically be issued by methods of this object. Typically
+    will typically be issued by methods of this object. Typically,
     the result of queries will be :py:class:`numpy.recarray` objects."""
 
     EXPECTED_DB_SCHEMA = "3.5"
@@ -1460,15 +1460,29 @@ class Database(object):
                 f"Ancestral genome node not found: {taxid_of_level}"
             )
 
-    def get_syntentic_hogs(self, level, hog_id=None, evidence=None, steps=2):
+    def get_syntentic_hogs(self, level, hog_id, steps):
+        import warnings
+
+        warnings.warn(
+            f"{__name__} is deprecated. please use `get_syntenic_hogs` instead",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.get_syntenic_hogs(level, hog_id, steps=steps)
+
+    def get_syntenic_hogs(self, level, hog_id=None, evidence=None, steps=2):
         """Returns a graph of the ancestral synteny
 
         This method returns a networkx.Graph object with HOGs as nodes
         and weighted edges representing ancestral synteny.
 
+        The evidence is a filter which can be one of `linearized`, `parsimonious` or `any`.
+        It defaults to `parsimonious`.
+
         :param str hog_id: the hog_id of the query HOG
         :param str level: the taxonomic level of the ancestral genome
-        :param int step: number of breadth-first steps to take to get the local
+        :param str evidence: include only edges with evidences up to this level
+        :param int steps: number of breadth-first steps to take to get the local
                          neighborhood of the query HOG.
         """
         if self.db_schema_version < (3, 5):
@@ -1479,23 +1493,40 @@ class Database(object):
         ancestral_node = self._ancestral_node(level)
         if evidence is None:
             evidence = "parsimonious"
-        evidence = ancestral_node.Synteny.get_enum("Evidence")[evidence]
+        evidence_enum = ancestral_node.Synteny.get_enum("Evidence")
+        evidence = evidence_enum[evidence]
         edge_data = ancestral_node.Synteny.read_where("Evidence <= {}".format(evidence))
         if hog_id is not None:
             hog_row = self.get_hog(hog_id, tab=ancestral_node.Hogs, field="_NROW")
             edges = (
-                (e[0], e[1], {"weight": e[2], "evidence": e[3]}) for e in edge_data
+                (e[0], e[1], {"weight": e[2], "evidence": evidence_enum(e[3])})
+                for e in edge_data
             )
             return _get_limited_synteny_graph(
                 edges, hog_row, ancestral_node.Hogs, steps
             )
         else:
-            all_hogs = ancestral_node.Hogs.read(field="ID")
+            all_hogs = ancestral_node.Hogs.read()
             g = nx.Graph()
-            g.add_nodes_from((h.decode() for h in all_hogs))
+            g.add_nodes_from(
+                [
+                    (
+                        h["ID"].decode(),
+                        {
+                            "nr_members": int(h["NrMemberGenes"]),
+                            "completeness_score": float(h["CompletenessScore"]),
+                        },
+                    )
+                    for h in all_hogs
+                ]
+            )
             g.add_edges_from(
                 (
-                    (all_hogs[e[0]], all_hogs[e[1]], {"weight": e[2], "evidence": e[3]})
+                    (
+                        all_hogs[e[0]],
+                        all_hogs[e[1]],
+                        {"weight": e[2], "evidence": evidence_enum(e[3])},
+                    )
                     for e in edge_data
                 )
             )

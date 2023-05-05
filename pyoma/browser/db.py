@@ -181,6 +181,14 @@ def _get_limited_synteny_graph(
             "Cannot find HogIdx {}  in Ancestral synteny graph".format(ref_hog_idx)
         )
     S = G.subgraph(neighbors)
+    for n in S.nodes:
+        hog = hog_tab[n]
+        S.nodes[n].update(
+            {
+                "nr_members": int(hog["NrMemberGenes"]),
+                "completeness_score": float(hog["CompletenessScore"]),
+            }
+        )
     return nx.relabel_nodes(S, lambda x: hog_tab[x]["ID"].decode())
 
 
@@ -1499,7 +1507,7 @@ class Database(object):
         if hog_id is not None:
             hog_row = self.get_hog(hog_id, tab=ancestral_node.Hogs, field="_NROW")
             edges = (
-                (e[0], e[1], {"weight": e[2], "evidence": evidence_enum(e[3])})
+                (e[0], e[1], {"weight": int(e[2]), "evidence": evidence_enum(e[3])})
                 for e in edge_data
             )
             return _get_limited_synteny_graph(
@@ -1523,8 +1531,8 @@ class Database(object):
             g.add_edges_from(
                 (
                     (
-                        all_hogs[e[0]],
-                        all_hogs[e[1]],
+                        all_hogs[e[0]]["ID"].decode(),
+                        all_hogs[e[1]]["ID"].decode(),
                         {"weight": e[2], "evidence": evidence_enum(e[3])},
                     )
                     for e in edge_data

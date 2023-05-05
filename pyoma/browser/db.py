@@ -1446,6 +1446,20 @@ class Database(object):
             (hog_str[0:-1] + chr(1 + ord(hog_str[-1]))).encode("ascii"),
         )
 
+    def _ancestral_node(self, level):
+        taxid_of_level = self.taxid_from_level(level)
+        try:
+            return self.db.get_node("/AncestralGenomes/tax{}".format(taxid_of_level))
+        except tables.NoSuchNodeError as e:
+            logger.exception(
+                "cannot find ancestral genome node for taxid:{} ({})".format(
+                    taxid_of_level, level
+                )
+            )
+            raise DBConsistencyError(
+                f"Ancestral genome node not found: {taxid_of_level}"
+            )
+
     def get_syntentic_hogs(self, level, hog_id=None, evidence=None, steps=2):
         """Returns a graph of the ancestral synteny
 

@@ -1506,8 +1506,11 @@ class Database(object):
         ancestral_node = self._ancestral_node(level)
         if evidence is None:
             evidence = "parsimonious"
-        evidence_enum = ancestral_node.Synteny.get_enum("Evidence")
-        evidence = evidence_enum[evidence]
+        try:
+            evidence_enum = ancestral_node.Synteny.get_enum("Evidence")
+            evidence = evidence_enum[evidence]
+        except KeyError:
+            raise ValueError(f"Invalid evidence value {evidence}")
         edge_data = ancestral_node.Synteny.read_where("Evidence <= {}".format(evidence))
         edges = (
             (e[0], e[1], {"weight": int(e[2]), "evidence": evidence_enum(e[3])})

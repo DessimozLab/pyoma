@@ -160,27 +160,34 @@ def count_rows_of_index_column_with_value(
 
 def _get_limited_synteny_graph(
     edges_data: Generator[Tuple[int, int, dict], None, None],
-    ref_hog_idx: int,
-    hog_tab: tables.Table,
-    steps: int = 2,
+    hog_tab: Union[tables.Table, numpy.ndarray, dict],
+    ref_hog_idx: Optional[int],
+    steps: Optional[int],
 ):
     G = nx.Graph()
     G.add_edges_from(edges_data)
-    try:
-        neighbors = [ref_hog_idx] + [
-            v for u, v in nx.bfs_edges(G, source=ref_hog_idx, depth_limit=steps)
-        ]
-    except nx.exception.NetworkXError as e:
-        logger.error(
-            "Trying to access a non-stored HOG in the ancestral synteny graph: "
-            "hog_row: {}, Size of Graph: N={}, E={}".format(
-                ref_hog_idx, len(G), len(G.edges)
+    if ref_hog_idx is not None:
+        try:
+            neighbors = [ref_hog_idx] + [
+                v for u, v in nx.bfs_edges(G, source=ref_hog_idx, depth_limit=steps)
+            ]
+        except nx.exception.NetworkXError as e:
+            logger.error(
+                "Trying to access a non-stored HOG in the ancestral synteny graph: "
+                "hog_row: {}, Size of Graph: N={}, E={}".format(
+                    ref_hog_idx, len(G), len(G.edges)
+                )
             )
-        )
-        raise DBConsistencyError(
-            "Cannot find HogIdx {}  in Ancestral synteny graph".format(ref_hog_idx)
-        )
-    S = G.subgraph(neighbors)
+            raise DBConsistencyError(
+                "Cannot find HogIdx {}  in Ancestral synteny graph".format(ref_hog_idx)
+            )
+        S = G.subgraph(neighbors)
+    else:
+        if isinstance(hog_tab, dict):
+            G.add_nodes_from(hog_tab.keys())
+        else:
+            G.add_nodes_from(range(len(hog_tab)))
+        S = G
     for n in S.nodes:
         hog = hog_tab[n]
         S.nodes[n].update(
@@ -1468,7 +1475,7 @@ class Database(object):
                 f"Ancestral genome node not found: {taxid_of_level}"
             )
 
-    def get_syntentic_hogs(self, level, hog_id, steps):
+    def get_syntentic_hogs(self, level, hog_id, steps=2):
         import warnings
 
         warnings.warn(
@@ -1478,7 +1485,7 @@ class Database(object):
         )
         return self.get_syntenic_hogs(level, hog_id, steps=steps)
 
-    def get_syntenic_hogs(self, level, hog_id=None, evidence=None, steps=2):
+    def get_syntenic_hogs(self, level, hog_id=None, evidence=None, steps=None):
         """Returns a graph of the ancestral synteny
 
         This method returns a networkx.Graph object with HOGs as nodes
@@ -1494,56 +1501,28 @@ class Database(object):
                          neighborhood of the query HOG.
         """
         if self.db_schema_version < (3, 5):
-            logger.warning(
-                "ancestral synteny: ignoring evidence and enforcing step-2 as outdated database"
-            )
-            return self._get_syntenic_hogs_obsolete_data(hog_id, level, steps=2)
+            logger.warning("ancestral synteny: ignoring evidence as outdated database")
+            return self._get_syntenic_hogs_obsolete_data(hog_id, level, steps=steps)
         ancestral_node = self._ancestral_node(level)
         if evidence is None:
             evidence = "parsimonious"
         evidence_enum = ancestral_node.Synteny.get_enum("Evidence")
         evidence = evidence_enum[evidence]
         edge_data = ancestral_node.Synteny.read_where("Evidence <= {}".format(evidence))
+        edges = (
+            (e[0], e[1], {"weight": int(e[2]), "evidence": evidence_enum(e[3])})
+            for e in edge_data
+        )
         if hog_id is not None:
             hog_row = self.get_hog(hog_id, tab=ancestral_node.Hogs, field="_NROW")
-            edges = (
-                (e[0], e[1], {"weight": int(e[2]), "evidence": evidence_enum(e[3])})
-                for e in edge_data
-            )
-            return _get_limited_synteny_graph(
-                edges, hog_row, ancestral_node.Hogs, steps
-            )
+            hogs = ancestral_node.Hogs
         else:
-            all_hogs = ancestral_node.Hogs.read()
-            g = nx.Graph()
-            g.add_nodes_from(
-                [
-                    (
-                        h["ID"].decode(),
-                        {
-                            "nr_members": int(h["NrMemberGenes"]),
-                            "completeness_score": float(h["CompletenessScore"]),
-                        },
-                    )
-                    for h in all_hogs
-                ]
-            )
-            g.add_edges_from(
-                (
-                    (
-                        all_hogs[e[0]]["ID"].decode(),
-                        all_hogs[e[1]]["ID"].decode(),
-                        {"weight": e[2], "evidence": evidence_enum(e[3])},
-                    )
-                    for e in edge_data
-                )
-            )
-            return g
+            hog_row = None
+            hogs = ancestral_node.Hogs.read()
+        return _get_limited_synteny_graph(edges, hogs, hog_row, steps)
 
     @outdated_database_warning()
     def _get_syntenic_hogs_obsolete_data(self, hog_id, level, steps=2):
-        hl_tab = self.db.get_node("/HogLevel")
-        hog_row = self.get_hog(hog_id, level, "_NROW")
         taxid_of_level = self.taxid_from_level(level)
         try:
             edge_data = self.db.get_node(
@@ -1556,8 +1535,19 @@ class Database(object):
                 )
             )
             edge_data = []
-        edges = ((e[0], e[1], {"weight": e[2]}) for e in edge_data)
-        return _get_limited_synteny_graph(edges, hog_row, hl_tab, steps)
+        edges = ((e[0], e[1], {"weight": e[2], "evidence": "any"}) for e in edge_data)
+
+        hl_tab = self.db.get_node("/HogLevel")
+        hogs = hl_tab
+        if hog_id is None:
+            all_hogs = {}
+            for row in hl_tab.where("Level == {!r}".format(level.encode("utf-8"))):
+                all_hogs[row.nrow] = row.fetch_all_fields()
+            hog_row = None
+            hogs = all_hogs
+        else:
+            hog_row = self.get_hog(hog_id, level, "_NROW")
+        return _get_limited_synteny_graph(edges, hogs, hog_row, steps)
 
     def taxid_from_level(self, level):
         try:

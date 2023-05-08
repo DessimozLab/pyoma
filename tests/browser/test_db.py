@@ -412,6 +412,12 @@ class DatabaseTests(TestWithDbInstance):
         graph = self.db.get_syntentic_hogs(query_level, query_hog, steps=2)
         self.assertIn(query_hog, graph)
 
+    def test_ancestral_syteny_of_genome(self):
+        query_level = "Fungi"
+        graph = self.db.get_syntenic_hogs(level=query_level)
+        self.assertIn("HOG:0000005", graph)
+        self.assertEqual(len(graph.nodes), self.db.count_hogs_at_level(query_level))
+
 
 class XRefDatabaseMock(Database):
     def __init__(self, name=None):

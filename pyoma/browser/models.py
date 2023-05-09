@@ -322,7 +322,7 @@ class Genome(object):
         try:
             return self._genome["Url"].decode()
         except ValueError:
-            if self._db.db_schema_version < (3.2):
+            if self._db.db_schema_version < (3, 2):
                 return ""
             raise
 
@@ -331,7 +331,7 @@ class Genome(object):
         try:
             return self._genome["Source"].decode()
         except ValueError:
-            if self._db.db_schema_version < (3.2):
+            if self._db.db_schema_version < (3, 2):
                 return ""
             raise
 
@@ -381,7 +381,7 @@ class Genome(object):
 
     @property
     def is_polyploid(self):
-        """returns whether or not this is a polyploid genome"""
+        """returns whether this is a polyploid genome"""
         return self._genome["IsPolyploid"]
 
     @LazyProperty

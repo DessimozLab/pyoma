@@ -357,7 +357,7 @@ def create_and_store_fast_famhoglevel_lookup(h5, hoglevtab, array_path):
 
 
 class DarwinExporter(object):
-    DB_SCHEMA_VERSION = "3.5"
+    DB_SCHEMA_VERSION = "3.6"
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
 
     def __init__(self, path, logger=None, mode=None):
@@ -997,8 +997,8 @@ class DarwinExporter(object):
                     # fallback to level if taxid is not known
                     tab_name = "tax{}".format(lev2tax.get(level, level.decode()))
                     tab = self.h5.create_table(
-                        where="/Hogs_per_Level",
-                        name=tab_name,
+                        where=f"/AncestralGenomes/{tab_name}",
+                        name="Hogs",
                         title="cached HogLevel data for {}".format(level.decode()),
                         obj=hogs,
                         createparents=True,
@@ -1607,7 +1607,7 @@ class DarwinExporter(object):
         # Gather entry-domain for each HOG.
         hog2dom = []
         hog2info = []
-        for (hog_id, hdf) in tqdm(df.groupby("OmaHOG")):
+        for hog_id, hdf in tqdm(df.groupby("OmaHOG")):
             size = len(set(hdf["EntryNr"]))
 
             hdf = hdf[~hdf["DomainId"].isnull()]
@@ -1616,7 +1616,7 @@ class DarwinExporter(object):
             if (size > 2) and (cov > 1):
                 # There are some annotations
                 da = collections.defaultdict(list)
-                for (enum, edf) in hdf.groupby("EntryNr"):
+                for enum, edf in hdf.groupby("EntryNr"):
                     d = edf["DomainId"]
                     d = tuple(d) if (type(d) != bytes) else (d,)
                     da[d].append(enum)
@@ -2786,7 +2786,7 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
             for modif, completeness, parent in zip(
                 ["", "_support"], [0.0, 0.2], [parent_hogs, parent_hogs_support]
             ):
-                hogs = h5.get_node("/Hogs_per_Level/tax{}".format(taxid)).read_where(
+                hogs = h5.get_node(f"/AncestralGenomes/tax{taxid}/Hogs").read_where(
                     "CompletenessScore > completeness"
                 )
                 if modif == "":

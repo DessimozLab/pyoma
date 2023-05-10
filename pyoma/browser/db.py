@@ -204,7 +204,7 @@ class Database(object):
     will typically be issued by methods of this object. Typically,
     the result of queries will be :py:class:`numpy.recarray` objects."""
 
-    EXPECTED_DB_SCHEMA = "3.5"
+    EXPECTED_DB_SCHEMA = "3.6"
 
     def __init__(self, db):
         if isinstance(db, str):
@@ -1331,22 +1331,32 @@ class Database(object):
 
     def count_hogs_at_level(self, level):
         """returns the number of HOGs at the requested taxonomic level"""
-        taxid = self.taxid_from_level(level)
         try:
-            return len(self.db.get_node("/Hogs_per_Level/tax{}".format(taxid)))
-        except tables.NoSuchNodeError:
-            return len(self.get_all_hogs_at_level(level))
+            anc_node = self._ancestral_node(level)
+            return len(anc_node.Hogs)
+        except DBConsistencyError:
+            try:
+                taxid = self.taxid_from_level(level)
+                return len(self.db.get_node("/Hogs_per_Level/tax{}".format(taxid)))
+            except tables.NoSuchNodeError:
+                return len(self.get_all_hogs_at_level(level))
 
     def get_all_hogs_at_level(self, level, compare_with=None):
         """returns a :class:`numpy.array` instance with all hogs at the requested level"""
-        taxid = self.taxid_from_level(level)
         try:
-            hog_data = self.db.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()
-        except tables.NoSuchNodeError:
-            logger.warning(
-                "Cannot load Hogs_per_Level. extracting from main table. SLOW!"
-            )
-            hog_data = self.db.get_node("/HogLevel").read_where("Level == level")
+            anc_node = self._ancestral_node(level)
+            hog_data = anc_node.Hogs.read()
+        except DBConsistencyError:
+            try:
+                taxid = self.taxid_from_level(level)
+                hog_data = self.db.get_node(
+                    "/Hogs_per_Level/tax{}".format(taxid)
+                ).read()
+            except tables.NoSuchNodeError:
+                logger.warning(
+                    "Cannot load AncestralGenome nor Hogs_per_Level. extracting from main table. SLOW!"
+                )
+                hog_data = self.db.get_node("/HogLevel").read_where("Level == level")
         if compare_with is None:
             return hog_data
         compare_hog = self.get_all_hogs_at_level(compare_with)

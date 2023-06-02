@@ -246,9 +246,14 @@ def load_hogs_at_level(fname, level):
     with tables.open_file(fname, "r") as h5:
         lev = level.encode("utf-8") if isinstance(level, str) else level
         tab = h5.get_node("/HogLevel")
-        hog_it = (row.fetch_all_fields() for row in tab.where("Level == lev"))
-        hogs = numpy.fromiter(hog_it, dtype=tab.dtype)
+        extended_dtype = numpy.dtype(tab.dtype.descr + [("HogLevelRowIdx", "i4")])
+        hog_it = (
+            tuple(row.fetch_all_fields()) + (row.nrow,)
+            for row in tab.where("Level == lev")
+        )
+        hogs = numpy.fromiter(hog_it, dtype=extended_dtype)
         hogs.sort(order="ID")
+        hogs["IdxPerLevelTable"] = numpy.arange(len(hogs))
         return hogs
 
 
@@ -983,6 +988,7 @@ class DarwinExporter(object):
             for row in self.h5.get_node("/Taxonomy").read()
         }
         lev2tax[b"LUCA"] = 0
+        idx_per_level = numpy.zeros(len(hl_tab), "i4")
         with concurrent.futures.ProcessPoolExecutor(max_workers=nr_procs) as pool:
             future_to_level = {
                 pool.submit(
@@ -1007,10 +1013,12 @@ class DarwinExporter(object):
                     create_index_for_columns(
                         tab, "Fam", "IsRoot", "NrMemberGenes", "CompletenessScore"
                     )
+                    idx_per_level[hogs["HogLevelRowIdx"]] = hogs["IdxPerLevelTable"]
                 except Exception as exc:
                     msg = "cannot store cached hogs for {}".format(level)
                     self.logger.exception(msg)
                     pass
+        hl_tab.modify_column(column=idx_per_level, colname="IdxPerLevelTable")
 
     def xref_databases(self):
         return os.path.join(os.environ["DARWIN_BROWSERDATA_PATH"], "ServerIndexed.db")
@@ -2217,6 +2225,7 @@ class HogConverter(object):
                     + (
                         self.get_nr_member_genes(ognode),
                         bool(taxnode.get("IsRoot", False)),
+                        -1,
                     )
                 )
 

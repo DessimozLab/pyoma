@@ -658,7 +658,7 @@ class HOG(object):
 
     @property
     def is_root(self):
-        """whether or not this is the deepest taxonomic range for
+        """whether this is the deepest taxonomic range for
         this (sub-)HOG."""
         return bool(self._hog["IsRoot"])
 

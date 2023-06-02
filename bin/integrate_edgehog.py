@@ -23,8 +23,12 @@ if __name__ == "__main__":
     with tables.open_file(conf.edgehog, "r") as edge_h5, tables.open_file(
         conf.omadb, "a"
     ) as h5:
-        for node in edge_h5.walk_nodes("/", tables.Table):
+        for node in edge_h5.walk_nodes("/", 'Table'):
             path, name = node._v_pathname.rsplit("/", 1)
             target_node = h5.get_node(path)
             logger.debug(f"copy {name} from {path} to {target_node}")
             node._f_copy(target_node, name)
+            tab = h5.get_node(path, name)
+            for col in ("HogRow1", "HogRow2", "Weight", "Evidence"):
+                tab.colinstances[col].create_csindex()
+

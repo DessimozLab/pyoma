@@ -169,7 +169,7 @@ class GeneOntologyTable(tables.IsDescription):
 
 class AncestralGeneOntologyTable(tables.IsDescription):
     HogRow = tables.UInt32Col(pos=1)
-    TermNr = tables.Uint32Col(pos=2)
+    TermNr = tables.UInt32Col(pos=2)
     Score = tables.UInt8Col(pos=3)
     RawScore = tables.Float16Col(pos=4)
 

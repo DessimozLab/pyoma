@@ -37,6 +37,7 @@ class AncGOData:
 class AncGOManager:
     def __init__(self, h5):
         self.h5 = h5
+        self.sentinel = -9999 
         self.tax_ids, self.hog_rows = self._load_hoglevel2hogrow()
         logger.info(
             f"loaded level2taxid and hog_row mapping for {len(self.tax_ids)} rows in /HogLevel table"
@@ -56,12 +57,15 @@ class AncGOManager:
         lev2tax = self._load_lev_to_tax()
         hl_tab = self.h5.get_node("/HogLevel")
         return numpy.fromiter(
-            map(lev2tax, hl_tab.read("Level")), dtype="i4"
-        ), hl_tab.read("IdxPerLevelTable")
+            map(lambda lev: lev2tax.get(lev, self.sentinel), hl_tab.read(field="Level")), dtype="i4"
+        ), hl_tab.read(field="IdxPerLevelTable")
 
     def process_data(self, go_tab):
         for anno in go_tab:
             taxid = self.tax_ids[anno["HogNr"]]
+            if taxid == self.sentinel:
+                logger.warning(f"skip annotation {anno} for level {self.h5.root.HogLevel[anno['HogNr']]}")
+                continue
             self.data_containers[taxid].add(
                 self.hog_rows[anno["HogNr"]],
                 anno["TermNr"],

@@ -167,6 +167,13 @@ class GeneOntologyTable(tables.IsDescription):
     Reference = tables.StringCol(255, pos=4)
 
 
+class AncestralGeneOntologyTable(tables.IsDescription):
+    HogRow = tables.UInt32Col(pos=1)
+    TermNr = tables.Uint32Col(pos=2)
+    Score = tables.UInt8Col(pos=3)
+    RawScore = tables.Float16Col(pos=4)
+
+
 class ECTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     ECacc = tables.StringCol(16, pos=2)

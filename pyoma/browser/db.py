@@ -199,6 +199,38 @@ def _get_limited_synteny_graph(
     return nx.relabel_nodes(S, lambda x: hog_tab[x]["ID"].decode())
 
 
+def read_table_where(tab: tables.Table, query: str, field: str = None) -> numpy.ndarray:
+    """Reads data of a pytables table fulfilling the query as a numpy array.
+
+    This is a more efficient implementation of the :py:method:`tables.Table.read_where`
+    method.
+
+    :param tab: The table to be read from
+    :param query: the query
+    :param field: which column to be read.
+                  If set to None, all columns are read, if set to 'nrow',
+                  the row number is returned
+    :return the data as a numpy array
+    """
+    it = tab.where(query)
+    try:
+        first = next(it)
+    except StopIteration:
+        return numpy.array([], dtype=tab.dtype)
+    if field is None:
+        fun = lambda row: row.fetch_all_fields()
+    elif field.lower == "nrow":
+        fun = lambda row: row.nrow
+    else:
+        fun = lambda row: row[field]
+
+    data = numpy.fromiter(
+        map(fun, itertools.chain([first], it)),
+        dtype=tab.dtype,
+    )
+    return data
+
+
 class Database(object):
     """This is the main interface to the oma database. Queries
     will typically be issued by methods of this object. Typically,
@@ -434,8 +466,8 @@ class Database(object):
         """return all protein entries of a genome"""
         rng = self.id_mapper["OMA"].genome_range(genome)
         prot_tab = self.get_hdf5_handle().get_node("/Protein/Entries")
-        return prot_tab.read_where(
-            "(EntryNr >= {}) & (EntryNr <= {})".format(rng[0], rng[1])
+        return read_table_where(
+            prot_tab, "(EntryNr >= {}) & (EntryNr <= {})".format(rng[0], rng[1])
         )
 
     def main_isoforms(self, genome):
@@ -507,14 +539,11 @@ class Database(object):
         if e["AltSpliceVariant"] == 0:
             return numpy.array([e], dtype=e.dtype)
         # TODO: create index on AltSpliceVariant column?!
-        return (
-            self.get_hdf5_handle()
-            .get_node("/Protein/Entries")
-            .read_where(
-                "(EntryNr >= {:d}) & (EntryNr < {:d}) & (AltSpliceVariant == {:d})".format(
-                    e["EntryNr"] - 100, e["EntryNr"] + 100, e["AltSpliceVariant"]
-                )
-            )
+        return read_table_where(
+            self.get_hdf5_handle().get_node("/Protein/Entries"),
+            "(EntryNr >= {:d}) & (EntryNr < {:d}) & (AltSpliceVariant == {:d})".format(
+                e["EntryNr"] - 100, e["EntryNr"] + 100, e["AltSpliceVariant"]
+            ),
         )
 
     def _get_vptab(self, entry_nr):
@@ -589,7 +618,7 @@ class Database(object):
             query += " & (EntryNr2 >= {:d}) & (EntryNr2 <= {:d})".format(*target_range)
         if typ_filter is not None:
             query += " & (RelType == {:d})".format(typ_filter)
-        dat = tab.read_where(query)
+        dat = read_table_where(tab, query)
         typ = tab.get_enum("RelType")
         cols = ["EntryNr1", "EntryNr2", "Score", "Distance"]
         if extra_cols is not None:
@@ -903,7 +932,8 @@ class Database(object):
         target_chr = dat["Chromosome"]
         genome_range = self.id_mapper["OMA"].genome_range(entry_nr)
         f = 5
-        data = self.db.root.Protein.Entries.read_where(
+        data = read_table_where(
+            self.db.root.Protein.Entries,
             "(EntryNr >= {:d}) & (EntryNr <= {:d}) & "
             "(Chromosome == {!r}) & "
             "((AltSpliceVariant == 0) |"
@@ -911,7 +941,7 @@ class Database(object):
                 max(genome_range[0], entry_nr - f * window),
                 min(genome_range[1], entry_nr + f * window),
                 target_chr,
-            )
+            ),
         )
         data.sort(order=["LocusStart"])
         idx = int((data["EntryNr"] == entry_nr).nonzero()[0])
@@ -1086,8 +1116,10 @@ class Database(object):
         :param field: name of the column to be returned. If not set, all columns
             will be returned."""
         lev = level if isinstance(level, bytes) else level.encode("ascii")
-        return self.db.root.HogLevel.read_where(
-            "(Fam=={}) & (Level == {!r})".format(fam_nr, lev), field=field
+        return read_table_where(
+            self.db.root.HogLevel,
+            "(Fam=={}) & (Level == {!r})".format(fam_nr, lev),
+            field=field,
         )
 
     def get_parent_hogs(self, hog_id, level=None):
@@ -1407,9 +1439,9 @@ class Database(object):
         """returns the orthoxml of a given toplevel HOG family
 
         :param fam: numeric id of requested toplevel hog
-        :param augmented: boolean flag to indicated whether or not to return
+        :param augmented: boolean flag to indicated whether to return
                           the augmented orthoxml or not. (defaults to not)"""
-        idx = self.db.root.OrthoXML.Index.read_where("Fam == {:d}".format(fam))
+        idx = read_table_where(self.db.root.OrthoXML.Index, "Fam == {:d}".format(fam))
         if len(idx) < 1:
             raise ValueError("cannot retrieve orthoxml for {}".format(fam))
         idx = idx[0]
@@ -1521,7 +1553,9 @@ class Database(object):
             evidence = evidence_enum[evidence]
         except KeyError:
             raise ValueError(f"Invalid evidence value {evidence}")
-        edge_data = ancestral_node.Synteny.read_where("Evidence <= {}".format(evidence))
+        edge_data = read_table_where(
+            ancestral_node.Synteny, "Evidence <= {}".format(evidence)
+        )
         edges = (
             (e[0], e[1], {"weight": int(e[2]), "evidence": evidence_enum(e[3])})
             for e in edge_data
@@ -1601,16 +1635,7 @@ class Database(object):
         :param group_id: numeric oma group id or Fingerprint"""
         group_nr = self.resolve_oma_group(group_id)
         pe_tab = self.db.get_node("/Protein/Entries")
-        it = pe_tab.where("OmaGroup == {:d}".format(group_nr))
-        try:
-            first = next(it)
-        except StopIteration:
-            return numpy.array([], dtype=pe_tab.dtype)
-        members = numpy.fromiter(
-            map(lambda row: row.fetch_all_fields(), itertools.chain([first], it)),
-            dtype=pe_tab.dtype,
-        )
-        return members
+        return read_table_where(pe_tab, "OmaGroup == {:d}".format(group_nr))
 
     def resolve_oma_group(self, group_id):
         if isinstance(group_id, int) and 0 < group_id <= self._nr_oma_groups:
@@ -1800,12 +1825,12 @@ class Database(object):
             .decode()
         )
         locus_tab = self.db.get_node("/Protein/Locus/{}".format(genome))
-        return locus_tab.read_where("EntryNr == {}".format(entry_nr))
+        return read_table_where(locus_tab, "EntryNr == {}".format(entry_nr))
 
     def get_domains(self, entry_nr):
         try:
-            return self.db.root.Annotations.Domains.read_where(
-                "EntryNr == {:d}".format(entry_nr)
+            return read_table_where(
+                self.db.root.Annotations.Domains, "EntryNr == {:d}".format(entry_nr)
             )
         except ValueError as e:
             raise InvalidId("require a numeric entry id, got {}".format(entry_nr))
@@ -2104,7 +2129,7 @@ class Database(object):
                         "stop argument needs to be a entry number that is larger than 'entry_nr'"
                     )
                 query = "(EntryNr >= {:d}) & (EntryNr < {:d})".format(entry_nr, stop)
-            annots = self.db.root.Annotations.GeneOntology.read_where(query)
+            annots = read_table_where(self.db.root.Annotations.GeneOntology, query)
 
             # for test database we also have some obsolete terms. we need to filter those
             if len(annots) > 0:

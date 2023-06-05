@@ -1624,6 +1624,104 @@ class Database(object):
             neighbors = {}
         return neighbors
 
+    def get_ancestral_gene_ontology_annotations(
+        self,
+        level: Union[str, bytes, int],
+        hog_id: Union[str, bytes, None] = None,
+        as_dataframe: bool = False,
+        as_gaf: bool = False,
+    ):
+        """
+        Retrieve the ancestral gene ontology annotations for a hog / all hogs at a taxonomic level
+
+        The method returns the gene ontology annotations stored in the database
+        for a given hog_id at a given taxonomic level or for all the hogs at the given
+        taxonomic level.
+
+        By default, the result are returned as numpy arrays of type
+        :class:`tablefmt.AncestralGeneOntologyTable`, augemtned with a HogID column.
+        If `as_dataframe` is set to true, the result will be a pandas dataframe,
+        and if `as_gaf` is set to true, a gaf formatted text file with the
+        annotations is returned.
+
+        :param level: the taxonomic level for the ancestral data
+        :type level: str | bytes | int
+        :param hog_id: the hog_id for which the annotations should be retrieved.
+                       if not specified, information for all hogs will be used.
+        :type hog_id: str | bytes
+        :param as_dataframe: return as a pandas dataframe.
+        :type as_dataframe: bool
+        :param as_gaf: return annotations in GAF format
+        :type as_gaf: bool
+        """
+        ancestral_node = self._ancestral_node(level)
+        if hog_id is not None:
+            hog = self.get_hog(hog_id, tab=ancestral_node.Hogs)
+            query = f"(HogRow == {hog['IdxPerLevelTable']})"
+            annots = read_table_where(ancestral_node.GeneOntology, query)
+            hog_ids = {hog["IdxPerLevelTable"]: hog["ID"]}
+        else:
+            annots = ancestral_node.GeneOntology.read()
+            hog_ids = ancestral_node.Hogs.read(field="ID")
+        annots = numpy.lib.recfunctions.append_fields(
+            annots,
+            names="HogID",
+            data=[hog_ids[row] for row in annots["HogRow"]],
+            usemask=False,
+        )
+        if not as_dataframe and not as_gaf:
+            return annots
+        # early return if no annotations available
+        if len(annots) == 0:
+            return "!gaf-version: {}\n".format(GAF_VERSION) if as_gaf else None
+
+        df = pd.DataFrame(annots)
+        df["DB"] = "OMA"
+        df["DB_Object_ID"] = df["HogID"]
+        # 3R DB Object Symbol
+        df["DB_Object_Symbol"] = df["DB_Object_ID"]
+        # 4O Qualifier
+        df["Qualifier"] = ""
+        # 5R GO ID
+        df["GO_ID"] = df["TermNr"].apply(lambda t: "GO:{:07d}".format(t))
+        # 6R DB:Reference
+        df["DB:Reference"] = "OMA HogProp"
+        # 7R Evidence code
+        df["Evidence"] = "IEA"
+        # 8O With (or) From
+        df["With"] = ""
+        # 9R Aspect
+        df["Aspect"] = df["GO_ID"].apply(
+            lambda t: GOAspect.to_char(self.gene_ontology.term_by_id(t).aspect)
+        )
+        # 10O DB Object Name
+        df["DB_Object_Name"] = ""
+        # 11O DB Object Synonym (|Synonym)
+        df["Synonym"] = ""
+        # 12R DB Object Type
+        df["DB_Object_Type"] = "ancestral protein"
+        # 13R Taxon (|taxon)
+        df["Taxon_ID"] = level
+        # 14R Date
+        df["Date"] = self.get_conversion_date().strftime("%Y%m%d")
+        # 15R Assigned by
+        df["Assigned_By"] = df["DB"]
+        # 16O Annotation Extension
+        df["Annotation_Extension"] = ""
+        # 17O Gene Product Form ID
+        df["Gene_Product_Form_ID"] = ""
+
+        df = df[GOA.GAF20FIELDS]
+        return (
+            df
+            if not as_gaf
+            else (
+                "!gaf-version: {}\n".format(GAF_VERSION)
+                + "\n".join(df.apply(lambda e: "\t".join(map(str, e)), axis=1))
+                + "\n"
+            )
+        )
+
     def oma_group_members(self, group_id):
         """get the member entries of an oma group.
 
@@ -2102,9 +2200,9 @@ class Database(object):
         The method returns the gene ontology annotations stored in the database
         for a given entry (if `stop` parameter is not provided) or for all the
         entries between [entry_nr, stop). Like in slices, the stop entry_nr is
-        not inclusive, where as the entry_nr - the start of the slice - is.
+        not inclusive, whereas the entry_nr - the start of the slice - is.
 
-        By default the result are returned as numpy arrays of type
+        By default, the result are returned as numpy arrays of type
         :class:`tablefmt.GeneOntologyTable`. If as_dataframe is set to true, the
         result will be a pandas dataframe, and if as_gaf is set to true, a gaf
         formatted text file with the annotations is returned.

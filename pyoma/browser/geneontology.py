@@ -4,6 +4,8 @@ import csv
 import logging
 import math
 import re
+from functools import lru_cache
+
 import numpy
 
 
@@ -76,7 +78,7 @@ class GOterm(object):
     """A class representing a single Gene Ontology term.
 
     This class can serve as a factory for the OntologyParser. For that,
-    pass it as a factory on 'Term'. """
+    pass it as a factory on 'Term'."""
 
     def __init__(self, stanza):
         self.id = validate_go_id(stanza["id"][0])
@@ -277,6 +279,7 @@ class GeneOntology(object):
         term = self.ensure_term(term)
         return self._traverseGraph(term, max_steps, self.down_rels)
 
+    @lru_cache(maxsize=4048)
     def _traverseGraph(self, node, max_steps, rels):
         """_traverseGraph traverses the graph in a breath first manner
         and reports all the nodes reachable within max_steps."""

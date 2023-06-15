@@ -242,6 +242,7 @@ class GeneOntologyAnnotationTests(unittest.TestCase):
             goa.aspect,
             ["molecular_function", "biological_process", "cellular_component"],
         )
+        self.assertEqual("YEAST00012", goa.object_id)
 
 
 class SingletonTests(unittest.TestCase):

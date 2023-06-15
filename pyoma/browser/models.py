@@ -765,6 +765,10 @@ class GeneOntologyAnnotation(object):
         return int(self.anno["EntryNr"])
 
     @LazyProperty
+    def object_id(self):
+        return self.db.id_mapper["OMA"].map_entry_nr(self.entry_nr)
+
+    @LazyProperty
     def aspect(self):
         from .geneontology import GOAspect
 

@@ -157,7 +157,7 @@ class HogIDSearch(BaseSearch):
                 # we have a taxon filter, search for subhogs/superhogs of ids
                 ids_to_look = ids if self.outdated_query_hog else (ids[0],)
                 for hog_id in ids_to_look:
-                    for subhog in self.db.iter_hog_at_level(hog_id, level=self._level):
+                    for subhog in self.db.iter_hogs_at_level(hog_id, level=self._level):
                         hogs.append(models.HOG(self.db, subhog))
             levels = [level]
             if level is not None:

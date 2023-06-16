@@ -1277,14 +1277,14 @@ class Database(object):
         :param bytes hog_id: the query hog id
         :param str level: the taxonomic level of interest"""
         try:
-            hog = next(self.iter_hog_at_level(hog_id, level))
+            hog = next(self.iter_hogs_at_level(hog_id, level))
         except StopIteration:
             raise ValueError('Level "{0:s}" undefined for query gene'.format(level))
         # get the entries which have this hogid (or a sub-hog)
         members = self.member_of_hog_id(hog["ID"], level=level)
         return members
 
-    def iter_hog_at_level(self, hog_id, level):
+    def iter_hogs_at_level(self, hog_id, level):
         """yields the (sub- or parent-) hogs for a given level.
 
         This method yields the hogs as numpy.array instances that
@@ -1308,15 +1308,26 @@ class Database(object):
         """
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
+
         query_fam = self.parse_hog_id(hog_id)
-        for hog in self.db.root.HogLevel.where(
-            "(Fam == {:d}) & (Level == {!r})".format(query_fam, level.encode("ascii"))
-        ):
+        query = "(Fam == {:d})".format(query_fam)
+        try:
+            anc_node = self._ancestral_node(level)
+            hog_tab = anc_node.Hogs
+        except DBConsistencyError:
+            hog_tab = self.db.root.HogLevel
+            query += " & (Level == {!r})".format(level.encode("utf-8"))
+
+        for hog in hog_tab.where(query):
             if hog_id.startswith(hog["ID"]):
                 if hog_id == hog["ID"] or chr(hog_id[len(hog["ID"])]) == ".":
                     yield hog.fetch_all_fields()
             elif hog["ID"].startswith(hog_id):
                 yield hog.fetch_all_fields()
+
+    def iter_hog_at_level(self, hog_id, level):
+        """deprecated method. use iter_hogs_at_level"""
+        yield from self.iter_hogs_at_level(hog_id=hog_id, level=level)
 
     def get_hog(self, hog_id, level=None, field=None, tab=None):
         """Retrieve the one relevant HOG for a certain hog-id.

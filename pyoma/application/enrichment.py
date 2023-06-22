@@ -1,8 +1,10 @@
+import collections
 from collections import Counter, defaultdict
 
 import numpy
 from property_manager import lazy_property
 from ..browser.db import Database
+from ..browser.geneontology import GOAspect
 from scipy.stats import fisher_exact
 from statsmodels.stats.multitest import multipletests
 from typing import Iterable, Union
@@ -122,7 +124,7 @@ class GOEnrichmentAnalysis(object):
         # results
         df["GO_Name"] = df["GO_ID"].apply(lambda t: t.name)
         # df["GO_Depth"] = df["GO_ID"].apply(lambda t: self._go[t].min_depth)
-        df["GO_Aspect"] = df["GO_ID"].apply(lambda t: t.aspect)
+        df["GO_Aspect"] = df["GO_ID"].apply(lambda t: GOAspect.to_char(t.aspect))
         df["GO_ID"] = df["GO_ID"].apply(lambda t: str(t))
 
         df["Study_Proportion"] = df.apply(
@@ -132,7 +134,9 @@ class GOEnrichmentAnalysis(object):
             lambda x: "{} / {}".format(x["study_count"], x["study_n"]), axis=1
         )
         df["Study_Entries"] = df["Study_Entries"].apply(
-            lambda x: ", ".join(sorted(map(str, x)))
+            lambda x: ", ".join(
+                sorted(map(lambda e: e.decode() if isinstance(e, bytes) else str(e), x))
+            )
         )
 
         df["Population_Proportion"] = df.apply(
@@ -153,16 +157,26 @@ def extent_species_go_enrichment(
     db: Database, foreground_entries: Iterable[int], alpha=0.05
 ) -> pd.DataFrame:
     foreground = sorted(set(foreground_entries))
-    rng = db.id_mapper["OMA"].genome_range(foreground[0])
+    omaid_mapper = db.id_mapper["OMA"]
+    rng = omaid_mapper.genome_range(foreground[0])
     if rng[1] < foreground[-1]:
-        raise ValueError("foreground_entries must all be from the same speices")
+        fnd_species = collections.Counter(
+            map(lambda enr: omaid_mapper.map_entry_nr(enr)[:5], foreground_entries)
+        )
+        raise ValueError(
+            f"foreground_entries must all be from the same species. "
+            f"Found {len(fnd_species)} different ones (top 3: {fnd_species.most_common(3)}"
+        )
     anno = defaultdict(set)
-    for row in db.get_gene_ontology_annotations(rng[0], stop=rng[1]):
-        anno[int(row["EntryNr"])].add(int(row["TermNr"]))
-    main_iso = [int(row["EntryNr"]) for row in db._main_isoform_iter(rng[0], rng[1])]
+    for row in db.get_gene_ontology_annotations(rng[0], stop=rng[1] + 1):
+        anno[omaid_mapper.map_entry_nr(int(row["EntryNr"]))].add(int(row["TermNr"]))
+    main_iso = [
+        omaid_mapper.map_entry_nr(int(row["EntryNr"]))
+        for row in db._main_isoform_iter(rng[0], rng[1])
+    ]
     goea = GOEnrichmentAnalysis(db, main_iso, annots=anno, ensure_term=True)
     logger.debug(f"go_traverse_cache: {goea._go._traverseGraph.cache_info()}")
-    return goea.run_study(foreground, alpha=alpha)
+    return goea.run_study(map(omaid_mapper.map_entry_nr, foreground), alpha=alpha)
 
 
 def ancestral_species_go_enrichment(
@@ -173,13 +187,19 @@ def ancestral_species_go_enrichment(
 ) -> pd.DataFrame:
     anc_node = db._ancestral_node(level)
     hog_ids = anc_node.Hogs.read(field="ID")
-    foreground_hogs = set(
-        x.encode("utf-8") if isinstance(x, str) else x for x in foreground_hogs
+    foreground_hogs = numpy.fromiter(
+        set(x.encode("utf-8") if isinstance(x, str) else x for x in foreground_hogs),
+        dtype="S255",
     )
+    print(foreground_hogs)
     if not numpy.isin(foreground_hogs, hog_ids).all():
+        logger.warning(
+            f"not all hogs found at the requested level: {numpy.isin(foreground_hogs, hog_ids)}"
+        )
+        print(numpy.isin(foreground_hogs, hog_ids))
         raise ValueError("foreground_hogs must all be from the same level")
     annots = defaultdict(set)
     for row in anc_node.GeneOntology:
-        annots[hog_ids[row.nrow]].add(int(row["TermNr"]))
+        annots[hog_ids[row["HogRow"]]].add(int(row["TermNr"]))
     goea = GOEnrichmentAnalysis(db, hog_ids, annots=annots, ensure_term=True)
     return goea.run_study(foreground_hogs, alpha=alpha)

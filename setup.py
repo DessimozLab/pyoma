@@ -5,8 +5,8 @@ import shutil
 name = "pyoma"
 
 req_packages = [
-    "numpy >= 1.16",
-    "tables >= 3.5.1",
+    "numpy >= 1.20",
+    "tables >= 3.8.0",
     "future",
     "fuzzyset2 >= 0.1.1",
     "tqdm",
@@ -18,6 +18,7 @@ req_packages = [
     "ete3",
     "networkx",
     "statsmodels",
+    "property_manager",
 ]
 
 cur_dir = os.path.abspath(os.path.dirname(__file__))

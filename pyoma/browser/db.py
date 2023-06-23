@@ -219,14 +219,17 @@ def read_table_where(tab: tables.Table, query: str, field: str = None) -> numpy.
         return numpy.array([], dtype=tab.dtype)
     if field is None:
         fun = lambda row: row.fetch_all_fields()
+        dtyp = tab.dtype
     elif field.lower == "nrow":
         fun = lambda row: row.nrow
+        dtyp = numpy.int64
     else:
         fun = lambda row: row[field]
+        dtyp = tab.dtype[field]
 
     data = numpy.fromiter(
         map(fun, itertools.chain([first], it)),
-        dtype=tab.dtype,
+        dtype=dtyp,
     )
     return data
 

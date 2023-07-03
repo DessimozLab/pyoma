@@ -323,7 +323,7 @@ class FreqAwareGeneOntology(GeneOntology):
                 self._update_counts(self.term_by_id(anno["TermNr"]))
             except ValueError:
                 logging.info(
-                    "invalid annotation term_id in freq estim:" + str(anno.term_id)
+                    "invalid annotation term_id in freq estim:" + str(anno["TermNr"])
                 )
 
     def _update_counts(self, term):

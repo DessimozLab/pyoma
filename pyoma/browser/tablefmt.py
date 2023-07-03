@@ -174,6 +174,11 @@ class AncestralGeneOntologyTable(tables.IsDescription):
     RawScore = tables.Float16Col(pos=4)
 
 
+class GeneOntologyTermCounts(tables.IsDescription):
+    TermNr = tables.UInt32Col(pos=1)
+    Counts = tables.UInt32Col(pos=2)
+
+
 class ECTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     ECacc = tables.StringCol(16, pos=2)

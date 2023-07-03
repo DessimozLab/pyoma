@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import logging
 from hashlib import md5
 
 import numpy
@@ -20,6 +21,7 @@ from pyoma.browser.convert import (
     load_tsv_to_numpy,
     HogConverter,
 )
+from .test_db import find_path_to_test_db
 
 
 def store_in_json(data, fn):
@@ -352,3 +354,17 @@ class HogConverterTest(unittest.TestCase):
             with self.subTest(release_char=release_char):
                 with self.assertRaises(ValueError):
                     conv = HogConverter(self.h5.root.Entries, release_char=release_char)
+
+
+class ReadOnlyTestDbImporter(unittest.TestCase):
+    importer = None
+    h5_file_name = "TestDb.h5"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        path = find_path_to_test_db(cls.h5_file_name)
+        cls.importer = DarwinExporter(path, mode="read")
+
+    def test_count_goterm_freqs(self):
+        cnts, tot_per_ont = self.importer.collect_goterm_freqs()
+        self.assertLess(sum(tot_per_ont), sum(cnts.values()))

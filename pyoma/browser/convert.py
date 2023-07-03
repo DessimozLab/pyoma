@@ -6,6 +6,7 @@ import errno
 import fileinput
 import gzip
 import hashlib
+import io
 import itertools
 import json
 import multiprocessing as mp
@@ -36,7 +37,7 @@ from . import suffixsearch
 from . import tablefmt
 from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
-from .geneontology import GeneOntology, OntologyParser
+from .geneontology import GeneOntology, OntologyParser, FreqAwareGeneOntology
 from .homoeologs import HomeologsConfidenceCalculator
 from .synteny import SyntenyScorer
 from . import hoghelper
@@ -1279,7 +1280,7 @@ class DarwinExporter(object):
         all / in OMA Group / in HOGs for all of them.
         """
         for tab_name, sum_fun in [
-            ("/Annotations/GeneOntology", self.count_xref_summary),
+            ("/Annotations/GeneOntology", self.count_gene_ontology_summary),
             ("/XRef", self.count_xref_summary),
         ]:
             summary = sum_fun()
@@ -1316,6 +1317,26 @@ class DarwinExporter(object):
         dom_cov_hist_tab.set_attr(
             "mean_coverage_w_domain", numpy.mean(cov_fracs[cov_fracs > 0])
         )
+
+    def collect_goterm_freqs(self):
+        self.logger.info("Computing gene ontology annotations term frequencies")
+        go_tab = self.h5.get_node("/Annotations/GeneOntology")
+        fp = io.StringIO(self.h5.get_node("/Ontologies/GO").read().tobytes().decode())
+        gof = FreqAwareGeneOntology(OntologyParser(fp), rels=None)
+        gof.parse()
+
+        def iter_entry_terms(go_tab, filter=None):
+            for (enr, term), row_iter in itertools.groupby(
+                go_tab, operator.itemgetter("EntryNr", "TermNr")
+            ):
+                if filter is not None:
+                    evid = {row["Evidence"] for row in row_iter}
+                    if evid not in filter:
+                        continue
+                yield {"TermNr": int(term)}
+
+        gof.estimate_freqs(iter_entry_terms(go_tab))
+        return gof.cnts, gof.tot_cnts
 
     def count_gene_ontology_summary(self):
         self.logger.info("Bulding gene ontology annotations summary info")
@@ -1459,6 +1480,27 @@ class DarwinExporter(object):
             )
         dom_cov_tab[0 : len(cov_sites)] = cov_sites
         return cov_sites / (prot_tab.col("SeqBufferLength") - 1)
+
+    def add_gene_ontology_term_cnts(self):
+        """
+        Stores the counts of a gene ontology annotation per term in the database.
+
+        This function also includes the implied parental terms.
+
+        :return: hdf5 Table instance with the counts
+        """
+        cnts, tot_cnts = self.collect_goterm_freqs()
+        cnts = sorted(cnts.items())
+        tab = self.create_table_if_needed(
+            "/Ontology",
+            "GeneOntologyTermCounts",
+            description=tablefmt.GeneOntologyTermCounts,
+            obj=cnts,
+        )
+        self.h5.set_node_attr(tab, "total_molecular_function", tot_cnts[0])
+        self.h5.set_node_attr(tab, "total_biological_process", tot_cnts[1])
+        self.h5.set_node_attr(tab, "total_cellular_component", tot_cnts[2])
+        return tab
 
     def add_sequence_suffix_array(self, k=6, fn=None, sa=None):
         """
@@ -2939,6 +2981,7 @@ def main(
         x.add_group_metadata()
         x.add_hog_domain_prevalence()
         x.add_roothog_metadata()
+        x.add_gene_ontology_term_cnts()
 
     def phase7():
         x.create_indexes()

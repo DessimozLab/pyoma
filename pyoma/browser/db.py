@@ -549,6 +549,71 @@ class Database(object):
             ),
         )
 
+    def get_extant_synteny_graph(
+        self,
+        genome,
+        center_entry: Optional[Union[int, str]] = None,
+        window: Optional[int] = None,
+    ):
+        all_genes = self.main_isoforms(genome)
+        all_genes.sort(order=["Chromosome", "LocusStart"])
+        gs = self.id_mapper["OMA"].genome_of_entry_nr(all_genes[0]["EntryNr"])
+        if center_entry is not None:
+            if window is None:
+                window = 7
+            if isinstance(center_entry, str) and center_entry.startswith("HOG:"):
+                k = numpy.where(all_genes["OmaHOG"] == center_entry.encode("utf-8"))[0]
+                if len(k) == 1:
+                    en = all_genes[k]
+                else:
+                    raise InvalidId(
+                        f"{center_entry} unknown for {gs['UniProtSpeciesCode']}"
+                    )
+            else:
+                en = self.ensure_entry(self.id_resolver.resolve(center_entry))
+                if (
+                    en["AltSpliceVariant"] > 0
+                    and en["AltSpliceVariant"] != en["EntryNr"]
+                ):
+                    en = self.ensure_entry(en["AltSpliceVariant"])
+            try:
+                idx = numpy.where(all_genes["EntryNr"] == en["EntryNr"])[0][0]
+                ref = all_genes[idx]
+            except IndexError:
+                identified_genome = gs["UniProtSpeciesCode"].decode()
+                raise InvalidId(
+                    f"Center gene {center_entry} is not a valid for genome {identified_genome}"
+                )
+            all_genes = all_genes[idx - window : idx + window + 1]
+            all_genes = all_genes[
+                numpy.where(all_genes["Chromosome"] == ref["Chromosome"])
+            ]
+        oma_ids = list(
+            map(
+                lambda x: f"{gs['UniProtSpeciesCode'].decode()}{x - gs['EntryOff']:05d}",
+                all_genes["EntryNr"],
+            )
+        )
+
+        def node_data_generator(genes):
+            for id_, g in zip(oma_ids, genes):
+                yield (
+                    id_,
+                    {
+                        "chromosome": g["Chromosome"].decode(),
+                        "start": int(g["LocusStart"]),
+                        "strand": "+" if g["LocusStrand"] > 0 else "-",
+                        "hog_id": g["OmaHOG"].decode(),
+                    },
+                )
+
+        G = nx.Graph()
+        G.add_nodes_from(node_data_generator(all_genes))
+        for i in range(len(all_genes) - 1):
+            if all_genes[i]["Chromosome"] == all_genes[i + 1]["Chromosome"]:
+                G.add_edge(oma_ids[i], oma_ids[i + 1], weight=1)
+        return G
+
     def _get_vptab(self, entry_nr):
         return self._get_pw_tab(entry_nr, "VPairs")
 

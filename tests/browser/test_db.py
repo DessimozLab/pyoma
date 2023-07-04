@@ -418,6 +418,11 @@ class DatabaseTests(TestWithDbInstance):
         self.assertIn("HOG:0000005", graph)
         self.assertEqual(len(graph.nodes), self.db.count_hogs_at_level(query_level))
 
+    def test_extant_syntey_of_genome(self):
+        query_level = "YEAST"
+        graph = self.db.get_extant_synteny_graph(query_level)
+        self.assertIn("YEAST00012", graph)
+
 
 class XRefDatabaseMock(Database):
     def __init__(self, name=None):

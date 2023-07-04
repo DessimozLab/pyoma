@@ -1,3 +1,3 @@
 0e7f5e7c-ad6c-47b2-a8aa-077648046ab5 encryption=none name=ucl_zoo rsyncurl=aaltenho@jet.cs.ucl.ac.uk:/cs/research/biosciences/zoo/annex-remotes/pyoma type=rsync timestamp=1688494614.42472s
-95a843da-fab9-4049-9777-54a13064506e encryption=none name=aa-ftp rsyncurl=public-ftp:ftp_folder/pyoma.annex/ type=rsync timestamp=1619436406.526005s
+95a843da-fab9-4049-9777-54a13064506e encryption=none name=aa-ftp rsyncurl=public-ftp:ftp_folder/pyoma.annex/ type=rsync timestamp=1688494634.402639s
 dcdc8038-e4e3-4ce1-9f59-84cbb04f3f18 sameas-name=ftp sameas-uuid=95a843da-fab9-4049-9777-54a13064506e type=httpalso url=ftp://ftp.vital-it.ch/altenhoff/pyoma.annex/ timestamp=1682427816.519194s

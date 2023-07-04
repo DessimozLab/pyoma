@@ -1492,11 +1492,11 @@ class DarwinExporter(object):
         cnts, tot_cnts = self.collect_goterm_freqs()
         cnts = sorted(cnts.items())
         tab = self.create_table_if_needed(
-            "/Ontology",
+            "/Ontologies",
             "GeneOntologyTermCounts",
             description=tablefmt.GeneOntologyTermCounts,
-            obj=cnts,
         )
+        tab.append(cnts)
         self.h5.set_node_attr(tab, "total_molecular_function", tot_cnts[0])
         self.h5.set_node_attr(tab, "total_biological_process", tot_cnts[1])
         self.h5.set_node_attr(tab, "total_cellular_component", tot_cnts[2])

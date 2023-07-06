@@ -47,7 +47,7 @@ from .exceptions import (
     AmbiguousID,
     TooUnspecificQuery,
 )
-from .geneontology import GeneOntology, OntologyParser, GOAspect
+from .geneontology import GeneOntology, OntologyParser, GOAspect, FreqAwareGeneOntology
 from .hoghelper import compare_levels, are_orthologous
 from .hogprofile import Profiler
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
@@ -345,6 +345,24 @@ class Database(object):
         :meth:`load_gene_ontology` to parametrize the
         creation of GeneOntology object."""
         return self.load_gene_ontology(GeneOntology)
+
+    @LazyProperty
+    def freq_aware_gene_ontology(self):
+        gof = self.load_gene_ontology(factory=FreqAwareGeneOntology)
+        try:
+            go_count_tab = self.db.get_node("/Ontologies/GeneOntologyTermCounts")
+            gof.cnts = {int(row["TermNr"]): int(row["Counts"]) for row in go_count_tab}
+            gof.tot_cnts = [
+                go_count_tab.attrs[z]
+                for z in (
+                    "total_molecular_function",
+                    "total_biological_process",
+                    "total_cellular_component",
+                )
+            ]
+        except tables.NoSuchNodeError:
+            pass
+        return gof
 
     def load_gene_ontology(self, factory=None, rels=None):
         """Instantiate GeneOntology object

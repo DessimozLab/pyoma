@@ -346,6 +346,10 @@ class FreqAwareGeneOntology(GeneOntology):
         lca = min(cand, key=self.get_term_frequency)
         return lca
 
+    def ic(self, term):
+        term = self.ensure_term(term)
+        return -math.log(self.get_term_frequency(term))
+
     def lin_similarity(self, term1, term2):
         term1 = self.ensure_term(term1)
         term2 = self.ensure_term(term2)

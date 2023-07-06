@@ -389,6 +389,14 @@ class DatabaseTests(TestWithDbInstance):
         for enr in nrs:
             self.assertIn(4575, self.db.get_gene_ontology_annotations(enr)["TermNr"])
 
+    def test_go_ic_values(self):
+        terms = ["GO:003674", "GO:008150"]
+        for term in terms:
+            with self.subTest(case=term):
+                gof = self.db.freq_aware_gene_ontology
+                ic = gof.ic(term)
+                self.assertAlmostEqual(0, ic)
+
     def test_induced_pairwise_orthologs(self):
         query = "YEAST3523"
         query_entry = self.db.ensure_entry(self.db.id_resolver.resolve(query))

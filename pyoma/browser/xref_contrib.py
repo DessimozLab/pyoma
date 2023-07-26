@@ -76,12 +76,14 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         xref_dtype = numpy.dtype(
             [("XRefId", "S50"), ("EntryNr", "i4"), ("XRefRow", "i4")]
         )
+        grp = self.xref_h5.create_group(
+            "/", "XRefIndex", title="auxiliary lookup tables with deduplicated xrefs"
+        )
         self.xref_idx = self.xref_h5.create_table(
-            "/XRefIndex",
+            grp,
             "XRefs",
             description=xref_dtype,
             chunkshape=(16384,),
-            createparents=True,
         )
         self.genenames = collections.defaultdict(list)
         self.spids = collections.defaultdict(list)

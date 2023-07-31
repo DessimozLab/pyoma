@@ -397,6 +397,14 @@ class DatabaseTests(TestWithDbInstance):
                 ic = gof.ic(term)
                 self.assertAlmostEqual(0, ic)
 
+    def test_go_lin_same_term_is_1(self):
+        self.assertEqual(1, self.db.freq_aware_gene_ontology.lin_similarity(55, 55))
+
+    def test_go_semantic_sim_of_same_term(self):
+        self.assertGreater(
+            1, self.db.freq_aware_gene_ontology.semantic_similarity(55, 55)
+        )
+
     def test_induced_pairwise_orthologs(self):
         query = "YEAST3523"
         query_entry = self.db.ensure_entry(self.db.id_resolver.resolve(query))

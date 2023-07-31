@@ -17,7 +17,6 @@ req_packages = [
     "datasketch",
     "ete3",
     "networkx",
-    "statsmodels",
     "property_manager",
 ]
 
@@ -69,6 +68,12 @@ setup(
             "pebble",
             "lark-parser",
             "pyham",
+        ],
+        "enrichment": [
+            "plotly",
+            "scikit-learn",
+            "statsmodels",
+            "scipy",
         ],
         "notebooks": [
             "jupyter",

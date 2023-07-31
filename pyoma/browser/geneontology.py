@@ -348,17 +348,24 @@ class FreqAwareGeneOntology(GeneOntology):
 
     def ic(self, term):
         term = self.ensure_term(term)
-        return -math.log(self.get_term_frequency(term))
+        return abs(-math.log(self.get_term_frequency(term)))
 
-    def lin_similarity(self, term1, term2):
-        term1 = self.ensure_term(term1)
-        term2 = self.ensure_term(term2)
-        if term1.aspect != term2.aspect:
-            # early abort, since the two terms will be by
-            # definition not similar
-            sim = 0
-        else:
-            lca = self.last_common_ancestor(term1, term2)
+    def _resolve_lca_term(self, *terms):
+        goterms = list(map(self.ensure_term, terms))
+        if not all(map(lambda t: goterms[0].aspect == t.aspect, goterms)):
+            raise DifferentAspectError()
+        lca = self.last_common_ancestor(*goterms)
+        return lca, *goterms
+
+    def lin_similarity(self, term1, term2) -> float:
+        """computes the Lin similarity between two GO terms:
+
+        .. math::
+            sim(GO_i, GO_j) = \frac{2 \log_{10}(IC(GO_{LCA}}{\log_{10}(IC(GO_i) + \log_{10}(IC(GO_j))}
+
+        """
+        try:
+            lca, term1, term2 = self._resolve_lca_term(term1, term2)
             sim = (
                 2
                 * math.log(self.get_term_frequency(lca))
@@ -367,7 +374,28 @@ class FreqAwareGeneOntology(GeneOntology):
                     + math.log(self.get_term_frequency(term2))
                 )
             )
+            return sim
+        except DifferentAspectError:
+            return 0
+
+    def semantic_similarity(self, term1, term2):
+        try:
+            lca, term1, term2 = self._resolve_lca_term(term1, term2)
+        except DifferentAspectError:
+            return 0
+        p_lca = self.get_term_frequency(lca)
+        sim = (1 - p_lca) * (
+            (2 * numpy.log2(p_lca))
+            / (
+                numpy.log2(self.get_term_frequency(term1))
+                + numpy.log2(self.get_term_frequency(term2))
+            )
+        )
         return sim
+
+
+class DifferentAspectError(Exception):
+    pass
 
 
 class AnnotationFilter(object):

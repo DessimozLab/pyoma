@@ -2,12 +2,17 @@ import collections
 from collections import Counter, defaultdict
 
 import numpy
+import pandas
+import pathlib
 from property_manager import lazy_property
 from ..browser.db import Database
 from ..browser.geneontology import GOAspect
 from scipy.stats import fisher_exact
 from statsmodels.stats.multitest import multipletests
+from sklearn.manifold import MDS
 from typing import Iterable, Union
+import plotly
+import plotly.graph_objects as go
 import itertools
 import pandas as pd
 import logging
@@ -66,7 +71,7 @@ class GOEnrichmentAnalysis(object):
                 z[t] = n
         return z
 
-    def run_study(self, study, alpha=0.05):
+    def run_study(self, study, alpha=0.05, correction=None):
         """
         Run a GOEA with the study set as a foreground, with the already loaded background.
         """
@@ -95,6 +100,12 @@ class GOEnrichmentAnalysis(object):
                     p = fisher_exact([[a, b], [c, d]], alternative="greater")[1]
                     yield (t, study_count, pop_count, study_entries, study_n, pop_n, p)
 
+        if correction is None:
+            correction = "fdr_bh"
+        if correction not in ("fdr_bh", "bonferroni"):
+            raise ValueError(
+                f"correction parameter must be 'fdr_bh' or 'bonferroni': {correction}"
+            )
         study = set(study) & self._with_annot
         study_counts = self._get_term_counts(study)
 
@@ -120,6 +131,10 @@ class GOEnrichmentAnalysis(object):
         df["p_fdr_bh"] = multipletests(
             df.p_uncorrected.values, alpha=alpha, method="fdr_bh"
         )[1]
+        if correction == "fdr_bh":
+            df = df[df["p_fdr_bh"] <= alpha]
+        elif correction == "bonferroni":
+            df = df[df["p_bonferroni"] <= alpha]
 
         # results
         df["GO_Name"] = df["GO_ID"].apply(lambda t: t.name)
@@ -148,12 +163,12 @@ class GOEnrichmentAnalysis(object):
         df["Fold_Change"] = df["Study_Proportion"] / df["Population_Proportion"]
 
         return df.sort_values(
-            ["p_bonferroni", "Fold_Change", "p_uncorrected"],
+            [f"p_{correction}", "Fold_Change", "p_uncorrected"],
             ascending=[True, False, True],
         ).reset_index(drop=True)
 
 
-def extent_species_go_enrichment(
+def extant_species_go_enrichment(
     db: Database, foreground_entries: Iterable[int], alpha=0.05
 ) -> pd.DataFrame:
     foreground = sorted(set(foreground_entries))
@@ -203,3 +218,108 @@ def ancestral_species_go_enrichment(
         annots[hog_ids[row["HogRow"]]].add(int(row["TermNr"]))
     goea = GOEnrichmentAnalysis(db, hog_ids, annots=annots, ensure_term=True)
     return goea.run_study(foreground_hogs, alpha=alpha)
+
+
+class GO_MDS:
+    def __init__(self, db):
+        self.db = db
+
+    def __call__(self, terms):
+        return self.mds(terms)
+
+    def mds(self, terms):
+        """
+        Perform MDS on the semantic similarity between the terms
+        """
+        # split the terms into different aspects first
+        terms_by_aspect = defaultdict(set)
+        for t in map(self.db.freq_aware_gene_ontology.term_by_id, terms):
+            terms_by_aspect[t.aspect].add(t)
+
+        # for each aspect, perform the
+        mds = {}
+        for aspect, subterms in terms_by_aspect.items():
+            aspect_desc = GOAspect.to_string(aspect)
+
+            subterms = sorted(map(lambda t: t.id, subterms))
+
+            n = len(subterms)
+            ss = numpy.ones((n, n), dtype=numpy.float64)
+            for i in range(n):
+                for j in range(i + 1, n):
+                    ss[i, j] = ss[
+                        j, i
+                    ] = self.db.freq_aware_gene_ontology.semantic_similarity(
+                        subterms[i], subterms[j]
+                    )
+
+            #  now perform a 2d MDS
+            xy = (
+                MDS(dissimilarity="precomputed", normalized_stress="auto")
+                .fit(10 * (1 - ss))
+                .embedding_
+            )
+            mds[aspect_desc] = {t: tuple(xy[i]) for (i, t) in enumerate(subterms)}
+        return mds
+
+
+def generate_plots(enr_df, db, folder=None, pval_col="p_bonferroni"):
+    """generate plots MDS of similarities of GO terms with significance and information content.
+
+    The dataframes with the resulting MDS embedings is also returned."""
+    if folder is None:
+        folder = ""
+    folder = pathlib.Path(folder)
+    mds = GO_MDS(db)
+    xy = mds.mds(enr_df["GO_ID"])
+    per_aspect = {}
+    for aspect, terms in xy.items():
+        labels = sorted(terms.keys())
+        df = pandas.DataFrame(
+            {
+                "id": labels,
+                "MDS1": [terms[x][0] for x in labels],
+                "MDS2": [terms[x][1] for x in labels],
+            }
+        )
+        df["GO_term"] = df["id"].apply(db.freq_aware_gene_ontology.ensure_term)
+        df["id"] = df["GO_term"].apply(str)
+        df["name"] = df["GO_term"].apply(lambda t: t.name)
+        df["ic"] = df["GO_term"].apply(lambda t: db.freq_aware_gene_ontology.ic(t))
+        df = pandas.merge(
+            df, enr_df[["GO_ID", pval_col]], left_on="id", right_on="GO_ID"
+        )
+        df.drop(columns=["id", "GO_term"], inplace=True)
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=df["MDS1"],
+                y=df["MDS2"],
+                mode="markers",
+                marker={
+                    "size": 200 / (df["ic"] + 3),
+                    "color": numpy.log10(df[pval_col]),
+                    "colorbar": {"title": f"p-value ({pval_col}) (log10 scale)"},
+                },
+                opacity=0.9,
+                customdata=numpy.stack(
+                    (df["GO_ID"], df["name"], df["ic"], df[pval_col]), axis=-1
+                ),
+                hovertemplate=(
+                    "<b>ID</b>: %{customdata[0]}<br>"
+                    + "<b>Name</b>: %{customdata[1]}<br>"
+                    + "<b>Information Content</b>: %{customdata[2]:,.3f}<br>"
+                    + "<b>p-value</b>: %{customdata[3]:,.3e}<br>"
+                    + "<extra></extra>"
+                ),
+            )
+        )
+        fig.update_layout(
+            xaxis={"title": "Semantic Space X"},
+            yaxis={"title": "Semantic Space Y"},
+            title=f"{aspect.title()}",
+        )
+        plotly.offline.plot(fig, filename=str(folder / f"{aspect}.html"))
+        per_aspect[aspect] = df
+    return per_aspect

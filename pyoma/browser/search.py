@@ -277,11 +277,11 @@ class TaxSearch(BaseSearch):
     def _matched_taxons(self):
         try:
             tax_nodes = self.db.tax.get_taxnode_from_name_or_taxid(self.term)
-            tax = [int(z) for z in tax_nodes["NCBITaxonId"]]
+            tax = [(int(z), 1.0) for z in tax_nodes["NCBITaxonId"]]
         except KeyError:
             try:
                 genome = self.db.id_mapper["OMA"].identify_genome(self.term)
-                tax = [int(genome["NCBITaxonId"])]
+                tax = [(int(genome["NCBITaxonId"]), 1.0)]
             except UnknownSpecies:
                 # fuzzy match of all taxonomic names in OMA.
                 approx_matches = self.db.tax.approx_search(self.term)
@@ -291,7 +291,10 @@ class TaxSearch(BaseSearch):
                 tax_nodes = self.db.tax.get_taxnode_from_name_or_taxid(
                     [z[1] for z in approx_matches]
                 )
-                tax = [int(z["NCBITaxonId"]) for z in tax_nodes]
+                tax = [
+                    (int(z["NCBITaxonId"]), approx_match[0])
+                    for z, approx_match in zip(tax_nodes, approx_matches)
+                ]
         return tax
 
     def search_entries(self):
@@ -301,17 +304,26 @@ class TaxSearch(BaseSearch):
         return enrs
 
     def search_ancestral_genomes(self):
-        return [models.AncestralGenome(self.db, tax) for tax in self._matched_taxons]
+        ancestral_genomes = []
+        for tax, score in self._matched_taxons:
+            ag = models.AncestralGenome(self.db, tax)
+            ag.match_score = score
+            ancestral_genomes.append(ag)
+        return ancestral_genomes
 
     def search_species(self):
         extant_species = {}
-        for tax in self._matched_taxons:
-            extant_species.update(
-                {
-                    z.ncbi_taxon_id: z
-                    for z in models.AncestralGenome(self.db, tax).extant_genomes
-                }
-            )
+        for tax, score in self._matched_taxons:
+            extant_species_of_tax = models.AncestralGenome(self.db, tax).extant_genomes
+            if len(extant_species_of_tax) > 1:
+                score /= 2
+            for sp in extant_species_of_tax:
+                if sp.ncbi_taxon_id not in extant_species:
+                    sp.match_score = score
+                    extant_species[sp.ncbi_taxon_id] = sp
+                else:
+                    genome = extant_species[sp.ncbi_taxon_id]
+                    genome.match_score = max(score, genome.match_score)
         return list(extant_species.values())
 
 

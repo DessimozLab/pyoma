@@ -319,6 +319,12 @@ class CombineTest(TestWithDbInstance):
             self.assertEqual(pe.mode, "approx")
             self.assertTrue(hasattr(pe, "alignment"))
             self.assertTrue(hasattr(pe, "score"))
+        for tax in res.ancestral_genomes.values():
+            self.assertTrue(hasattr(tax, "match_score"))
+            self.assertLessEqual(tax.match_score, 1)
+        for g in res.species.values():
+            self.assertTrue(hasattr(g, "match_score"))
+            self.assertLessEqual(g.match_score, 0.5)
         self.assertGreaterEqual(s2.count_entries(), len(res.entries))
 
     def test_combine_xref_and_inexisting_tax(self):

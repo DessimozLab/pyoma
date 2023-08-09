@@ -28,7 +28,8 @@ class HogHasher(object):
     def analyze_fam(self, fam_nr):
         members = self.db.member_of_fam(fam_nr)
         minhashes = collections.defaultdict(MinHash256)
-        for e in members:
+        t_start = t0 = time.time()
+        for i, e in enumerate(members):
             hog_id = e["OmaHOG"]
             prot_id = e["CanonicalId"]
             if len(prot_id) == e.dtype["CanonicalId"].itemsize:
@@ -37,9 +38,14 @@ class HogHasher(object):
                     if ref["xref"].encode("utf-8").startswith(prot_id):
                         prot_id = ref["xref"].encode("utf-8")
                         break
-            for p in re.finditer(br"\.", hog_id):
+            for p in re.finditer(rb"\.", hog_id):
                 minhashes[hog_id[: p.start()]].update(prot_id)
             minhashes[hog_id].update(prot_id)
+            if time.time() - t0 > 10:
+                logger.debug(
+                    f"working since {time.time()-t_start}sec on fam {fam_nr}. Done {i} out of {len(members)} proteins"
+                )
+                t0 = time.time()
         return minhashes
 
 

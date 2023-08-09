@@ -3189,7 +3189,7 @@ class Taxonomy(object):
             self._load_valid_taxlevels()
 
     def _load_valid_taxlevels(self):
-        forbidden_chars = re.compile(r"[^A-Za-z0-9()/,.: -]")
+        forbidden_chars = re.compile(r"[^A-Za-z0-9()/_,.: -]")
         try:
             with open(os.environ["DARWIN_BROWSERDATA_PATH"] + "/TaxLevels.drw") as f:
                 taxStr = f.read()

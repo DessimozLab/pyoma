@@ -58,7 +58,7 @@ class BaseProfileBuilderProcess(mp.Process):
         self.outstanding_dones = nr_workers_pre_step
         self.control_queue = control_queue
         self.quit_req = False
-        self.proc_id = uuid.uuid4()
+        self.proc_id = str(uuid.uuid4())
 
     def setup(self):
         pass
@@ -372,6 +372,7 @@ class PipelineControllerThread(threading.Thread):
 
     def _process_alive_info(self, item):
         proc_id, flag = item
+        logger.debug(item)
         if flag is "DONE":
             self.processes.pop(proc_id)
         else:
@@ -379,7 +380,7 @@ class PipelineControllerThread(threading.Thread):
 
     def _kill_orphan_procs(self):
         to_rem = []
-        for proc_id, proc_info in self.processes:
+        for proc_id, proc_info in self.processes.items():
             last_seen, proc = proc_info[0], proc_info[1]
             if last_seen == 0:
                 logger.info(f"process {proc.name}[{proc.proc_id}] not yet started?")
@@ -414,6 +415,7 @@ class PipelineControllerThread(threading.Thread):
                     )
             if time.time() - self._last_timeout_check > 10:
                 self._kill_orphan_procs()
+                self._last_timeout_check = time.time()
 
 
 class Stage(object):
@@ -439,7 +441,7 @@ class Pipeline(object):
         logger_process.start()
         rootlogger_configurer(log_queue)
         print("setting up pipeline")
-        control_queue = mp.Queue
+        control_queue = mp.Queue()
 
         procs = []
         for i in range(len(self.stages) - 1, 0, -1):
@@ -476,6 +478,7 @@ class Pipeline(object):
         control_thread = PipelineControllerThread(
             control_queue=control_queue, log_queue=log_queue, processes=procs
         )
+        control_thread.start()
         print("all processes started")
         try:
             for p in procs:

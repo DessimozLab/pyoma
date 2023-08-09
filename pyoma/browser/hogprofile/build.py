@@ -466,7 +466,10 @@ class Pipeline(object):
         stage.out_queue = self.stages[1].in_queue
         for k in range(stage.nr_procs):
             p = stage.process(
-                out_queue=stage.out_queue, log_queue=log_queue, **stage.kwargs
+                out_queue=stage.out_queue,
+                log_queue=log_queue,
+                control_queue=control_queue,
+                **stage.kwargs,
             )
             procs.append(p)
             p.start()

@@ -220,17 +220,25 @@ def generator_of_unprocessed_fams(db_path, lsh_path=None):
 
 
 def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
-    pipeline = Pipeline()
     if nr_procs is None:
         nr_procs = multiprocessing.cpu_count()
 
     fams_to_process = generator_of_unprocessed_fams(db_path, output_path)
-    pipeline.add_stage(Stage(FamGenerator, nr_procs=1, fam_generator=fams_to_process))
-    pipeline.add_stage(Stage(HashWorker, nr_procs=nr_procs, db_path=db_path))
-    pipeline.add_stage(Stage(Collector, nr_procs=1, output_path=output_path))
-    print("setup pipeline, about to start it.")
-    pipeline.run()
-    print("finished with computing the MinHashLSH for {}".format(db_path))
+    while True:
+        pipeline = Pipeline()
+        pipeline.add_stage(
+            Stage(FamGenerator, nr_procs=1, fam_generator=fams_to_process)
+        )
+        pipeline.add_stage(Stage(HashWorker, nr_procs=nr_procs, db_path=db_path))
+        pipeline.add_stage(Stage(Collector, nr_procs=1, output_path=output_path))
+        print("setup pipeline, about to start it.")
+        pipeline.run()
+        print("finished with computing the MinHashLSH for {}".format(db_path))
+
+        fams_to_process = set(generator_of_unprocessed_fams(db_path, output_path))
+        if len(fams_to_process) == 0:
+            break
+    print("for sure all families processes. we're done!")
 
 
 def compare_versions(output_file, target_path, *old_path):

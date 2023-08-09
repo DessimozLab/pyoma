@@ -1,6 +1,8 @@
 import functools
 import queue
 import signal
+import threading
+import uuid
 
 import tables
 import ete3
@@ -46,14 +48,17 @@ class BaseProfileBuilderProcess(mp.Process):
         out_queue: mp.Queue,
         nr_workers_pre_step: mp.Value,
         log_queue: mp.Queue,
-        **kwargs
+        control_queue: mp.Queue,
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.in_queue = in_queue
         self.out_queue = out_queue
         self.log_queue = log_queue
         self.outstanding_dones = nr_workers_pre_step
+        self.control_queue = control_queue
         self.quit_req = False
+        self.proc_id = uuid.uuid4()
 
     def setup(self):
         pass
@@ -84,7 +89,12 @@ class BaseProfileBuilderProcess(mp.Process):
             except queue.Empty:
                 nr_empty_cnt += 1
                 if nr_empty_cnt > 10:
-                    logger.info("input queue seems to be empty ({}x), but expecting still some chunks".format(nr_empty_cnt))
+                    logger.info(
+                        "input queue seems to be empty ({}x), but expecting still some chunks".format(
+                            nr_empty_cnt
+                        )
+                    )
+                self.control_queue.put((self.proc_id, "NO WORK"))
                 continue
 
             if item is None:
@@ -92,11 +102,13 @@ class BaseProfileBuilderProcess(mp.Process):
                 with self.outstanding_dones.get_lock():
                     self.outstanding_dones.value -= 1
                 logger.info("outstanding_dones: {}".format(self.outstanding_dones))
-
+                self.control_queue.put((self.proc_id, "DONE"))
+                logger.debug(f"sent DONE info to control queue ({self.proc_id})")
             else:
                 result = self.handle_input(item)
                 if result is not None:
                     self.out_queue.put(result)
+                self.control_queue.put((self.proc_id, "JOB_HANDELED"))
         if not self.quit_req:
             self.out_queue.put(None)  # signal end of work for this worker
             logger.info("sent sentinel to next stage")
@@ -130,12 +142,14 @@ class SourceProcess(BaseProfileBuilderProcess):
                         qsize, input
                     )
                 )
+            self.control_queue.put((self.proc_id, "ALIVE"))
 
     def run(self):
         self.setup()
         for input in self.generate_data():
             self._put_in_queue_with_status(input)
         self.out_queue.put(None)
+        self.control_queue.put((self.proc_id, "DONE"))
         logger.info("sent sentinel to next stage")
         self.finalize()
 
@@ -345,6 +359,63 @@ def logger_listener(log_queue):
         logger.handle(record)
 
 
+class PipelineControllerThread(threading.Thread):
+    def __init__(
+        self, control_queue, log_queue, processes, time_until_kill=1800, **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.control_queue = control_queue
+        self.log_queue = log_queue
+        self.processes = {p.proc_id: [0, p] for p in processes}
+        self.time_until_kill = time_until_kill
+        self._last_timeout_check = time.time()
+
+    def _process_alive_info(self, item):
+        proc_id, flag = item
+        if flag is "DONE":
+            self.processes.pop(proc_id)
+        else:
+            self.processes[proc_id][0] = time.time()
+
+    def _kill_orphan_procs(self):
+        to_rem = []
+        for proc_id, proc_info in self.processes:
+            last_seen, proc = proc_info[0], proc_info[1]
+            if last_seen == 0:
+                logger.info(f"process {proc.name}[{proc.proc_id}] not yet started?")
+            elif time.time() - last_seen > self.time_until_kill:
+                logger.warning(
+                    f"process {proc.name}[{proc.proc_id}] seems to be dead. No alive signal since {time.time()-last_seen}sec."
+                )
+                proc.terminate()
+                proc.out_queue.put(None)
+                to_rem.append(proc_id)
+        for proc_id in to_rem:
+            self.processes.pop(proc_id)
+        logger.info(f"killed {len(to_rem)} orphan processes")
+
+    def run(self):
+        logger.info("starting controler thread")
+        nr_empty_cnt = 0
+        while len(self.processes) > 0:
+            try:
+                item = self.control_queue.get(timeout=30)
+                nr_empty_cnt = 0
+                if item is None:
+                    break  # None indicates end of pipeline
+                self._process_alive_info(item)
+            except queue.Empty:
+                nr_empty_cnt += 1
+                if nr_empty_cnt > 10:
+                    logger.info(
+                        "control queue seems to be empty ({}x), but expecting still some running jobs".format(
+                            nr_empty_cnt
+                        )
+                    )
+            if time.time() - self._last_timeout_check > 10:
+                self._kill_orphan_procs()
+
+
 class Stage(object):
     def __init__(self, process, nr_procs, **kwargs):
         self.process = process
@@ -368,6 +439,7 @@ class Pipeline(object):
         logger_process.start()
         rootlogger_configurer(log_queue)
         print("setting up pipeline")
+        control_queue = mp.Queue
 
         procs = []
         for i in range(len(self.stages) - 1, 0, -1):
@@ -383,8 +455,9 @@ class Pipeline(object):
                     out_queue=stage.out_queue,
                     nr_workers_pre_step=stage.outstanding_dones,
                     log_queue=log_queue,
+                    control_queue=control_queue,
                     daemon=True,
-                    **stage.kwargs
+                    **stage.kwargs,
                 )
                 procs.append(p)
                 p.start()
@@ -397,6 +470,9 @@ class Pipeline(object):
             )
             procs.append(p)
             p.start()
+        control_thread = PipelineControllerThread(
+            control_queue=control_queue, log_queue=log_queue, processes=procs
+        )
         print("all processes started")
         try:
             for p in procs:
@@ -405,7 +481,9 @@ class Pipeline(object):
             print("keyboard interupt in main loop")
             time.sleep(20)
         log_queue.put(None)
+        control_queue.put(None)
         logger_process.join()
+        control_thread.join()
 
         print("successfully joined all processes")
 

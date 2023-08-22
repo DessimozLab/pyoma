@@ -1107,17 +1107,17 @@ class Database(object):
         hog_id will be returned, i.e. a set of taxonomic ranges for
         which no duplication occurred in between for this HOG.
 
-        The method returns an generator of :class:`models.HOG` instances.
+        The method returns a generator of :class:`models.HOG` instances.
 
         :param (bytes, str) hog_id: the hog_id of interest
 
         :param str level: the root level, defaults to the root of the subhog
 
-        :param bool include_subids: whether or not to include suhogs
+        :param bool include_subids: whether to include suhogs
                                     that originated after a duplication
                                     in the query (sub)HOG. defaults to False
 
-        :param bool include_leaf_levels: whether or not to include the level
+        :param bool include_leaf_levels: whether to include the level
                                     of the extant species. defaults to True.
                                     Leaf levels have by definition only one
                                     member and are thus not of limited interest
@@ -1133,8 +1133,18 @@ class Database(object):
             try:
                 subtax = self.tax.get_subtaxonomy_rooted_at(level, collapse=False)
                 if not include_leaf_levels:
-                    internal_node_idx = subtax.tax_table["NCBITaxonId"].searchsorted(
+                    idx = subtax.tax_table["NCBITaxonId"].searchsorted(
                         subtax.tax_table["ParentTaxonId"], sorter=subtax.taxid_key
+                    )
+                    internal_node_idx = set(
+                        pos
+                        for i, pos in enumerate(idx)
+                        if 0 <= pos < len(subtax.tax_table)
+                        and subtax.tax_table["NCBITaxonId"][pos]
+                        == subtax.tax_table["ParentTaxonId"][i]
+                    )
+                    internal_node_idx = numpy.fromiter(
+                        internal_node_idx, dtype="i4", count=len(internal_node_idx)
                     )
                     subtax.tax_table = subtax.tax_table[internal_node_idx]
                 children = set(n["Name"] for n in subtax.tax_table)
@@ -1142,7 +1152,7 @@ class Database(object):
                     level.encode("utf-8") if isinstance(level, str) else level
                 )
             except KeyError as e:
-                raise ValueError("invalid level: {}".format(level))
+                raise ValueError(f"invalid level: {level}") from e
         elif not include_leaf_levels:
             children = self.tax.all_hog_levels
 

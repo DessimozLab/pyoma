@@ -373,7 +373,7 @@ class PipelineControllerThread(threading.Thread):
     def _process_alive_info(self, item):
         proc_id, flag = item
         logger.debug(item)
-        if flag is "DONE":
+        if flag == "DONE":
             self.processes.pop(proc_id)
         else:
             self.processes[proc_id][0] = time.time()

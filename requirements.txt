@@ -1,6 +1,6 @@
 future>=0.14.3
 numpy>=1.16.0
-numexpr>=2.4
+numexpr>=2.8
 tables>=3.6.1
 cython
 PySAIS

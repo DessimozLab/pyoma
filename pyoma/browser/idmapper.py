@@ -7,6 +7,7 @@ import re
 import numpy
 import pandas as pd
 import tables
+from typing import Tuple, Mapping
 from .decorators import timethis
 from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .exceptions import TooUnspecificQuery
@@ -85,23 +86,30 @@ class XRefSearchHelper:
             return m.group("base")
         return query
 
-    def _query_prefix(self, query: bytes, entrynr_range=None, exact_match=False):
+    def _query_prefix(
+        self, query: bytes, entrynr_range=None, exact_match=False
+    ) -> Tuple[str, Mapping]:
+        condvals = {}
         if exact_match:
-            stmt = "(XRefId == {!r})".format(query)
+            stmt = "(XRefId == query)"
+            condvals["query"] = query
         else:
-            low = query
-            high = query[:-1] + bytes([query[-1] + 1])
-            stmt = "(XRefId >= {!r}) & (XRefId < {!r})".format(low, high)
+            condvals["low"] = query
+            condvals["high"] = query[:-1] + bytes([query[-1] + 1])
+            stmt = "(XRefId >= low) & (XRefId < high)"
         if entrynr_range is not None:
-            stmt += "& (EntryNr >= {}) & (EntryNr < {})".format(*entrynr_range)
-        return stmt
+            stmt += "& (EntryNr >= enr_min) & (EntryNr < enr_max)"
+            condvals.update(
+                {k: v for k, v in zip(("enr_min", "enr_max"), entrynr_range)}
+            )
+        return stmt, condvals
 
     def _prefix_reduced_search(self, query, entrynr_range, limit=None, exact=False):
         query = self._version_free_query(query).lower().encode("utf-8")
         if query in self.gene_name_lookup:
             return self.gene_name_lookup.get_matching_xref_row_nrs(query, entrynr_range)
         red_tab_it = self.reduced_xref_tab.where(
-            self._query_prefix(query, entrynr_range, exact)
+            *self._query_prefix(query, entrynr_range, exact)
         )
         xref_rows = numpy.fromiter(
             itertools.islice((row["XRefRow"] for row in red_tab_it), limit), dtype="i4"
@@ -115,7 +123,7 @@ class XRefSearchHelper:
         cnts = self.gene_name_lookup.count(query)
         if cnts == 0:
             cnts = count_elements(
-                self.reduced_xref_tab.where(self._query_prefix(query, entrynr_range))
+                self.reduced_xref_tab.where(*self._query_prefix(query, entrynr_range))
             )
         return cnts
 
@@ -161,7 +169,7 @@ class XRefSearchHelper:
             print(self.xref_tab)
             print(self.xref_tab.nrows)
             it = self.xref_tab.where(
-                self._query_prefix(query, entrynr_range, exact_match=exact)
+                *self._query_prefix(query, entrynr_range, exact_match=exact)
             )
             xrefs = numpy.fromiter(
                 (row.fetch_all_fields() for row in itertools.islice(it, limit)),
@@ -176,7 +184,7 @@ class XRefSearchHelper:
         from .db import count_elements
 
         query = query.encode("utf-8")
-        it = self.xref_tab.where(self._query_prefix(query, entrynr_range))
+        it = self.xref_tab.where(*self._query_prefix(query, entrynr_range))
         return count_elements(it)
 
     def search(self, query, mode=None, entrynr_range=None, limit=None):

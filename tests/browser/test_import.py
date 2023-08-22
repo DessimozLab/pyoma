@@ -108,7 +108,7 @@ class GenomeDirectImportTest(ImportIntegrationBase):
         self.assertEqual(len(gstab), len(data["GS"]), "unexpected number of genomes")
         for genome in data["GS"]:
             gs = gstab.read_where(
-                "UniProtSpeciesCode == {!r}".format(genome[1].encode("utf-8"))
+                "UniProtSpeciesCode == code", genome[1].encode("utf-8")
             )
             for key in (
                 (2, "TotEntries"),

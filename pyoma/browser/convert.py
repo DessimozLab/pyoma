@@ -216,9 +216,9 @@ def load_tsv_to_numpy(args):
 
 
 def read_vps_from_tsv(gs, ref_genome, basedir=None):
-    ref_genome_idx = gs.get_where_list("(UniProtSpeciesCode=={!r})".format(ref_genome))[
-        0
-    ]
+    ref_genome_idx = gs.get_where_list(
+        "(UniProtSpeciesCode==code)", condvars={"code": ref_genome}
+    )[0]
     job_args = []
     if basedir is None:
         basedir = os.path.join(os.environ["DARWIN_OMADATA_PATH"], "Phase4")

@@ -83,9 +83,13 @@ class CacheBuilderWorker(mp.Process):
 
     def load_fam_members(self, fam):
         members = []
-        hog_range = [self.db.format_hogid(x).encode("utf-8") for x in (fam, fam + 1)]
+        vals = {
+            k: self.db.format_hogid(x).encode("utf-8")
+            for k, x in zip(("fam", "fam_next"), (fam, fam + 1))
+        }
         for row in self.h5.get_node("/Protein/Entries").where(
-            "({!r} <= OmaHOG) & (OmaHOG < {!r})".format(*hog_range)
+            "(fam <= OmaHOG) & (OmaHOG < fam_next)",
+            condvars=vals,
         ):
             members.append(
                 Protein(row["EntryNr"], row["OmaHOG"].decode(), row["OmaGroup"])

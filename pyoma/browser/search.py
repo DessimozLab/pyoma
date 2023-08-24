@@ -301,7 +301,7 @@ class TaxSearch(BaseSearch):
                     for z, approx_match in zip(tax_nodes, approx_matches)
                 ]
                 tax.extend(
-                    (int(g["NCBITaxonId"]), score)
+                    (g.ncbi_taxon_id, score)
                     for g, score in zip(genomes, genome_approx_scores)
                 )
         return tax

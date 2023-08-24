@@ -2957,9 +2957,13 @@ class OmaIdMapper(object):
                     pass
             return self.genome_from_SciName(code)
 
-    def approx_search_genomes(self, pattern):
+    def approx_search_genomes(self, pattern, scores=False):
         candidates = self._approx_genome_matcher.search_approx(pattern)
-        return [Genome(self._db, self.genome_table[z[2]]) for z in candidates]
+        genomes = [Genome(self._db, self.genome_table[z[2]]) for z in candidates]
+        if scores:
+            return genomes, [z[0] for z in candidates]
+        else:
+            return genomes
 
     def omaid_to_entry_nr(self, omaid):
         """returns the internal numeric entrynr from a

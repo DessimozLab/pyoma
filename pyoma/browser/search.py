@@ -283,6 +283,11 @@ class TaxSearch(BaseSearch):
                 genome = self.db.id_mapper["OMA"].identify_genome(self.term)
                 tax = [(int(genome["NCBITaxonId"]), 1.0)]
             except UnknownSpecies:
+                # fuzzy match of all extant genomes in OMA
+                genomes, genome_approx_scores = self.db.id_mapper[
+                    "OMA"
+                ].approx_search_genomes(self.term, scores=True)
+                logger.debug("{} matches approximately to {}", self.term, genomes)
                 # fuzzy match of all taxonomic names in OMA.
                 approx_matches = self.db.tax.approx_search(self.term)
                 logger.debug(
@@ -295,6 +300,10 @@ class TaxSearch(BaseSearch):
                     (int(z["NCBITaxonId"]), approx_match[0])
                     for z, approx_match in zip(tax_nodes, approx_matches)
                 ]
+                tax.extend(
+                    (int(g["NCBITaxonId"]), score)
+                    for g, score in zip(genomes, genome_approx_scores)
+                )
         return tax
 
     def search_entries(self):

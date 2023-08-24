@@ -316,6 +316,8 @@ class TaxSearch(BaseSearch):
         ancestral_genomes = []
         for tax, score in self._matched_taxons:
             ag = models.AncestralGenome(self.db, tax)
+            if len(ag.extant_genomes) <= 1:
+                continue
             ag.match_score = score
             ancestral_genomes.append(ag)
         return ancestral_genomes

@@ -283,12 +283,14 @@ class CombineTest(TestWithDbInstance):
         self.assertEqual(1, len(res.groups))
 
     def test_combine_tax_and_hog(self):
+        # this is a non-furcating species node, so expect to find hogs at level Saccharomycetaceae
         s1 = TaxSearch(self.db, "Saccharomycetes")
         s2 = HogIDSearch(self.db, "HOG:0000165")
         res = SearchResult() & s1 & s2
         self.assertTrue(
             any(
-                x.hog_id.startswith("HOG:0000165.1a") and x.level == "Saccharomycetes"
+                x.hog_id.startswith("HOG:0000165.1a")
+                and x.level == "Saccharomycetaceae"
                 for x in res.groups.values()
                 if isinstance(x, HOG)
             ),

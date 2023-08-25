@@ -318,6 +318,14 @@ class TaxSearch(BaseSearch):
             ag = models.AncestralGenome(self.db, tax)
             if len(ag.extant_genomes) <= 1:
                 continue
+            if ag.sciname not in self.db.tax.all_hog_levels:
+                orig_sciname = ag.sciname
+                while True:
+                    childs = self.db.tax._direct_children_taxa(int(ag.ncbi_taxon_id))
+                    if len(childs) == 0 or len(childs) > 1:
+                        break
+                    ag = models.AncestralGenome(self.db, int(childs[0]["NCBITaxonId"]))
+                ag.common_name = f"Representative for '{orig_sciname}'"
             ag.match_score = score
             ancestral_genomes.append(ag)
         return ancestral_genomes

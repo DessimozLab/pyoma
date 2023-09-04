@@ -5,6 +5,7 @@ import logging
 import math
 import re
 from functools import lru_cache
+from collections import deque
 
 import numpy
 
@@ -86,6 +87,7 @@ class GOterm(object):
         self.definition = " ".join(stanza["def"])
         self.aspect = GOAspect.from_string(" ".join(stanza["namespace"]))
         self.is_a = [validate_go_id(parent) for parent in stanza["is_a"]]
+        self.min_depth = 100000
         for rel in stanza["relationship"]:
             reltype, partner = rel.strip().split()
             if not reltype in self.__dict__.keys():
@@ -244,6 +246,26 @@ class GeneOntology(object):
         # this can be only done once all the terms have been created
         for term in self.terms.values():
             term.replace_parentnames_by_refs(self.terms)
+
+        # compute mindepth of terms in a bfg traversal
+        self._compute_min_depths()
+
+    def _compute_min_depths(self):
+        root_terms = [
+            t
+            for t in self.terms.values()
+            if not any((len(getattr(t, rel, [])) > 0 for rel in self.up_rels))
+        ]
+        bfg_queue = deque(((t, 0) for t in root_terms))
+        while len(bfg_queue) > 0:
+            term, depth = bfg_queue.popleft()
+            if depth < term.min_depth:
+                term.min_depth = depth
+                bfg_queue.extend(
+                    (child, depth + 1)
+                    for rel in self.down_rels
+                    for child in getattr(term, rel, [])
+                )
 
     def ensure_term(self, term):
         """returns the term object associated with term. if term is already

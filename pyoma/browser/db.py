@@ -14,7 +14,7 @@ import warnings
 from bisect import bisect_left
 from builtins import chr, range, object, zip, bytes, str
 from xml.etree import ElementTree as et
-from typing import Union, Tuple, Optional, AnyStr, Set, Generator
+from typing import Union, Tuple, Optional, AnyStr, Set, Generator, Mapping
 
 import dateutil
 import fuzzyset
@@ -199,7 +199,9 @@ def _get_limited_synteny_graph(
     return nx.relabel_nodes(S, lambda x: hog_tab[x]["ID"].decode())
 
 
-def read_table_where(tab: tables.Table, query: str, field: str = None) -> numpy.ndarray:
+def read_table_where(
+    tab: tables.Table, query: str, condvars: Optional[Mapping] = None, field: str = None
+) -> numpy.ndarray:
     """Reads data of a pytables table fulfilling the query as a numpy array.
 
     This is a more efficient implementation of the :py:method:`tables.Table.read_where`
@@ -207,12 +209,13 @@ def read_table_where(tab: tables.Table, query: str, field: str = None) -> numpy.
 
     :param tab: The table to be read from
     :param query: the query
+    :param condvars: mapping of condition variables of the query
     :param field: which column to be read.
                   If set to None, all columns are read, if set to 'nrow',
                   the row number is returned
     :return the data as a numpy array
     """
-    it = tab.where(query)
+    it = tab.where(query, condvars=condvars)
     try:
         first = next(it)
     except StopIteration:
@@ -1018,16 +1021,18 @@ class Database(object):
         target_chr = dat["Chromosome"]
         genome_range = self.id_mapper["OMA"].genome_range(entry_nr)
         f = 5
+        condvars = {
+            "enr_max": min(genome_range[1], entry_nr + f * window),
+            "enr_min": max(genome_range[0], entry_nr - f * window),
+            "chr": target_chr,
+        }
         data = read_table_where(
             self.db.root.Protein.Entries,
-            "(EntryNr >= {:d}) & (EntryNr <= {:d}) & "
-            "(Chromosome == {!r}) & "
+            "(EntryNr >= enr_min) & (EntryNr <= enr_max) & "
+            "(Chromosome == chr) & "
             "((AltSpliceVariant == 0) |"
-            " (AltSpliceVariant == EntryNr))".format(
-                max(genome_range[0], entry_nr - f * window),
-                min(genome_range[1], entry_nr + f * window),
-                target_chr,
-            ),
+            " (AltSpliceVariant == EntryNr))",
+            condvars=condvars,
         )
         data.sort(order=["LocusStart"])
         idx = int((data["EntryNr"] == entry_nr).nonzero()[0])
@@ -1107,17 +1112,17 @@ class Database(object):
         hog_id will be returned, i.e. a set of taxonomic ranges for
         which no duplication occurred in between for this HOG.
 
-        The method returns an generator of :class:`models.HOG` instances.
+        The method returns a generator of :class:`models.HOG` instances.
 
         :param (bytes, str) hog_id: the hog_id of interest
 
         :param str level: the root level, defaults to the root of the subhog
 
-        :param bool include_subids: whether or not to include suhogs
+        :param bool include_subids: whether to include suhogs
                                     that originated after a duplication
                                     in the query (sub)HOG. defaults to False
 
-        :param bool include_leaf_levels: whether or not to include the level
+        :param bool include_leaf_levels: whether to include the level
                                     of the extant species. defaults to True.
                                     Leaf levels have by definition only one
                                     member and are thus not of limited interest
@@ -1133,8 +1138,18 @@ class Database(object):
             try:
                 subtax = self.tax.get_subtaxonomy_rooted_at(level, collapse=False)
                 if not include_leaf_levels:
-                    internal_node_idx = subtax.tax_table["NCBITaxonId"].searchsorted(
+                    idx = subtax.tax_table["NCBITaxonId"].searchsorted(
                         subtax.tax_table["ParentTaxonId"], sorter=subtax.taxid_key
+                    )
+                    internal_node_idx = set(
+                        pos
+                        for i, pos in enumerate(idx)
+                        if 0 <= pos < len(subtax.tax_table)
+                        and subtax.tax_table["NCBITaxonId"][pos]
+                        == subtax.tax_table["ParentTaxonId"][i]
+                    )
+                    internal_node_idx = numpy.fromiter(
+                        internal_node_idx, dtype="i4", count=len(internal_node_idx)
                     )
                     subtax.tax_table = subtax.tax_table[internal_node_idx]
                 children = set(n["Name"] for n in subtax.tax_table)
@@ -1142,19 +1157,23 @@ class Database(object):
                     level.encode("utf-8") if isinstance(level, str) else level
                 )
             except KeyError as e:
-                raise ValueError("invalid level: {}".format(level))
+                raise ValueError(f"invalid level: {level}") from e
         elif not include_leaf_levels:
             children = self.tax.all_hog_levels
 
         if include_subids:
-            query = "(ID >= {!r}) & (ID < {!r})".format(*self._hog_lex_range(hog_id))
+            condvars = {
+                v: k
+                for v, k in zip(
+                    ("hogid_low", "hogid_high"), self._hog_lex_range(hog_id)
+                )
+            }
+            query = "(ID >= hogid_low) & (ID < hogid_high)"
         else:
-            hog_id_ascii = (
-                hog_id if isinstance(hog_id, bytes) else hog_id.encode("ascii")
-            )
-            query = "ID == {!r}".format(hog_id_ascii)
+            query = "ID == hogid"
+            condvars = {"hogid": hog_id}
 
-        for row in self.db.root.HogLevel.where(query):
+        for row in self.db.root.HogLevel.where(query, condvars=condvars):
             hog = row.fetch_all_fields()
             if (
                 (level is None or level in ("LUCA", b"LUCA")) and include_leaf_levels
@@ -1204,7 +1223,8 @@ class Database(object):
         lev = level if isinstance(level, bytes) else level.encode("ascii")
         return read_table_where(
             self.db.root.HogLevel,
-            "(Fam=={}) & (Level == {!r})".format(fam_nr, lev),
+            query="(Fam==fam) & (Level == lev)",
+            condvars={"fam": fam_nr, "lev": lev},
             field=field,
         )
 
@@ -1235,9 +1255,10 @@ class Database(object):
             parent_pos.update(
                 {lev: pos for pos, lev in enumerate(parent_taxnodes["Name"][::-1])}
             )
-        query = "(Fam == {}) & (ID <= {!r})".format(ref_hog["Fam"], hog_id)
+        query = "(Fam == fam) & (ID <= hogid)"
+        condvars = {"fam": ref_hog["Fam"], "hogid": hog_id}
         parent_hogs = [] * len(parent_pos)
-        for row in self.db.root.HogLevel.where(query):
+        for row in self.db.root.HogLevel.where(query, condvars=condvars):
             hog = row.fetch_all_fields()
             if not hog_id.startswith(hog["ID"]):
                 continue
@@ -1251,7 +1272,8 @@ class Database(object):
     def _members_of_hog_id(self, hog_id):
         hog_range = self._hog_lex_range(hog_id)
         it = self.db.root.Protein.Entries.where(
-            "({!r} <= OmaHOG) & (OmaHOG < {!r})".format(*hog_range)
+            "(low <= OmaHOG) & (OmaHOG < high)",
+            condvars={k: v for k, v in zip(("low", "high"), hog_range)},
         )
         # we need to filter them in case there are many (>26) paralog clusters,
         # in which case the hog_id need to be followed by a '.'
@@ -1395,16 +1417,17 @@ class Database(object):
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
 
-        query_fam = self.parse_hog_id(hog_id)
-        query = "(Fam == {:d})".format(query_fam)
+        condvars = {"fam": self.parse_hog_id(hog_id)}
+        query = "(Fam == fam)"
         try:
             anc_node = self._ancestral_node(level)
             hog_tab = anc_node.Hogs
         except DBConsistencyError:
             hog_tab = self.db.root.HogLevel
-            query += " & (Level == {!r})".format(level.encode("utf-8"))
+            query += " & (Level == lev)"
+            condvars["lev"] = level.encode("utf-8")
 
-        for hog in hog_tab.where(query):
+        for hog in hog_tab.where(query, condvars=condvars):
             if hog_id.startswith(hog["ID"]):
                 if hog_id == hog["ID"] or chr(hog_id[len(hog["ID"])]) == ".":
                     yield hog.fetch_all_fields()
@@ -1436,16 +1459,18 @@ class Database(object):
 
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
-        query_fam = self.parse_hog_id(hog_id)
-        query = "(Fam == {}) & (ID == {!r})".format(query_fam, hog_id)
+        condvars = {"query_fam": self.parse_hog_id(hog_id), "hogid": hog_id}
+        query = "(Fam == query_fam) & (ID == hogid)"
         if tab is None:
             tab = self.db.get_node("/HogLevel")
             if level is None:
-                query += " & (IsRoot == True)"
+                query += " & (IsRoot == is_root)"
+                condvars["is_root"] = True
             else:
-                query += " & (Level == {!r})".format(level.encode("ascii"))
+                query += " & (Level == lev)"
+                condvars["lev"] = level.encode("ascii")
         try:
-            row = next(tab.where(query))
+            row = next(tab.where(query, condvars=condvars))
             if field is not None:
                 if field == "_NROW":
                     return row.nrow
@@ -1685,7 +1710,7 @@ class Database(object):
         hogs = hl_tab
         if hog_id is None:
             all_hogs = {}
-            for row in hl_tab.where("Level == {!r}".format(level.encode("utf-8"))):
+            for row in hl_tab.where("Level == lev", {"lev": level.encode("utf-8")}):
                 all_hogs[row.nrow] = row.fetch_all_fields()
             hog_row = None
             hogs = all_hogs
@@ -1853,7 +1878,7 @@ class Database(object):
                 group_meta_tab = self.db.get_node("/OmaGroups/MetaData")
                 try:
                     e = next(
-                        group_meta_tab.where("(Fingerprint == {!r})".format(group_id))
+                        group_meta_tab.where("(Fingerprint == og)", {"og": group_id})
                     )
                     return int(e["GroupNr"])
                 except StopIteration:
@@ -2139,10 +2164,13 @@ class Database(object):
         """
         if isinstance(ec, str):
             ec = ec.encode("utf-8")
-        query = "(ECacc == {!r})".format(ec)
+        query = "(ECacc == ec)"
         ectab = self.get_hdf5_handle().get_node("/Annotations/EC")
         return self._fetch_entry_nrs(
-            self._iter_rows_with_entrynr_filter(ectab, query, entrynr_filter), limit
+            self._iter_rows_with_entrynr_filter(
+                ectab, query, condvars={"ec", ec}, entrynr_filter=entrynr_filter
+            ),
+            limit,
         )
 
     def count_ec_annotations(self, ec: AnyStr) -> int:
@@ -2180,12 +2208,16 @@ class Database(object):
         :return: Entry numbers of proteins that contain the domain id.
         :rtype: set[int]"""
 
-        if isinstance(domain_id, str):
-            domain_id = domain_id.encode("utf-8")
-        query = "(DomainId == {!r})".format(domain_id)
+        vars = {
+            "dom": domain_id.encode("utf-8")
+            if isinstance(domain_id, str)
+            else domain_id
+        }
+        query = "(DomainId == dom)"
         domtab = self.get_hdf5_handle().get_node("/Annotations/Domains")
         return self._fetch_entry_nrs(
-            self._iter_rows_with_entrynr_filter(domtab, query, entrynr_filter), limit
+            self._iter_rows_with_entrynr_filter(domtab, query, vars, entrynr_filter),
+            limit,
         )
 
     def count_domain_id_annotations(self, domain_id: AnyStr) -> int:
@@ -2228,17 +2260,21 @@ class Database(object):
             term = term[3:]
 
         try:
-            term = int(term)
+            vars = {"term_nr": int(term)}
         except ValueError:
             raise InvalidId("Invalid GO ID: {}".format(term))
 
         gotab = self.get_hdf5_handle().get_node("/Annotations/GeneOntology")
-        query = "(TermNr == {})".format(term)
+        query = "(TermNr == term_nr)"
         if evidence is not None:
-            query += " & (Evidence == {!r})".format(evidence.encode("utf-8"))
+            vars["ev"] = evidence.encode("utf-8")
+            query += " & (Evidence == ev)"
 
         return self._fetch_entry_nrs(
-            self._iter_rows_with_entrynr_filter(gotab, query, entrynr_filter), limit
+            self._iter_rows_with_entrynr_filter(
+                gotab, query, condvars=vars, entrynr_filter=entrynr_filter
+            ),
+            limit,
         )
 
     def count_go_annotations(self, term: Union[AnyStr, int]) -> int:
@@ -2276,6 +2312,7 @@ class Database(object):
         self,
         tab: tables.Table,
         query_stub: str,
+        condvars: Optional[Mapping] = None,
         entrynr_filter: Union[Tuple[int, int], Set[int], None] = None,
     ) -> Generator:
         query = query_stub
@@ -2285,7 +2322,7 @@ class Database(object):
             query += " & (EntryNr >= {}) & (EntryNr <= {})".format(*rng)
             if isinstance(entrynr_filter, set):
                 cond = lambda row: row["EntryNr"] in entrynr_filter
-        for row in tab.where(query):
+        for row in tab.where(query, condvars=condvars):
             if cond(row):
                 yield row
 
@@ -2920,9 +2957,13 @@ class OmaIdMapper(object):
                     pass
             return self.genome_from_SciName(code)
 
-    def approx_search_genomes(self, pattern):
+    def approx_search_genomes(self, pattern, scores=False):
         candidates = self._approx_genome_matcher.search_approx(pattern)
-        return [Genome(self._db, self.genome_table[z[2]]) for z in candidates]
+        genomes = [Genome(self._db, self.genome_table[z[2]]) for z in candidates]
+        if scores:
+            return genomes, [z[0] for z in candidates]
+        else:
+            return genomes
 
     def omaid_to_entry_nr(self, omaid):
         """returns the internal numeric entrynr from a
@@ -3010,7 +3051,8 @@ class HogIdForwardMapper(object):
     def map_hogid(self, hogid):
         hogid = hogid.encode("utf-8") if isinstance(hogid, str) else hogid
         cand_iter = self.h5_hogmap.get_node("/hogmap").where(
-            "Old == {!r}".format(hogid)
+            "Old == hogid",
+            {"hogid": hogid},
         )
         return {c["New"].decode(): float(c["Jaccard"]) for c in cand_iter}
 

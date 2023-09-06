@@ -216,9 +216,9 @@ def load_tsv_to_numpy(args):
 
 
 def read_vps_from_tsv(gs, ref_genome, basedir=None):
-    ref_genome_idx = gs.get_where_list("(UniProtSpeciesCode=={!r})".format(ref_genome))[
-        0
-    ]
+    ref_genome_idx = gs.get_where_list(
+        "(UniProtSpeciesCode==code)", condvars={"code": ref_genome}
+    )[0]
     job_args = []
     if basedir is None:
         basedir = os.path.join(os.environ["DARWIN_OMADATA_PATH"], "Phase4")
@@ -2142,7 +2142,7 @@ class GeneOntologyManager(object):
 
     def _get_obo_version(self, obo_arr):
         header = obo_arr[0:1000].tobytes()
-        rel_info = re.search(b"data-version:\s*(?P<version>[\w/_ -]+)", header)
+        rel_info = re.search(rb"data-version:\s*(?P<version>[\w/_ -]+)", header)
         if rel_info is not None:
             rel_info = rel_info.group("version").decode()
         return rel_info
@@ -2176,7 +2176,7 @@ class GeneOntologyManager(object):
                 continue
             rem = rem.replace("{", "[")
             rem = rem.replace("}", "]")
-            rem = self.quote_re.sub('\g<1>"\g<2>"\g<3>', rem)
+            rem = self.quote_re.sub(r'\g<1>"\g<2>"\g<3>', rem)
             for evi, refs in eval(rem):
                 for ref in refs:
                     self._go_buf.append((enr, term_nr, evi, ref.encode("utf-8")))

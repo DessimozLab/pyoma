@@ -283,6 +283,11 @@ class TaxSearch(BaseSearch):
                 genome = self.db.id_mapper["OMA"].identify_genome(self.term)
                 tax = [(int(genome["NCBITaxonId"]), 1.0)]
             except UnknownSpecies:
+                # fuzzy match of all extant genomes in OMA
+                genomes, genome_approx_scores = self.db.id_mapper[
+                    "OMA"
+                ].approx_search_genomes(self.term, scores=True)
+                logger.debug("{} matches approximately to {}", self.term, genomes)
                 # fuzzy match of all taxonomic names in OMA.
                 approx_matches = self.db.tax.approx_search(self.term)
                 logger.debug(
@@ -295,6 +300,10 @@ class TaxSearch(BaseSearch):
                     (int(z["NCBITaxonId"]), approx_match[0])
                     for z, approx_match in zip(tax_nodes, approx_matches)
                 ]
+                tax.extend(
+                    (g.ncbi_taxon_id, score)
+                    for g, score in zip(genomes, genome_approx_scores)
+                )
         return tax
 
     def search_entries(self):
@@ -307,6 +316,16 @@ class TaxSearch(BaseSearch):
         ancestral_genomes = []
         for tax, score in self._matched_taxons:
             ag = models.AncestralGenome(self.db, tax)
+            if len(ag.extant_genomes) <= 1:
+                continue
+            if ag.sciname not in self.db.tax.all_hog_levels:
+                orig_sciname = ag.sciname
+                while True:
+                    childs = self.db.tax._direct_children_taxa(int(ag.ncbi_taxon_id))
+                    if len(childs) == 0 or len(childs) > 1:
+                        break
+                    ag = models.AncestralGenome(self.db, int(childs[0]["NCBITaxonId"]))
+                ag.common_name = f"Representative for '{orig_sciname}'"
             ag.match_score = score
             ancestral_genomes.append(ag)
         return ancestral_genomes

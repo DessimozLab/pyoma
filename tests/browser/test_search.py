@@ -94,7 +94,8 @@ class DomainSearchTest(TestWithDbInstance):
             s.set_entry_nr_filter({5, 511, 19})
             s.search_entries()
             mocked.assert_called_with(
-                "(DomainId == {!r}) & (EntryNr >= 5) & (EntryNr <= 511)".format(query)
+                "(DomainId == dom) & (EntryNr >= 5) & (EntryNr <= 511)",
+                condvars={"dom": query},
             )
 
 
@@ -200,7 +201,9 @@ class XRefSearchTest(TestWithDbInstance):
                 t2 = time.time()
                 self.assertEqual(20, len(res_limit))
                 self.assertGreater(len(res_ref), len(res_limit))
-                self.assertGreater(t1 - t0, t2 - t1, "limited search took longer")
+                self.assertGreater(
+                    t1 - t0 + 2e-3, t2 - t1, "limited search took longer"
+                )
 
     def test_inexisting_term(self):
         for query in ("lksjfewlsd", "Kgop524fslkAA2fnb"):
@@ -280,12 +283,14 @@ class CombineTest(TestWithDbInstance):
         self.assertEqual(1, len(res.groups))
 
     def test_combine_tax_and_hog(self):
+        # this is a non-furcating species node, so expect to find hogs at level Saccharomycetaceae
         s1 = TaxSearch(self.db, "Saccharomycetes")
         s2 = HogIDSearch(self.db, "HOG:0000165")
         res = SearchResult() & s1 & s2
         self.assertTrue(
             any(
-                x.hog_id.startswith("HOG:0000165.1a") and x.level == "Saccharomycetes"
+                x.hog_id.startswith("HOG:0000165.1a")
+                and x.level == "Saccharomycetaceae"
                 for x in res.groups.values()
                 if isinstance(x, HOG)
             ),

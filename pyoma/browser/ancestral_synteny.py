@@ -276,8 +276,9 @@ def taxid_from_level(h5, level):
 @concurrent.process(timeout=1200)
 def hogid_2_rownr(h5, level):
     lookup = {}
-    level_query = "Level == {!r}".format(level.encode("utf-8"))
-    row_iter = h5.get_hdf5_handle().root.HogLevel.where(level_query)
+    row_iter = h5.get_hdf5_handle().root.HogLevel.where(
+        "Level == lev", {"lev": level.encode("utf-8")}
+    )
     for row in row_iter:
         lookup[row["ID"].decode()] = row.nrow
     logger.info("hogmap: found {} hog at level {}".format(len(lookup), level))

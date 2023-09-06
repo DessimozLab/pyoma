@@ -18,6 +18,7 @@ import pandas as pd
 import logging
 
 logger = logging.getLogger(__name__)
+LONGONT = {"F": "MF", "P": "BP", "C": "CC"}
 
 
 class GOEnrichmentAnalysis(object):
@@ -114,9 +115,9 @@ class GOEnrichmentAnalysis(object):
             columns=[
                 "GO_ID",
                 "study_count",
-                "pop_count",
-                "Study_Entries",
-                "study_n",
+                "population_count",
+                "study_entries_with_go_term",
+                "study_size",
                 "pop_n",
                 "p_uncorrected",
             ],
@@ -137,33 +138,57 @@ class GOEnrichmentAnalysis(object):
             df = df[df["p_bonferroni"] <= alpha]
 
         # results
-        df["GO_Name"] = df["GO_ID"].apply(lambda t: t.name)
-        # df["GO_Depth"] = df["GO_ID"].apply(lambda t: self._go[t].min_depth)
-        df["GO_Aspect"] = df["GO_ID"].apply(lambda t: GOAspect.to_char(t.aspect))
+        df["GO_name"] = df["GO_ID"].apply(lambda t: t.name)
+        df["GO_depth"] = df["GO_ID"].apply(lambda t: t.min_depth)
+        df["GO_aspect"] = df["GO_ID"].apply(
+            lambda t: LONGONT[GOAspect.to_char(t.aspect)]
+        )
         df["GO_ID"] = df["GO_ID"].apply(lambda t: str(t))
 
-        df["Study_Proportion"] = df.apply(
-            lambda x: (x["study_count"] / x["study_n"]), axis=1
+        df["study_proportion"] = df.apply(
+            lambda x: (x["study_count"] / x["study_size"]), axis=1
         )
-        df["Study_Ratio"] = df.apply(
-            lambda x: "{} / {}".format(x["study_count"], x["study_n"]), axis=1
+        df["study_ratio"] = df.apply(
+            lambda x: "{} / {}".format(x["study_count"], x["study_size"]), axis=1
         )
-        df["Study_Entries"] = df["Study_Entries"].apply(
+        df["study_entries_with_go_term"] = df["study_entries_with_go_term"].apply(
             lambda x: ", ".join(
                 sorted(map(lambda e: e.decode() if isinstance(e, bytes) else str(e), x))
             )
         )
 
-        df["Population_Proportion"] = df.apply(
-            lambda x: (x["pop_count"] / x["pop_n"]), axis=1
+        df["population_proportion"] = df.apply(
+            lambda x: (x["population_count"] / x["pop_n"]), axis=1
         )
-        df["Population_Ratio"] = df.apply(
-            lambda x: "{} / {}".format(x["pop_count"], x["pop_n"]), axis=1
+        df["population_ratio"] = df.apply(
+            lambda x: "{} / {}".format(x["population_count"], x["pop_n"]), axis=1
         )
-        df["Fold_Change"] = df["Study_Proportion"] / df["Population_Proportion"]
+        df["population_size"] = df["pop_n"]
+        df["fold_change"] = df["study_proportion"] / df["population_proportion"]
+
+        cols = [
+            "GO_ID",
+            "GO_name",
+            "GO_aspect",
+            "GO_depth",
+            "p_uncorrected",
+            "p_bonferroni",
+            "p_fdr_bh",
+            "study_count",
+            "study_size",
+            "study_ratio",
+            "study_proportion",
+            "population_count",
+            "population_size",
+            "population_ratio",
+            "population_proportion",
+            "fold_change",
+            "study_entries_with_go_term",
+        ]
+        df = df[cols]
 
         return df.sort_values(
-            [f"p_{correction}", "Fold_Change", "p_uncorrected"],
+            [f"p_{correction}", "fold_change", "p_uncorrected"],
             ascending=[True, False, True],
         ).reset_index(drop=True)
 

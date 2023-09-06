@@ -418,11 +418,16 @@ class Genome(object):
             chr = chromosome.encode("utf-8")
         else:
             chr = "{}".format(chromosome).encode("utf-8")
-        query = "(EntryNr > {}) & (EntryNr <= {}) & (Chromosome == {!r})".format(
-            self.entry_nr_offset, self.entry_nr_offset + self.nr_entries, chr
-        )
+        query = "(EntryNr > enr_off) & (EntryNr <= enr_max) & (Chromosome == chr)"
+        condvars = {
+            "enr_off": self.entry_nr_offset,
+            "enr_max": self.entry_nr_offset + self.nr_entries,
+            "chr": chr,
+        }
         tab = self._db.get_hdf5_handle().get_node("/Protein/Entries")
-        chr_len = int(max((row["LocusEnd"] for row in tab.where(query))))
+        chr_len = int(
+            max((row["LocusEnd"] for row in tab.where(query, condvars=condvars)))
+        )
         return chr_len
 
     def __repr__(self):

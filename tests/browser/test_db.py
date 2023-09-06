@@ -405,6 +405,14 @@ class DatabaseTests(TestWithDbInstance):
             1, self.db.freq_aware_gene_ontology.semantic_similarity(55, 55)
         )
 
+    def test_mindepth_of_go(self):
+        examples = [(8150, 0), (168, 7), (5689, 5)]
+        for term, exp_depth in examples:
+            with self.subTest(case=term):
+                self.assertEqual(
+                    exp_depth, self.db.gene_ontology.ensure_term(term).min_depth
+                )
+
     def test_induced_pairwise_orthologs(self):
         query = "YEAST3523"
         query_entry = self.db.ensure_entry(self.db.id_resolver.resolve(query))

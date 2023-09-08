@@ -224,6 +224,7 @@ def ancestral_species_go_enrichment(
     level: Union[str, bytes, int],
     foreground_hogs: Iterable[Union[str, bytes]],
     alpha=0.05,
+    score_cutoff=0.1,
 ) -> pd.DataFrame:
     anc_node = db._ancestral_node(level)
     hog_ids = anc_node.Hogs.read(field="ID")
@@ -240,7 +241,8 @@ def ancestral_species_go_enrichment(
         raise ValueError("foreground_hogs must all be from the same level")
     annots = defaultdict(set)
     for row in anc_node.GeneOntology:
-        annots[hog_ids[row["HogRow"]]].add(int(row["TermNr"]))
+        if row["RawScore"] >= score_cutoff:
+            annots[hog_ids[row["HogRow"]]].add(int(row["TermNr"]))
     goea = GOEnrichmentAnalysis(db, hog_ids, annots=annots, ensure_term=True)
     return goea.run_study(foreground_hogs, alpha=alpha)
 

@@ -154,7 +154,7 @@ class HogIDSearch(BaseSearch):
                 ids = new_hogs.keys()
             else:
                 ids = (
-                    match.group("id"),
+                    ("" if match.group("prefix") else "HOG:") + match.group("id"),
                     "HOG:{}{:07d}".format(
                         self.db.release_char, int(match.group("fam"))
                     ),

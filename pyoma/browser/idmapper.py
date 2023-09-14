@@ -149,7 +149,10 @@ class XRefSearchHelper:
     def _search_suffix_with_constrains(self, query, entrynr_range, limit):
         args = {}
         if limit is not None:
-            args = {"limit": limit, "unspecific_exception": max(1000, 10 * limit)}
+            unspecific_threshold = (
+                max(1000, 10 * limit) if entrynr_range is not None else 50000
+            )
+            args = {"limit": limit, "unspecific_exception": unspecific_threshold}
         xref_rows = self._suffix_search(query, **args)
         xref_rows.sort()
         if entrynr_range is not None and self._xref_entry_offset is not None:

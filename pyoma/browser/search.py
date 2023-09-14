@@ -6,7 +6,13 @@ import re
 from typing import Union, List
 from dataclasses import dataclass
 
-from .exceptions import InvalidId, UnknownSpecies, InvalidTaxonId, AmbiguousID
+from .exceptions import (
+    InvalidId,
+    UnknownSpecies,
+    InvalidTaxonId,
+    AmbiguousID,
+    TooUnspecificQuery,
+)
 from . import db, models
 
 logger = logging.getLogger(__name__)
@@ -487,9 +493,15 @@ class XRefSearch(BaseSearch):
                     rng = (min(self.entry_filter), max(self.entry_filter))
                     filt = lambda enr: enr in self.entry_filter
 
-            self._matched_entries = self.db.id_resolver.search_protein(
-                self.term, limit=self.max_matches, entrynr_range=rng
-            )
+            try:
+                self._matched_entries = self.db.id_resolver.search_protein(
+                    self.term, limit=self.max_matches, entrynr_range=rng
+                )
+            except TooUnspecificQuery:
+                logger.exception(
+                    f"XRefSearch with term {self.term} and entry_range {rng}"
+                )
+                self._matched_entries = []
             if filt is not None:
                 self._matched_entries = {
                     enr: v for enr, v in self._matched_entries.items() if filt(enr)

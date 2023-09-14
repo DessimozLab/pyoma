@@ -501,7 +501,7 @@ class XRefSearch(BaseSearch):
                 logger.exception(
                     f"XRefSearch with term {self.term} and entry_range {rng}"
                 )
-                self._matched_entries = []
+                self._matched_entries = {}
             if filt is not None:
                 self._matched_entries = {
                     enr: v for enr, v in self._matched_entries.items() if filt(enr)

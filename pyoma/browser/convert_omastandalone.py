@@ -23,6 +23,9 @@ class StandaloneExporter(DarwinExporter):
                 pass
 
     def get_version(self):
+        rel = os.getenv("RELEASE", None)
+        if rel is not None:
+            return rel
         # TODO: obtain real version
         return "OmaStandalone; 1.0.x"
 
@@ -161,6 +164,7 @@ def import_oma_run(path, outfile, domains=None, log_level="INFO"):
     x.add_species_data()
     x.add_orthologs()
     x.add_proteins()
+    x.add_same_species_relations()
     x.add_hogs()
     x.add_xrefs()
     if domains is None:

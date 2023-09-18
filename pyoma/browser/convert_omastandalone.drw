@@ -301,20 +301,7 @@ GetVPsForGenome := proc(g)
 end:
 
 GetSameSpeciesRelations := proc(g)
-    global DB;
-    ReadDb(ddir.'/ServerVPs.db');
-    gNr := SearchArray(g, genomes);
     ssTab :=  []:
-    for i from Goff[gNr]+1 to Goff[gNr+1] do
-        e := Entry(i);
-        for cp in parse(SearchTag('CP', e)) do
-            ssTab := append(ssTab, [i, cp, 'close paralog', -1, -1, -1, -1]);
-        od:
-        hpTag := SearchTag('HP', e);
-        if hpTag<>'' then for hp in parse(hpTag) do
-            ssTab := append(ssTab, [i, hp[1], 'homeolog', -1, hp[2], -1, -1, -1]);
-        od fi:
-    od:
     StoreResults(json(ssTab));
 end:
 

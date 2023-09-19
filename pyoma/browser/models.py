@@ -774,6 +774,13 @@ class GeneOntologyAnnotation(object):
         return self.db.id_mapper["OMA"].map_entry_nr(self.entry_nr)
 
     @LazyProperty
+    def ic(self):
+        try:
+            return self.db.freq_aware_gene_ontology.ic(self.term)
+        except ValueError:
+            return 0
+
+    @LazyProperty
     def aspect(self):
         from .geneontology import GOAspect
 

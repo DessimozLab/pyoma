@@ -369,6 +369,11 @@ class FreqAwareGeneOntology(GeneOntology):
         return lca
 
     def ic(self, term):
+        """returns the information content of the term based on the number of annotations in the OMA database
+
+        .. math::
+            ic(GO_i) = -\log_{10}(term_freq)
+        """
         term = self.ensure_term(term)
         return abs(-math.log(self.get_term_frequency(term)))
 

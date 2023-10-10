@@ -537,6 +537,24 @@ class GeneNameOrSymbolIdMapper(XRefNoApproximateIdMapper):
         return self.order
 
 
+class GeneNameAndMainDbIdMapper(XRefNoApproximateIdMapper):
+    def __init__(self, db):
+        super(GeneNameAndMainDbIdMapper, self).__init__(db)
+        self.order = [
+            "Gene Name",
+            "UniProtKB/SwissProt",
+            "UniProtKB/TrEMBL",
+            "Ensembl Gene",
+            "RefSeq",
+            "EntrezGene",
+            "SourceID",
+        ]
+        self.idtype = frozenset(self.xrefEnum[z] for z in self.order)
+
+    def canonical_source_order(self):
+        return self.order
+
+
 class DomainNameIdMapper(object):
     def __init__(self, db):
         self.domain_src = db.get_hdf5_handle().root.Annotations.DomainDescription.read()

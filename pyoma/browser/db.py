@@ -57,6 +57,7 @@ from .idmapper import (
     XrefIdMapper,
     LinkoutIdMapper,
     GeneNameOrSymbolIdMapper,
+    GeneNameAndMainDbIdMapper,
     UniProtIdMapper,
     DomainNameIdMapper,
 )
@@ -3606,10 +3607,15 @@ class IdMapperFactory(object):
         try:
             mapper = self.mappers[idtype]
         except KeyError:
-            try:
-                mapper = globals()[str(idtype).title() + "IdMapper"](self.db)
-                self.mappers[idtype] = mapper
-            except KeyError:
+            mapper = None
+            for inst in (str(idtype).title() + "IdMapper", str(idtype)):
+                try:
+                    mapper = globals()[inst](self.db)
+                    self.mappers[idtype] = mapper
+                    break
+                except KeyError:
+                    pass
+            if mapper is None:
                 raise UnknownIdType("{} is unknown".format(str(idtype)))
         return mapper
 

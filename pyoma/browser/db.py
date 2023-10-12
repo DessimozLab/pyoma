@@ -3313,15 +3313,18 @@ class Taxonomy(object):
         candidates = self._approx_matcher.search_approx(pattern)
         return candidates
 
-    def get_parent_taxa(self, query):
+    def get_parent_taxa(self, query, root=0):
         """Get array of taxonomy entries leading towards the
         root of the taxonomy.
 
-        :param query: the starting taxonomy level"""
+        :param query: the starting taxonomy level
+        :param root: parameter to identify the root-taxid. defaults to 0.
+                     if set to -1, LUCA will be included into the list.
+        """
         idx = []
         parent = query
         count = 0
-        while parent != 0:
+        while parent != root:
             i = self._table_idx_from_numeric(parent)
             idx.append(i)
             tmp = self.tax_table[i]["ParentTaxonId"]

@@ -2948,15 +2948,16 @@ class OmaIdMapper(object):
     def identify_genome(self, code):
         """identify genome based on either a UniProtSpeciesCode,
         NCBI Taxonomy Id or species name"""
-        if isinstance(code, int) or code.isdigit():
-            return self.genome_from_taxid(code)
-        else:
+        try:
+            code = int(code)
+        except ValueError:
             if len(code) == 5:
                 try:
                     return self.genome_from_UniProtCode(code.upper())
                 except UnknownSpecies:
                     pass
             return self.genome_from_SciName(code)
+        return self.genome_from_taxid(code)
 
     def approx_search_genomes(self, pattern, scores=False):
         candidates = self._approx_genome_matcher.search_approx(pattern)

@@ -5,8 +5,8 @@ import shutil
 name = "pyoma"
 
 req_packages = [
-    "numpy >= 1.16",
-    "tables >= 3.5.1",
+    "numpy >= 1.20",
+    "tables >= 3.8.0",
     "future",
     "fuzzyset2 >= 0.1.1",
     "tqdm",
@@ -17,6 +17,7 @@ req_packages = [
     "datasketch",
     "ete3",
     "networkx",
+    "property_manager",
 ]
 
 cur_dir = os.path.abspath(os.path.dirname(__file__))
@@ -49,10 +50,10 @@ setup(
         "Topic :: Scientific/Engineering :: Bio-Informatics",
         "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
     ],
     scripts=["bin/importdata.py", "bin/oma2hdf", "bin/map_to_closest_seq"],
     package_data={"pyoma": ["browser/*.drw"]},
@@ -68,7 +69,17 @@ setup(
             "lark-parser",
             "pyham",
         ],
-        "notebooks": ["jupyter", "matplotlib", "seaborn",],
+        "enrichment": [
+            "plotly",
+            "scikit-learn",
+            "statsmodels",
+            "scipy",
+        ],
+        "notebooks": [
+            "jupyter",
+            "matplotlib",
+            "seaborn",
+        ],
         "docs": ["sphinx"],
     },
     test_require=["nose"],

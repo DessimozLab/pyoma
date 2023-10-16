@@ -21,6 +21,7 @@ class HOGsTable(tables.IsDescription):
     ImpliedLosses = tables.Int32Col(pos=5, dflt=-1)
     NrMemberGenes = tables.Int32Col(pos=6, dflt=-1)
     IsRoot = tables.BoolCol(pos=7, dflt=False)
+    IdxPerLevelTable = tables.Int32Col(pos=8, dflt=-1)
 
 
 class OrthoXmlHogTable(tables.IsDescription):
@@ -35,6 +36,12 @@ class AncestralSyntenyRels(tables.IsDescription):
     HogRow1 = tables.UInt32Col(pos=0)
     HogRow2 = tables.UInt32Col(pos=1)
     Weight = tables.Float16Col(pos=2)
+    Evidence = tables.EnumCol(
+        tables.Enum({"linearized": 1, "parsimonious": 2, "any": 4}),
+        pos=3,
+        dflt="any",
+        base="uint8",
+    )
 
 
 class ProteinTable(tables.IsDescription):
@@ -55,8 +62,6 @@ class ProteinTable(tables.IsDescription):
     DescriptionOffset = tables.UInt32Col(pos=15)
     DescriptionLength = tables.UInt16Col(pos=16)
     SubGenome = tables.StringCol(1, pos=17, dflt=b"")
-    RootHogUpstream = tables.Int32Col(pos=18, dflt=-1)
-    RootHogDownStream = tables.Int32Col(pos=19, dflt=-1)
 
 
 class ProteinCacheInfo(tables.IsDescription):
@@ -162,6 +167,18 @@ class GeneOntologyTable(tables.IsDescription):
     Reference = tables.StringCol(255, pos=4)
 
 
+class AncestralGeneOntologyTable(tables.IsDescription):
+    HogRow = tables.UInt32Col(pos=1)
+    TermNr = tables.UInt32Col(pos=2)
+    Score = tables.UInt8Col(pos=3)
+    RawScore = tables.Float16Col(pos=4)
+
+
+class GeneOntologyTermCounts(tables.IsDescription):
+    TermNr = tables.UInt32Col(pos=1)
+    Counts = tables.UInt32Col(pos=2)
+
+
 class ECTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     ECacc = tables.StringCol(16, pos=2)
@@ -181,6 +198,7 @@ class GenomeTable(tables.IsDescription):
     Source = tables.StringCol(255, pos=10)
     Date = tables.Time32Col(pos=11)
     IsPolyploid = tables.BoolCol(pos=12)
+    TotGenes = tables.UInt32Col(pos=13, dflt=0)
 
 
 class TaxonomyTable(tables.IsDescription):

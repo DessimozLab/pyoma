@@ -66,7 +66,7 @@ GetGenomeData := proc()
             GS[g,DBRELEASE], GS[g,URL], GS[g,SOURCE], GS[g,DATE], SubGenome[g]<>0]);
     od:
 
-    _parents := []: _next_new_taxid := -1:
+    _parents := []: _next_new_taxid := -2:
     linData := sort([seq([GS[g,Lineage], g], g=genomes)]):
     SpeciesTreeR(linData, 1, 0);
 

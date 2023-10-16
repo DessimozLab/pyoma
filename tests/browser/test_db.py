@@ -49,10 +49,11 @@ def find_path_to_test_db(dbfn="TestDb.h5"):
 
 class TestWithDbInstance(unittest.TestCase):
     db = None
+    db_file_name = "TestDb.h5"
 
     @classmethod
     def setUpClass(cls):
-        path = find_path_to_test_db("TestDb.h5")
+        path = find_path_to_test_db(cls.db_file_name)
         logger.info("Loading {} for DatabaseTests".format(path))
         cls.db = Database(path)
 
@@ -119,6 +120,20 @@ class DatabaseTests(TestWithDbInstance):
         self.assertEqual(neighbors["EntryNr"][idx], query)
         expected_entry_nrs = numpy.arange(1, query + window + 1, dtype="i4")
         self.assertTrue(numpy.array_equal(expected_entry_nrs, neighbors["EntryNr"]))
+
+    def test_count_rows_of_index_column_with_value(self):
+        entrynr = 12
+        vps = self.db.get_vpairs(entrynr)
+        vp_tab = self.db._get_vptab(entrynr)
+        self.assertEqual(
+            len(vps), count_rows_of_index_column_with_value(vp_tab, "EntryNr1", entrynr)
+        )
+
+        # check that it raises KeyError if operated on a column that is not indexed
+        with self.assertRaises(
+            KeyError, msg="Operating on non-indexed column should raise KeyError"
+        ):
+            count_rows_of_index_column_with_value(vp_tab, "EntryNr2", entrynr)
 
     def test_hog_family(self):
         entry = numpy.zeros(1, dtype=tables.dtype_from_descr(tablefmt.ProteinTable))
@@ -374,6 +389,30 @@ class DatabaseTests(TestWithDbInstance):
         for enr in nrs:
             self.assertIn(4575, self.db.get_gene_ontology_annotations(enr)["TermNr"])
 
+    def test_go_ic_values(self):
+        terms = ["GO:003674", "GO:008150"]
+        for term in terms:
+            with self.subTest(case=term):
+                gof = self.db.freq_aware_gene_ontology
+                ic = gof.ic(term)
+                self.assertAlmostEqual(0, ic)
+
+    def test_go_lin_same_term_is_1(self):
+        self.assertEqual(1, self.db.freq_aware_gene_ontology.lin_similarity(55, 55))
+
+    def test_go_semantic_sim_of_same_term(self):
+        self.assertGreater(
+            1, self.db.freq_aware_gene_ontology.semantic_similarity(55, 55)
+        )
+
+    def test_mindepth_of_go(self):
+        examples = [(8150, 0), (168, 7), (5689, 5)]
+        for term, exp_depth in examples:
+            with self.subTest(case=term):
+                self.assertEqual(
+                    exp_depth, self.db.gene_ontology.ensure_term(term).min_depth
+                )
+
     def test_induced_pairwise_orthologs(self):
         query = "YEAST3523"
         query_entry = self.db.ensure_entry(self.db.id_resolver.resolve(query))
@@ -391,6 +430,23 @@ class DatabaseTests(TestWithDbInstance):
             orthologs["DivergenceLevel"],
         )
 
+    def test_ancestral_synteny_graph(self):
+        query_hog = "HOG:0000005"
+        query_level = "Fungi"
+        graph = self.db.get_syntentic_hogs(query_level, query_hog, steps=2)
+        self.assertIn(query_hog, graph)
+
+    def test_ancestral_syteny_of_genome(self):
+        query_level = "Fungi"
+        graph = self.db.get_syntenic_hogs(level=query_level)
+        self.assertIn("HOG:0000005", graph)
+        self.assertEqual(len(graph.nodes), self.db.count_hogs_at_level(query_level))
+
+    def test_extant_syntey_of_genome(self):
+        query_level = "YEAST"
+        graph = self.db.get_extant_synteny_graph(query_level)
+        self.assertIn("YEAST00012", graph)
+
 
 class XRefDatabaseMock(Database):
     def __init__(self, name=None):
@@ -406,11 +462,15 @@ class XRefDatabaseMock(Database):
         xref["XRefSource"] = numpy.tile([0, 20], 5)
         xref["XRefId"] = ["XA{:03}g1.4".format(i) for i in range(10)]
         xref["Verification"] = tuple(itertools.islice(itertools.cycle([0, 2, 4]), 10))
-        f.create_table("/", "XRef", tablefmt.XRefTable, obj=xref)
+        x = f.create_table("/", "XRef", tablefmt.XRefTable, obj=xref)
+        x.colinstances["EntryNr"].create_csindex()
+        x.colinstances["XRefId"].create_csindex()
         f.create_group("/", "XRef_Index")
         for n in ("suffix", "buffer", "offset"):
             f.create_carray("/XRef_Index", n, obj=numpy.ones((5,), "i4"))
         self.db = f
+        self._on_close_notify = []
+        self._close_fh = True
 
 
 class XRefIdMapperTest(unittest.TestCase):
@@ -420,7 +480,7 @@ class XRefIdMapperTest(unittest.TestCase):
         self.xrefmapper = XrefIdMapper(patch_db)
 
     def tearDown(self):
-        self.xrefmapper._db.db.close()
+        self.xrefmapper._db.close()
 
     def test_multiple_xrefs_per_entry(self):
         xref_e1 = self.xrefmapper.map_entry_nr(1)
@@ -481,7 +541,7 @@ class IdResolverTests(unittest.TestCase):
         patch_db.id_mapper = {"XRef": self.xrefmapper}
 
     def tearDown(self):
-        self.xrefmapper._db.db.close()
+        self.xrefmapper._db.close()
 
     def test_search_of_modified_xref(self):
         xref = "XA002g1.4"
@@ -703,6 +763,148 @@ class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
     def test_induced_subtree_retains_internal_species(self):
         phylo = self.tax.get_induced_taxonomy([20, 40], augment_parents=True)
         self.assertIn(30, phylo.tax_table["NCBITaxonId"])
+
+
+def _get_taxtab():
+    # a random sample of 30 species from a production OMA release
+    taxtab = numpy.array(
+        [
+            (2, 0, b"Bacteria"),
+            (633, 1649845, b"Yersinia pseudotuberculosis"),
+            (1224, 2, b"Proteobacteria"),
+            (1236, 1224, b"Gammaproteobacteria"),
+            (2759, 0, b"Eukaryota"),
+            (5204, 451864, b"Basidiomycota"),
+            (5334, 5204, b"Schizophyllum commune"),
+            (5660, 2759, b"Leishmania braziliensis"),
+            (5786, 2759, b"Dictyostelium purpureum"),
+            (5794, 2698737, b"Apicomplexa"),
+            (5807, 5794, b"Cryptosporidium parvum"),
+            (5864, 5794, b"Babesia"),
+            (5866, 5864, b"Babesia bigemina"),
+            (6412, 33317, b"Helobdella robusta"),
+            (6960, 33317, b"Hexapoda"),
+            (7263, 6960, b"Drosophila arizonae"),
+            (9813, 32524, b"Procavia capensis"),
+            (13735, 32524, b"Pelodiscus sinensis"),
+            (28211, 1224, b"Alphaproteobacteria"),
+            (29760, 2759, b"Vitis vinifera"),
+            (32524, 33213, b"Amniota"),
+            (33154, 2759, b"Opisthokonta"),
+            (33213, 33154, b"Bilateria"),
+            (33317, 33213, b"Protostomia"),
+            (37360, 2698737, b"Plasmodiophora brassicae"),
+            (55529, 2759, b"Guillardia theta"),
+            (91347, 1236, b"Enterobacterales"),
+            (119060, 1224, b"Burkholderiaceae"),
+            (158441, 6960, b"Folsomia candida"),
+            (164328, 2698737, b"Phytophthora ramorum"),
+            (214092, 1649845, b"Yersinia pestis CO92"),
+            (
+                264198,
+                119060,
+                b"Cupriavidus pinatubonensis (strain JMP 134 / LMG 1197)",
+            ),
+            (
+                273123,
+                633,
+                b"Yersinia pseudotuberculosis serotype I (strain IP32953)",
+            ),
+            (
+                284812,
+                451864,
+                b"Schizosaccharomyces pombe (strain 972 / ATCC 24843)",
+            ),
+            (
+                323261,
+                1236,
+                b"Nitrosococcus oceani (strain ATCC 19707 / BCRC 17464 / NCIMB 11848 / C-107)",
+            ),
+            (338187, 1236, b"Vibrio campbellii (strain ATCC BAA-1116 / BB120)"),
+            (347255, 28211, b"Rickettsia africae (strain ESF-5)"),
+            (353152, 5807, b"Cryptosporidium parvum (strain Iowa II)"),
+            (
+                355278,
+                2,
+                b"Leptospira biflexa serovar Patoc (strain Patoc 1 / Ames)",
+            ),
+            (391774, 1224, b"Desulfovibrio vulgaris subsp. vulgaris (strain DP4)"),
+            (451864, 33154, b"Dikarya"),
+            (
+                502801,
+                633,
+                b"Yersinia pseudotuberculosis serotype IB (strain PB1/+)",
+            ),
+            (578458, 5334, b"Schizophyllum commune (strain H4-8 / FGSC 9210)"),
+            (626418, 119060, b"Burkholderia glumae (strain BGR1)"),
+            (640131, 91347, b"Klebsiella variicola (strain At-22)"),
+            (
+                713600,
+                91347,
+                b"Buchnera aphidicola subsp. Acyrthosiphon pisum (strain JF98)",
+            ),
+            (
+                754035,
+                28211,
+                b"Mesorhizobium australicum (strain HAMBI 3006 / LMG 24608 / WSM2073)",
+            ),
+            (905079, 55529, b"Guillardia theta (strain CCMP2712)"),
+            (1133968, 5864, b"Babesia microti (strain RI)"),
+            (1230383, 5204, b"Malassezia sympodialis (strain ATCC 42132)"),
+            (1649845, 91347, b"Yersinia pseudotuberculosis complex"),
+            (2698737, 2759, b"Sar"),
+        ],
+        dtype=tables.dtype_from_descr(tablefmt.TaxonomyTable),
+    )
+    return taxtab
+
+
+class LucaBasedTaxonomyTests(unittest.TestCase):
+    def setUp(self):
+        taxtab = _get_taxtab()
+        self.tax = Taxonomy(taxtab)
+        self.nr_species = 30
+
+    def test_root_is_luca(self):
+        self.assertEqual(self.tax._get_root_taxon()["Name"], b"LUCA")
+
+    def test_search_luca(self):
+        node = self.tax.get_taxnode_from_name_or_taxid("LUCA")
+        self.assertEqual(len(node), 1)
+        self.assertEqual(node["Name"], b"LUCA")
+
+    def test_extend_genomes(self):
+        self.assertEqual(len(self.tax.get_taxid_of_extent_genomes()), self.nr_species)
+
+    def test_search_approx_luca(self):
+        self.assertIn("LUCA", [x[1] for x in self.tax.approx_search("luca")])
+
+    def test_numeric_luca_is_found(self):
+        self.assertEqual(self.tax.get_taxnode_from_name_or_taxid(0)["Name"], b"LUCA")
+
+    def test_subtaxonomy_does_not_contain_luca_anymore(self):
+        # subset of only eukaryotes
+        subtax = self.tax.get_induced_taxonomy(
+            [451864, 55529, 158441], collapse=True, augment_parents=True
+        )
+        self.assertNotIn(b"LUCA", subtax._get_root_taxon()["Name"])
+
+    def test_as_newick_works(self):
+        self.assertTrue(self.tax.newick().endswith("LUCA;"), self.tax.newick()[-30:])
+
+
+class LucaWithNegTaxIDGenomeTaxonomyTests(LucaBasedTaxonomyTests):
+    def setUp(self):
+        taxtab = _get_taxtab()
+        taxtab = numpy.append(
+            taxtab,
+            numpy.array([(-2, 451864, b"Some Random Genome")], dtype=taxtab.dtype),
+        )
+        self.tax = Taxonomy(taxtab)
+        self.nr_species = 31
+
+    def test_neg_taxid_species_in_newick(self):
+        self.assertIn("Some_Random_Genome", self.tax.newick())
 
 
 class DBMock(object):

@@ -14,6 +14,7 @@ import warnings
 from bisect import bisect_left
 from builtins import chr, range, object, zip, bytes, str
 from xml.etree import ElementTree as et
+from typing import Union, Tuple, Optional, AnyStr, Set, Generator, Mapping
 
 import dateutil
 import fuzzyset
@@ -30,20 +31,43 @@ from datasketch import MinHash
 from tqdm import tqdm
 
 from .KmerEncoder import KmerEncoder
-from .decorators import timethis
-from .geneontology import GeneOntology, OntologyParser, GOAspect
+from .decorators import timethis, outdated_database_warning
+from .exceptions import (
+    InvalidTaxonId,
+    DBVersionError,
+    DBConsistencyError,
+    DBOutdatedError,
+    InvalidId,
+    InvalidOmaId,
+    UnknownIdType,
+    UnknownSpecies,
+    OutdatedHogId,
+    Singleton,
+    NoReprEntry,
+    AmbiguousID,
+    TooUnspecificQuery,
+)
+from .geneontology import GeneOntology, OntologyParser, GOAspect, FreqAwareGeneOntology
 from .hoghelper import compare_levels, are_orthologous
 from .hogprofile import Profiler
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
 from .suffixsearch import SuffixSearcher, SuffixIndexError
+from .idmapper import (
+    XRefNoApproximateIdMapper,
+    XrefIdMapper,
+    LinkoutIdMapper,
+    GeneNameOrSymbolIdMapper,
+    GeneNameAndMainDbIdMapper,
+    UniProtIdMapper,
+    DomainNameIdMapper,
+)
 from .. import version
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings(
     "ignore",
     category=tables.PerformanceWarning,
-    message=".*maximum recommended rowsize.*",
-    append=True,
+    message=r".*maximum recommended rowsize.*",
 )
 
 # Raise stack limit for PyOPA ~400MB
@@ -127,12 +151,99 @@ _tables_file._open_files = ThreadsafeFileRegistry()
 ####
 
 
+def count_rows_of_index_column_with_value(
+    tab: Union[str, tables.Table], col: str, start, end=None
+):
+    idx = tab.colindexes[col]
+    stop = end if end is not None else start
+    return idx.search((start, stop))
+
+
+def _get_limited_synteny_graph(
+    edges_data: Generator[Tuple[int, int, dict], None, None],
+    hog_tab: Union[tables.Table, numpy.ndarray, dict],
+    ref_hog_idx: Optional[int],
+    steps: Optional[int],
+):
+    G = nx.Graph()
+    G.add_edges_from(edges_data)
+    if ref_hog_idx is not None:
+        try:
+            neighbors = [ref_hog_idx] + [
+                v for u, v in nx.bfs_edges(G, source=ref_hog_idx, depth_limit=steps)
+            ]
+        except nx.exception.NetworkXError as e:
+            logger.error(
+                "Trying to access a non-stored HOG in the ancestral synteny graph: "
+                "hog_row: {}, Size of Graph: N={}, E={}".format(
+                    ref_hog_idx, len(G), len(G.edges)
+                )
+            )
+            raise DBConsistencyError(
+                "Cannot find HogIdx {}  in Ancestral synteny graph".format(ref_hog_idx)
+            )
+        S = G.subgraph(neighbors)
+    else:
+        if isinstance(hog_tab, dict):
+            G.add_nodes_from(hog_tab.keys())
+        else:
+            G.add_nodes_from(range(len(hog_tab)))
+        S = G
+    for n in S.nodes:
+        hog = hog_tab[n]
+        S.nodes[n].update(
+            {
+                "nr_members": int(hog["NrMemberGenes"]),
+                "completeness_score": float(hog["CompletenessScore"]),
+            }
+        )
+    return nx.relabel_nodes(S, lambda x: hog_tab[x]["ID"].decode())
+
+
+def read_table_where(
+    tab: tables.Table, query: str, condvars: Optional[Mapping] = None, field: str = None
+) -> numpy.ndarray:
+    """Reads data of a pytables table fulfilling the query as a numpy array.
+
+    This is a more efficient implementation of the :py:method:`tables.Table.read_where`
+    method.
+
+    :param tab: The table to be read from
+    :param query: the query
+    :param condvars: mapping of condition variables of the query
+    :param field: which column to be read.
+                  If set to None, all columns are read, if set to 'nrow',
+                  the row number is returned
+    :return the data as a numpy array
+    """
+    it = tab.where(query, condvars=condvars)
+    try:
+        first = next(it)
+    except StopIteration:
+        return numpy.array([], dtype=tab.dtype)
+    if field is None:
+        fun = lambda row: row.fetch_all_fields()
+        dtyp = tab.dtype
+    elif field.lower == "nrow":
+        fun = lambda row: row.nrow
+        dtyp = numpy.int64
+    else:
+        fun = lambda row: row[field]
+        dtyp = tab.dtype[field]
+
+    data = numpy.fromiter(
+        map(fun, itertools.chain([first], it)),
+        dtype=dtyp,
+    )
+    return data
+
+
 class Database(object):
     """This is the main interface to the oma database. Queries
-    will typically be issued by methods of this object. Typically
+    will typically be issued by methods of this object. Typically,
     the result of queries will be :py:class:`numpy.recarray` objects."""
 
-    EXPECTED_DB_SCHEMA = "3.4"
+    EXPECTED_DB_SCHEMA = "3.6"
 
     def __init__(self, db):
         if isinstance(db, str):
@@ -191,7 +302,7 @@ class Database(object):
             logger.exception(
                 "Cannot load SequenceSearch. Any future call to seq_search will fail!"
             )
-            self.seq_search = object()
+            self.seq_search = None
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
         genomes = [Genome(self, g) for g in self.db.root.Genome.read()]
@@ -238,6 +349,24 @@ class Database(object):
         :meth:`load_gene_ontology` to parametrize the
         creation of GeneOntology object."""
         return self.load_gene_ontology(GeneOntology)
+
+    @LazyProperty
+    def freq_aware_gene_ontology(self):
+        gof = self.load_gene_ontology(factory=FreqAwareGeneOntology)
+        try:
+            go_count_tab = self.db.get_node("/Ontologies/GeneOntologyTermCounts")
+            gof.cnts = {int(row["TermNr"]): int(row["Counts"]) for row in go_count_tab}
+            gof.tot_cnts = [
+                go_count_tab.attrs[z]
+                for z in (
+                    "total_molecular_function",
+                    "total_biological_process",
+                    "total_cellular_component",
+                )
+            ]
+        except tables.NoSuchNodeError:
+            pass
+        return gof
 
     def load_gene_ontology(self, factory=None, rels=None):
         """Instantiate GeneOntology object
@@ -362,8 +491,8 @@ class Database(object):
         """return all protein entries of a genome"""
         rng = self.id_mapper["OMA"].genome_range(genome)
         prot_tab = self.get_hdf5_handle().get_node("/Protein/Entries")
-        return prot_tab.read_where(
-            "(EntryNr >= {}) & (EntryNr <= {})".format(rng[0], rng[1])
+        return read_table_where(
+            prot_tab, "(EntryNr >= {}) & (EntryNr <= {})".format(rng[0], rng[1])
         )
 
     def main_isoforms(self, genome):
@@ -435,15 +564,77 @@ class Database(object):
         if e["AltSpliceVariant"] == 0:
             return numpy.array([e], dtype=e.dtype)
         # TODO: create index on AltSpliceVariant column?!
-        return (
-            self.get_hdf5_handle()
-            .get_node("/Protein/Entries")
-            .read_where(
-                "(EntryNr >= {:d}) & (EntryNr < {:d}) & (AltSpliceVariant == {:d})".format(
-                    e["EntryNr"] - 100, e["EntryNr"] + 100, e["AltSpliceVariant"]
+        return read_table_where(
+            self.get_hdf5_handle().get_node("/Protein/Entries"),
+            "(EntryNr >= {:d}) & (EntryNr < {:d}) & (AltSpliceVariant == {:d})".format(
+                e["EntryNr"] - 100, e["EntryNr"] + 100, e["AltSpliceVariant"]
+            ),
+        )
+
+    def get_extant_synteny_graph(
+        self,
+        genome,
+        center_entry: Optional[Union[int, str]] = None,
+        window: Optional[int] = None,
+    ):
+        all_genes = self.main_isoforms(genome)
+        all_genes.sort(order=["Chromosome", "LocusStart"])
+        gs = self.id_mapper["OMA"].genome_of_entry_nr(all_genes[0]["EntryNr"])
+        if center_entry is not None:
+            if window is None:
+                window = 7
+            if isinstance(center_entry, str) and center_entry.startswith("HOG:"):
+                k = numpy.where(all_genes["OmaHOG"] == center_entry.encode("utf-8"))[0]
+                if len(k) == 1:
+                    en = all_genes[k]
+                else:
+                    raise InvalidId(
+                        f"{center_entry} unknown for {gs['UniProtSpeciesCode']}"
+                    )
+            else:
+                en = self.ensure_entry(self.id_resolver.resolve(center_entry))
+                if (
+                    en["AltSpliceVariant"] > 0
+                    and en["AltSpliceVariant"] != en["EntryNr"]
+                ):
+                    en = self.ensure_entry(en["AltSpliceVariant"])
+            try:
+                idx = numpy.where(all_genes["EntryNr"] == en["EntryNr"])[0][0]
+                ref = all_genes[idx]
+            except IndexError:
+                identified_genome = gs["UniProtSpeciesCode"].decode()
+                raise InvalidId(
+                    f"Center gene {center_entry} is not a valid for genome {identified_genome}"
                 )
+            all_genes = all_genes[idx - window : idx + window + 1]
+            all_genes = all_genes[
+                numpy.where(all_genes["Chromosome"] == ref["Chromosome"])
+            ]
+        oma_ids = list(
+            map(
+                lambda x: f"{gs['UniProtSpeciesCode'].decode()}{x - gs['EntryOff']:05d}",
+                all_genes["EntryNr"],
             )
         )
+
+        def node_data_generator(genes):
+            for id_, g in zip(oma_ids, genes):
+                yield (
+                    id_,
+                    {
+                        "chromosome": g["Chromosome"].decode(),
+                        "start": int(g["LocusStart"]),
+                        "strand": "+" if g["LocusStrand"] > 0 else "-",
+                        "hog_id": g["OmaHOG"].decode(),
+                    },
+                )
+
+        G = nx.Graph()
+        G.add_nodes_from(node_data_generator(all_genes))
+        for i in range(len(all_genes) - 1):
+            if all_genes[i]["Chromosome"] == all_genes[i + 1]["Chromosome"]:
+                G.add_edge(oma_ids[i], oma_ids[i + 1], weight=1)
+        return G
 
     def _get_vptab(self, entry_nr):
         return self._get_pw_tab(entry_nr, "VPairs")
@@ -517,7 +708,7 @@ class Database(object):
             query += " & (EntryNr2 >= {:d}) & (EntryNr2 <= {:d})".format(*target_range)
         if typ_filter is not None:
             query += " & (RelType == {:d})".format(typ_filter)
-        dat = tab.read_where(query)
+        dat = read_table_where(tab, query)
         typ = tab.get_enum("RelType")
         cols = ["EntryNr1", "EntryNr2", "Score", "Distance"]
         if extra_cols is not None:
@@ -648,7 +839,7 @@ class Database(object):
             [is_orthologous(entry, hog_member[i]) for i in range(len(hog_member))],
             dtype="i4",
         )
-        mask = numpy.asarray(query_genome_genes_cnt, numpy.bool)
+        mask = numpy.asarray(query_genome_genes_cnt, bool)
         target_genomes = [
             self.id_mapper["OMA"].genome_of_entry_nr(o["EntryNr"])["NCBITaxonId"]
             for o in hog_member[mask]
@@ -750,7 +941,8 @@ class Database(object):
         :param return_omagroup: whether or not to return the oma group nr in case both proteins
                                 belong to the same oma group. If not, NaNs will be returned.
         :type return_omagroup: bool
-        :returns: array with hog induced pairwise orthologs between genome1 and genome2"""
+        :returns: array with hog induced pairwise orthologs between genome1 and genome2
+        """
 
         def load_prot_dataframe(g):
             genome = g if isinstance(g, Genome) else Genome(self, g)
@@ -830,15 +1022,18 @@ class Database(object):
         target_chr = dat["Chromosome"]
         genome_range = self.id_mapper["OMA"].genome_range(entry_nr)
         f = 5
-        data = self.db.root.Protein.Entries.read_where(
-            "(EntryNr >= {:d}) & (EntryNr <= {:d}) & "
-            "(Chromosome == {!r}) & "
+        condvars = {
+            "enr_max": min(genome_range[1], entry_nr + f * window),
+            "enr_min": max(genome_range[0], entry_nr - f * window),
+            "chr": target_chr,
+        }
+        data = read_table_where(
+            self.db.root.Protein.Entries,
+            "(EntryNr >= enr_min) & (EntryNr <= enr_max) & "
+            "(Chromosome == chr) & "
             "((AltSpliceVariant == 0) |"
-            " (AltSpliceVariant == EntryNr))".format(
-                max(genome_range[0], entry_nr - f * window),
-                min(genome_range[1], entry_nr + f * window),
-                target_chr,
-            )
+            " (AltSpliceVariant == EntryNr))",
+            condvars=condvars,
         )
         data.sort(order=["LocusStart"])
         idx = int((data["EntryNr"] == entry_nr).nonzero()[0])
@@ -918,24 +1113,24 @@ class Database(object):
         hog_id will be returned, i.e. a set of taxonomic ranges for
         which no duplication occurred in between for this HOG.
 
-        The method returns an generator of :class:`models.HOG` instances.
+        The method returns a generator of :class:`models.HOG` instances.
 
         :param (bytes, str) hog_id: the hog_id of interest
 
         :param str level: the root level, defaults to the root of the subhog
 
-        :param bool include_subids: whether or not to include suhogs
+        :param bool include_subids: whether to include suhogs
                                     that originated after a duplication
                                     in the query (sub)HOG. defaults to False
 
-        :param bool include_leaf_levels: whether or not to include the level
+        :param bool include_leaf_levels: whether to include the level
                                     of the extant species. defaults to True.
                                     Leaf levels have by definition only one
                                     member and are thus not of limited interest
                                     in most situations
 
-        :returns generator of HOG instances
-        :rtype :class:`models.HOG`
+        :returns: generator of HOG instances
+        :rtype: :class:`models.HOG`
 
         :see_also: :meth:`get_hog` that returns a single HOG instance
             for a specific level or the root level one for a specific HOG id.
@@ -944,8 +1139,18 @@ class Database(object):
             try:
                 subtax = self.tax.get_subtaxonomy_rooted_at(level, collapse=False)
                 if not include_leaf_levels:
-                    internal_node_idx = subtax.tax_table["NCBITaxonId"].searchsorted(
+                    idx = subtax.tax_table["NCBITaxonId"].searchsorted(
                         subtax.tax_table["ParentTaxonId"], sorter=subtax.taxid_key
+                    )
+                    internal_node_idx = set(
+                        pos
+                        for i, pos in enumerate(idx)
+                        if 0 <= pos < len(subtax.tax_table)
+                        and subtax.tax_table["NCBITaxonId"][pos]
+                        == subtax.tax_table["ParentTaxonId"][i]
+                    )
+                    internal_node_idx = numpy.fromiter(
+                        internal_node_idx, dtype="i4", count=len(internal_node_idx)
                     )
                     subtax.tax_table = subtax.tax_table[internal_node_idx]
                 children = set(n["Name"] for n in subtax.tax_table)
@@ -953,19 +1158,23 @@ class Database(object):
                     level.encode("utf-8") if isinstance(level, str) else level
                 )
             except KeyError as e:
-                raise ValueError("invalid level: {}".format(level))
+                raise ValueError(f"invalid level: {level}") from e
         elif not include_leaf_levels:
             children = self.tax.all_hog_levels
 
         if include_subids:
-            query = "(ID >= {!r}) & (ID < {!r})".format(*self._hog_lex_range(hog_id))
+            condvars = {
+                v: k
+                for v, k in zip(
+                    ("hogid_low", "hogid_high"), self._hog_lex_range(hog_id)
+                )
+            }
+            query = "(ID >= hogid_low) & (ID < hogid_high)"
         else:
-            hog_id_ascii = (
-                hog_id if isinstance(hog_id, bytes) else hog_id.encode("ascii")
-            )
-            query = "ID == {!r}".format(hog_id_ascii)
+            query = "ID == hogid"
+            condvars = {"hogid": hog_id}
 
-        for row in self.db.root.HogLevel.where(query):
+        for row in self.db.root.HogLevel.where(query, condvars=condvars):
             hog = row.fetch_all_fields()
             if (
                 (level is None or level in ("LUCA", b"LUCA")) and include_leaf_levels
@@ -986,12 +1195,11 @@ class Database(object):
         and for
         get_subhogids_at_level(1, 'Metazoa') --> ['HOG:0000001.1a', 'HOG:0000001.1b']
 
-        :note:
-        There is also the method :method:`get_subhogs_at_level` which returns all
+        :note::
+        There is also the method :meth:`get_subhogs_at_level` which returns all
         information stored in the HogLevel table, not only the HOG id.
 
-        :see_also:
-        get_subhogs_at_level
+        :see_also:: :meth:`get_subhogs_at_level`
 
         :param fam_nr: the numeric family id
         :param level: the taxonomic level of interest"""
@@ -1014,8 +1222,11 @@ class Database(object):
         :param field: name of the column to be returned. If not set, all columns
             will be returned."""
         lev = level if isinstance(level, bytes) else level.encode("ascii")
-        return self.db.root.HogLevel.read_where(
-            "(Fam=={}) & (Level == {!r})".format(fam_nr, lev), field=field
+        return read_table_where(
+            self.db.root.HogLevel,
+            query="(Fam==fam) & (Level == lev)",
+            condvars={"fam": fam_nr, "lev": lev},
+            field=field,
         )
 
     def get_parent_hogs(self, hog_id, level=None):
@@ -1045,9 +1256,10 @@ class Database(object):
             parent_pos.update(
                 {lev: pos for pos, lev in enumerate(parent_taxnodes["Name"][::-1])}
             )
-        query = "(Fam == {}) & (ID <= {!r})".format(ref_hog["Fam"], hog_id)
+        query = "(Fam == fam) & (ID <= hogid)"
+        condvars = {"fam": ref_hog["Fam"], "hogid": hog_id}
         parent_hogs = [] * len(parent_pos)
-        for row in self.db.root.HogLevel.where(query):
+        for row in self.db.root.HogLevel.where(query, condvars=condvars):
             hog = row.fetch_all_fields()
             if not hog_id.startswith(hog["ID"]):
                 continue
@@ -1061,7 +1273,8 @@ class Database(object):
     def _members_of_hog_id(self, hog_id):
         hog_range = self._hog_lex_range(hog_id)
         it = self.db.root.Protein.Entries.where(
-            "({!r} <= OmaHOG) & (OmaHOG < {!r})".format(*hog_range)
+            "(low <= OmaHOG) & (OmaHOG < high)",
+            condvars={k: v for k, v in zip(("low", "high"), hog_range)},
         )
         # we need to filter them in case there are many (>26) paralog clusters,
         # in which case the hog_id need to be followed by a '.'
@@ -1119,7 +1332,7 @@ class Database(object):
                     )["Name"]
                     for enr in members["EntryNr"]
                 ],
-                dtype=numpy.bool,
+                dtype=bool,
             )
             members = members[keep]
         return members
@@ -1173,14 +1386,14 @@ class Database(object):
         :param bytes hog_id: the query hog id
         :param str level: the taxonomic level of interest"""
         try:
-            hog = next(self.iter_hog_at_level(hog_id, level))
+            hog = next(self.iter_hogs_at_level(hog_id, level))
         except StopIteration:
             raise ValueError('Level "{0:s}" undefined for query gene'.format(level))
         # get the entries which have this hogid (or a sub-hog)
         members = self.member_of_hog_id(hog["ID"], level=level)
         return members
 
-    def iter_hog_at_level(self, hog_id, level):
+    def iter_hogs_at_level(self, hog_id, level):
         """yields the (sub- or parent-) hogs for a given level.
 
         This method yields the hogs as numpy.array instances that
@@ -1204,17 +1417,29 @@ class Database(object):
         """
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
-        query_fam = self.parse_hog_id(hog_id)
-        for hog in self.db.root.HogLevel.where(
-            "(Fam == {:d}) & (Level == {!r})".format(query_fam, level.encode("ascii"))
-        ):
+
+        condvars = {"fam": self.parse_hog_id(hog_id)}
+        query = "(Fam == fam)"
+        try:
+            anc_node = self._ancestral_node(level)
+            hog_tab = anc_node.Hogs
+        except DBConsistencyError:
+            hog_tab = self.db.root.HogLevel
+            query += " & (Level == lev)"
+            condvars["lev"] = level.encode("utf-8")
+
+        for hog in hog_tab.where(query, condvars=condvars):
             if hog_id.startswith(hog["ID"]):
                 if hog_id == hog["ID"] or chr(hog_id[len(hog["ID"])]) == ".":
                     yield hog.fetch_all_fields()
             elif hog["ID"].startswith(hog_id):
                 yield hog.fetch_all_fields()
 
-    def get_hog(self, hog_id, level=None, field=None):
+    def iter_hog_at_level(self, hog_id, level):
+        """deprecated method. use iter_hogs_at_level"""
+        yield from self.iter_hogs_at_level(hog_id=hog_id, level=level)
+
+    def get_hog(self, hog_id, level=None, field=None, tab=None):
         """Retrieve the one relevant HOG for a certain hog-id.
 
         If a level is provided, returns the (sub)hog at this level, otherwise
@@ -1226,7 +1451,8 @@ class Database(object):
 
         :see_also: :meth:`iter_hogs_at_level`, :meth:`get_subhogs_at_level`
 
-        :param (bytes,str) hog_id: the query hog id
+        :param hog_id: the query hog id
+        :type hog_id: (bytes, str)
         :param str level: the taxonomic level of interest, defaults to None
         :param field: the attribute of the HogLevel table to be returned. Defaults
                       to all attributes of the table.
@@ -1234,17 +1460,18 @@ class Database(object):
 
         if isinstance(hog_id, str):
             hog_id = hog_id.encode("ascii")
-        query_fam = self.parse_hog_id(hog_id)
-        if level is None:
-            query = "(Fam == {}) & (ID == {!r}) & (IsRoot == True)".format(
-                query_fam, hog_id
-            )
-        else:
-            query = "(Fam == {:d}) & (ID == {!r}) & (Level == {!r})".format(
-                query_fam, hog_id, level.encode("ascii")
-            )
+        condvars = {"query_fam": self.parse_hog_id(hog_id), "hogid": hog_id}
+        query = "(Fam == query_fam) & (ID == hogid)"
+        if tab is None:
+            tab = self.db.get_node("/HogLevel")
+            if level is None:
+                query += " & (IsRoot == is_root)"
+                condvars["is_root"] = True
+            else:
+                query += " & (Level == lev)"
+                condvars["lev"] = level.encode("ascii")
         try:
-            row = next(self.db.root.HogLevel.where(query))
+            row = next(tab.where(query, condvars=condvars))
             if field is not None:
                 if field == "_NROW":
                     return row.nrow
@@ -1253,20 +1480,38 @@ class Database(object):
         except StopIteration:
             raise ValueError(
                 'HOG-ID/Level combination "{}/{:s}" unknown'.format(
-                    hog_id.decode(), level
+                    hog_id.decode(), level if level is not None else "Root"
                 )
             )
 
+    def count_hogs_at_level(self, level):
+        """returns the number of HOGs at the requested taxonomic level"""
+        try:
+            anc_node = self._ancestral_node(level)
+            return len(anc_node.Hogs)
+        except DBConsistencyError:
+            try:
+                taxid = self.taxid_from_level(level)
+                return len(self.db.get_node("/Hogs_per_Level/tax{}".format(taxid)))
+            except tables.NoSuchNodeError:
+                return len(self.get_all_hogs_at_level(level))
+
     def get_all_hogs_at_level(self, level, compare_with=None):
         """returns a :class:`numpy.array` instance with all hogs at the requested level"""
-        taxid = self.taxid_from_level(level)
         try:
-            hog_data = self.db.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()
-        except tables.NoSuchNodeError:
-            logger.warning(
-                "Cannot load Hogs_per_Level. extracting from main table. SLOW!"
-            )
-            hog_data = self.db.get_node("/HogLevel").read_where("Level == level")
+            anc_node = self._ancestral_node(level)
+            hog_data = anc_node.Hogs.read()
+        except DBConsistencyError:
+            try:
+                taxid = self.taxid_from_level(level)
+                hog_data = self.db.get_node(
+                    "/Hogs_per_Level/tax{}".format(taxid)
+                ).read()
+            except tables.NoSuchNodeError:
+                logger.warning(
+                    "Cannot load AncestralGenome nor Hogs_per_Level. extracting from main table. SLOW!"
+                )
+                hog_data = self.db.get_node("/HogLevel").read_where("Level == level")
         if compare_with is None:
             return hog_data
         compare_hog = self.get_all_hogs_at_level(compare_with)
@@ -1317,9 +1562,9 @@ class Database(object):
         """returns the orthoxml of a given toplevel HOG family
 
         :param fam: numeric id of requested toplevel hog
-        :param augmented: boolean flag to indicated whether or not to return
+        :param augmented: boolean flag to indicated whether to return
                           the augmented orthoxml or not. (defaults to not)"""
-        idx = self.db.root.OrthoXML.Index.read_where("Fam == {:d}".format(fam))
+        idx = read_table_where(self.db.root.OrthoXML.Index, "Fam == {:d}".format(fam))
         if len(idx) < 1:
             raise ValueError("cannot retrieve orthoxml for {}".format(fam))
         idx = idx[0]
@@ -1381,19 +1626,73 @@ class Database(object):
             (hog_str[0:-1] + chr(1 + ord(hog_str[-1]))).encode("ascii"),
         )
 
-    def get_syntentic_hogs(self, hog_id, level, steps=2):
+    def _ancestral_node(self, level):
+        taxid_of_level = self.taxid_from_level(level)
+        try:
+            return self.db.get_node("/AncestralGenomes/tax{}".format(taxid_of_level))
+        except tables.NoSuchNodeError as e:
+            logger.exception(
+                "cannot find ancestral genome node for taxid:{} ({})".format(
+                    taxid_of_level, level
+                )
+            )
+            raise DBConsistencyError(
+                f"Ancestral genome node not found: {taxid_of_level}"
+            )
+
+    def get_syntentic_hogs(self, level, hog_id, steps=2):
+        import warnings
+
+        warnings.warn(
+            f"{__name__} is deprecated. please use `get_syntenic_hogs` instead",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.get_syntenic_hogs(level, hog_id, steps=steps)
+
+    def get_syntenic_hogs(self, level, hog_id=None, evidence=None, steps=None):
         """Returns a graph of the ancestral synteny
 
         This method returns a networkx.Graph object with HOGs as nodes
         and weighted edges representing ancestral synteny.
 
+        The evidence is a filter which can be one of `linearized`, `parsimonious` or `any`.
+        It defaults to `parsimonious`.
+
         :param str hog_id: the hog_id of the query HOG
         :param str level: the taxonomic level of the ancestral genome
-        :param int step: number of breadth-first steps to take to get the local
+        :param str evidence: include only edges with evidences up to this level
+        :param int steps: number of breadth-first steps to take to get the local
                          neighborhood of the query HOG.
         """
-        hl_tab = self.db.get_node("/HogLevel")
-        hog_row = self.get_hog(hog_id, level, "_NROW")
+        if self.db_schema_version < (3, 5):
+            logger.warning("ancestral synteny: ignoring evidence as outdated database")
+            return self._get_syntenic_hogs_obsolete_data(hog_id, level, steps=steps)
+        ancestral_node = self._ancestral_node(level)
+        if evidence is None:
+            evidence = "parsimonious"
+        try:
+            evidence_enum = ancestral_node.Synteny.get_enum("Evidence")
+            evidence = evidence_enum[evidence]
+        except KeyError:
+            raise ValueError(f"Invalid evidence value {evidence}")
+        edge_data = read_table_where(
+            ancestral_node.Synteny, "Evidence <= {}".format(evidence)
+        )
+        edges = (
+            (e[0], e[1], {"weight": int(e[2]), "evidence": evidence_enum(e[3])})
+            for e in edge_data
+        )
+        if hog_id is not None:
+            hog_row = self.get_hog(hog_id, tab=ancestral_node.Hogs, field="_NROW")
+            hogs = ancestral_node.Hogs
+        else:
+            hog_row = None
+            hogs = ancestral_node.Hogs.read()
+        return _get_limited_synteny_graph(edges, hogs, hog_row, steps)
+
+    @outdated_database_warning()
+    def _get_syntenic_hogs_obsolete_data(self, hog_id, level, steps=2):
         taxid_of_level = self.taxid_from_level(level)
         try:
             edge_data = self.db.get_node(
@@ -1406,27 +1705,19 @@ class Database(object):
                 )
             )
             edge_data = []
-        G = nx.Graph()
-        G.add_weighted_edges_from(edge_data)
-        try:
-            neighbors = [hog_row] + [
-                v for u, v in nx.bfs_edges(G, source=hog_row, depth_limit=steps)
-            ]
-        except nx.exception.NetworkXError as e:
-            logger.error(
-                "Trying to access a non-stored HOG in the ancestral synteny graph: "
-                "HOG: {}, Level: {}, taxid: {}, hog_row: {}, Size of Graph: N={}, E={}".format(
-                    hog_id, level, taxid_of_level, hog_row, len(G), len(G.edges)
-                )
-            )
-            raise DBConsistencyError(
-                'Cannot find HOG "{}/{}" in Ancestral synteny graph'.format(
-                    hog_id, level
-                )
-            )
+        edges = ((e[0], e[1], {"weight": e[2], "evidence": "any"}) for e in edge_data)
 
-        S = G.subgraph(neighbors)
-        return nx.relabel_nodes(S, lambda x: hl_tab[x]["ID"].decode())
+        hl_tab = self.db.get_node("/HogLevel")
+        hogs = hl_tab
+        if hog_id is None:
+            all_hogs = {}
+            for row in hl_tab.where("Level == lev", {"lev": level.encode("utf-8")}):
+                all_hogs[row.nrow] = row.fetch_all_fields()
+            hog_row = None
+            hogs = all_hogs
+        else:
+            hog_row = self.get_hog(hog_id, level, "_NROW")
+        return _get_limited_synteny_graph(edges, hogs, hog_row, steps)
 
     def taxid_from_level(self, level):
         try:
@@ -1449,12 +1740,110 @@ class Database(object):
         :param level: the taxonomic level of the ancestral genome
         :returns dict: hog_id -> edge_weight of the neighboring hogs
         """
-        G = self.get_syntentic_hogs(hog_id, level, 1)
+        G = self.get_syntentic_hogs(hog_id=hog_id, level=level, steps=1)
         try:
             neighbors = {nbr: edg["weight"] for nbr, edg in G[hog_id]}
         except KeyError:
             neighbors = {}
         return neighbors
+
+    def get_ancestral_gene_ontology_annotations(
+        self,
+        level: Union[str, bytes, int],
+        hog_id: Union[str, bytes, None] = None,
+        as_dataframe: bool = False,
+        as_gaf: bool = False,
+    ):
+        """
+        Retrieve the ancestral gene ontology annotations for a hog / all hogs at a taxonomic level
+
+        The method returns the gene ontology annotations stored in the database
+        for a given hog_id at a given taxonomic level or for all the hogs at the given
+        taxonomic level.
+
+        By default, the result are returned as numpy arrays of type
+        :class:`tablefmt.AncestralGeneOntologyTable`, augemtned with a HogID column.
+        If `as_dataframe` is set to true, the result will be a pandas dataframe,
+        and if `as_gaf` is set to true, a gaf formatted text file with the
+        annotations is returned.
+
+        :param level: the taxonomic level for the ancestral data
+        :type level: str | bytes | int
+        :param hog_id: the hog_id for which the annotations should be retrieved.
+                       if not specified, information for all hogs will be used.
+        :type hog_id: str | bytes
+        :param as_dataframe: return as a pandas dataframe.
+        :type as_dataframe: bool
+        :param as_gaf: return annotations in GAF format
+        :type as_gaf: bool
+        """
+        ancestral_node = self._ancestral_node(level)
+        if hog_id is not None:
+            hog = self.get_hog(hog_id, tab=ancestral_node.Hogs)
+            query = f"(HogRow == {hog['IdxPerLevelTable']})"
+            annots = read_table_where(ancestral_node.GeneOntology, query)
+            hog_ids = {hog["IdxPerLevelTable"]: hog["ID"]}
+        else:
+            annots = ancestral_node.GeneOntology.read()
+            hog_ids = ancestral_node.Hogs.read(field="ID")
+        annots = numpy.lib.recfunctions.append_fields(
+            annots,
+            names="HogID",
+            data=[hog_ids[row] for row in annots["HogRow"]],
+            usemask=False,
+        )
+        if not as_dataframe and not as_gaf:
+            return annots
+        # early return if no annotations available
+        if len(annots) == 0:
+            return "!gaf-version: {}\n".format(GAF_VERSION) if as_gaf else None
+
+        df = pd.DataFrame(annots)
+        df["DB"] = "OMA"
+        df["DB_Object_ID"] = df["HogID"]
+        # 3R DB Object Symbol
+        df["DB_Object_Symbol"] = df["DB_Object_ID"]
+        # 4O Qualifier
+        df["Qualifier"] = ""
+        # 5R GO ID
+        df["GO_ID"] = df["TermNr"].apply(lambda t: "GO:{:07d}".format(t))
+        # 6R DB:Reference
+        df["DB:Reference"] = "OMA HogProp"
+        # 7R Evidence code
+        df["Evidence"] = "IEA"
+        # 8O With (or) From
+        df["With"] = ""
+        # 9R Aspect
+        df["Aspect"] = df["GO_ID"].apply(
+            lambda t: GOAspect.to_char(self.gene_ontology.term_by_id(t).aspect)
+        )
+        # 10O DB Object Name
+        df["DB_Object_Name"] = ""
+        # 11O DB Object Synonym (|Synonym)
+        df["Synonym"] = ""
+        # 12R DB Object Type
+        df["DB_Object_Type"] = "ancestral protein"
+        # 13R Taxon (|taxon)
+        df["Taxon_ID"] = level
+        # 14R Date
+        df["Date"] = self.get_conversion_date().strftime("%Y%m%d")
+        # 15R Assigned by
+        df["Assigned_By"] = df["DB"]
+        # 16O Annotation Extension
+        df["Annotation_Extension"] = ""
+        # 17O Gene Product Form ID
+        df["Gene_Product_Form_ID"] = ""
+
+        df = df[GOA.GAF20FIELDS]
+        return (
+            df
+            if not as_gaf
+            else (
+                "!gaf-version: {}\n".format(GAF_VERSION)
+                + "\n".join(df.apply(lambda e: "\t".join(map(str, e)), axis=1))
+                + "\n"
+            )
+        )
 
     def oma_group_members(self, group_id):
         """get the member entries of an oma group.
@@ -1467,19 +1856,10 @@ class Database(object):
         :param group_id: numeric oma group id or Fingerprint"""
         group_nr = self.resolve_oma_group(group_id)
         pe_tab = self.db.get_node("/Protein/Entries")
-        it = pe_tab.where("OmaGroup == {:d}".format(group_nr))
-        try:
-            first = next(it)
-        except StopIteration:
-            return numpy.array([], dtype=pe_tab.dtype)
-        members = numpy.fromiter(
-            map(lambda row: row.fetch_all_fields(), itertools.chain([first], it)),
-            dtype=pe_tab.dtype,
-        )
-        return members
+        return read_table_where(pe_tab, "OmaGroup == {:d}".format(group_nr))
 
     def resolve_oma_group(self, group_id):
-        if isinstance(group_id, int) and 0 < group_id <= self.get_nr_oma_groups():
+        if isinstance(group_id, int) and 0 < group_id <= self._nr_oma_groups:
             return group_id
         elif isinstance(group_id, numpy.integer):
             return self.resolve_oma_group(int(group_id))
@@ -1499,7 +1879,7 @@ class Database(object):
                 group_meta_tab = self.db.get_node("/OmaGroups/MetaData")
                 try:
                     e = next(
-                        group_meta_tab.where("(Fingerprint == {!r})".format(group_id))
+                        group_meta_tab.where("(Fingerprint == og)", {"og": group_id})
                     )
                     return int(e["GroupNr"])
                 except StopIteration:
@@ -1531,10 +1911,10 @@ class Database(object):
         )
 
     def oma_group_metadata(self, group_nr):
-        """get the meta data associated with a OMA Group
+        """get the metadata associated with an OMA Group
 
-        The meta data contains the fingerprint and the keywords infered for this group.
-        The method retuns this information as a dictionary. The parameter must be
+        The metadata contains the fingerprint and the keywords inferred for this group.
+        The method returns this information as a dictionary. The parameter must be
         the numeric oma group nr.
 
         :param int group_nr: a numeric oma group id."""
@@ -1546,6 +1926,12 @@ class Database(object):
         try:
             e = next(meta_tab.where("GroupNr == {:d}".format(group_nr)))
             kw_buf = self.db.get_node("/OmaGroups/KeywordBuffer")
+            try:
+                grp_size = int(e["NrMembers"])
+            except KeyError:
+                # fallback if not stored in DB yet
+                grp_size = -1
+
             res = {
                 "fingerprint": e["Fingerprint"].decode(),
                 "group_nr": int(e["GroupNr"]),
@@ -1554,7 +1940,7 @@ class Database(object):
                 ]
                 .tobytes()
                 .decode(),
-                "size": int(e["NrMembers"]) if "NrMembers" in e else -1,
+                "size": grp_size,
             }
             return res
         except StopIteration:
@@ -1562,6 +1948,10 @@ class Database(object):
 
     def get_nr_oma_groups(self):
         """returns the number of OMA Groups in the database"""
+        return self._nr_oma_groups
+
+    @LazyProperty
+    def _nr_oma_groups(self):
         tab = self.db.get_node("/Protein/Entries")
         try:
             idx = tab.colindexes["OmaGroup"][-1]
@@ -1656,12 +2046,12 @@ class Database(object):
             .decode()
         )
         locus_tab = self.db.get_node("/Protein/Locus/{}".format(genome))
-        return locus_tab.read_where("EntryNr == {}".format(entry_nr))
+        return read_table_where(locus_tab, "EntryNr == {}".format(entry_nr))
 
     def get_domains(self, entry_nr):
         try:
-            return self.db.root.Annotations.Domains.read_where(
-                "EntryNr == {:d}".format(entry_nr)
+            return read_table_where(
+                self.db.root.Annotations.Domains, "EntryNr == {:d}".format(entry_nr)
             )
         except ValueError as e:
             raise InvalidId("require a numeric entry id, got {}".format(entry_nr))
@@ -1752,26 +2142,153 @@ class Database(object):
         except KeyError:
             return None
 
-    def entrynrs_with_ec_annotation(self, ec):
+    def entrynrs_with_ec_annotation(
+        self,
+        ec: AnyStr,
+        limit: Optional[int] = None,
+        entrynr_filter: Union[Tuple[int, int], Set[int], None] = None,
+    ) -> Set[int]:
+        """Search for protein entries with a certain EC annotation.
+
+        The option arguments limit and entrynr_filter can be used to
+        limit the amount of entries that are returned and to speed
+        up the search time.
+
+        :param ec: EC identifier to be searched
+        :type ec: (str, bytes)
+        :param limit: maximum number of entries to be returned.
+        :type limit: int
+        :param entrynr_filter: range (low, high) or set of entry numbers that should be considered
+        :type entrynr_filter: Union[Tuple[int, int], Set[int], None]
+        :return: Entry numbers of proteins that contain the domain id.
+        :rtype: set[int]
+        """
         if isinstance(ec, str):
             ec = ec.encode("utf-8")
+        query = "(ECacc == ec)"
         ectab = self.get_hdf5_handle().get_node("/Annotations/EC")
-        entrynrs = {row["EntryNr"] for row in ectab.where("(ECacc == {!r})".format(ec))}
-        return entrynrs
+        return self._fetch_entry_nrs(
+            self._iter_rows_with_entrynr_filter(
+                ectab, query, condvars={"ec", ec}, entrynr_filter=entrynr_filter
+            ),
+            limit,
+        )
 
-    def entrynrs_with_domain_id(self, domain_id):
+    def count_ec_annotations(self, ec: AnyStr) -> int:
+        """
+        Count the number of EC annoations of a certain term in the database.
+
+        :param ec: EC identifier, e.g. "GO:0003676", 50, b"GO:0003674"
+        :type ec: (str, bytes)
+        :return number of annotations
+        :rtype int
+        """
+        if isinstance(ec, str):
+            ec = ec.encode("utf-8")
+        ecTab = self.get_hdf5_handle().get_node("/Annotations/EC")
+        return count_rows_of_index_column_with_value(ecTab, "ECacc", ec)
+
+    def entrynrs_with_domain_id(
+        self,
+        domain_id: AnyStr,
+        limit: Optional[int] = None,
+        entrynr_filter: Union[Tuple[int, int], Set[int], None] = None,
+    ) -> Set[int]:
+        """Search for protein entries with a certain domain_id.
+
+        The option arguments limit and entrynr_filter can be used to
+        limit the amount of entries that are returned and to speed
+        up the search time.
+
+        :param domain_id: domain identifier to be searched
+        :type domain_id: (str, bytes)
+        :param limit: maximum number of entries to be returned.
+        :type limit: int
+        :param entrynr_filter: range (low, high) or set of entry numbers that should be considered
+        :type entrynr_filter:  Union[Tuple[int, int], Set[int], None]
+        :return: Entry numbers of proteins that contain the domain id.
+        :rtype: set[int]"""
+
+        vars = {
+            "dom": domain_id.encode("utf-8")
+            if isinstance(domain_id, str)
+            else domain_id
+        }
+        query = "(DomainId == dom)"
+        domtab = self.get_hdf5_handle().get_node("/Annotations/Domains")
+        return self._fetch_entry_nrs(
+            self._iter_rows_with_entrynr_filter(domtab, query, vars, entrynr_filter),
+            limit,
+        )
+
+    def count_domain_id_annotations(self, domain_id: AnyStr) -> int:
+        """
+        Count the number of Domain annoations of a certain id in the database.
+
+        :param domain_id: Domain identifier, e.g. "2.60.10.60"
+        :type domain_id: (str, bytes)
+        :return number of annotations
+        :rtype int
+        """
         if isinstance(domain_id, str):
             domain_id = domain_id.encode("utf-8")
-        domtab = self.get_hdf5_handle().get_node("/Annotations/Domains")
-        entrynrs = {
-            row["EntryNr"] for row in domtab.where("DomainId =={!r}".format(domain_id))
-        }
-        return entrynrs
+        ecTab = self.get_hdf5_handle().get_node("/Annotations/Domains")
+        return count_rows_of_index_column_with_value(ecTab, "DomainId", domain_id)
 
-    def entrynrs_with_go_annotation(self, term, evidence=None):
+    def entrynrs_with_go_annotation(
+        self,
+        term: Union[AnyStr, int],
+        evidence: Optional[AnyStr] = None,
+        limit: Optional[int] = None,
+        entrynr_filter: Union[Tuple[int, int], Set[int], None] = None,
+    ) -> Set[int]:
         """Retrieve protein entry numbers that have a certain GO annotation term
 
-        :param term: numeric term or GO-identifier"""
+        :param term: numeric term or GO-identifier
+        :type term: (int, str, bytes)
+        :param evidence: evidence code which is required
+        :type evidence: (str, bytes)
+        :param limit: maximum number of entries to be returned.
+        :type limit: int
+        :param entrynr_filter: range (low, high) or set of entry numbers that should be considered
+        :type entrynr_filter: Union[Tuple[int, int], Set[int], None]
+        :return: Entry numbers of proteins that contain the domain id.
+        :rtype: set[int]
+        """
+        if (isinstance(term, str) and term.startswith("GO:")) or (
+            isinstance(term, bytes) and term.startswith(b"GO:")
+        ):
+            term = term[3:]
+
+        try:
+            vars = {"term_nr": int(term)}
+        except ValueError:
+            raise InvalidId("Invalid GO ID: {}".format(term))
+
+        gotab = self.get_hdf5_handle().get_node("/Annotations/GeneOntology")
+        query = "(TermNr == term_nr)"
+        if evidence is not None:
+            vars["ev"] = evidence.encode("utf-8")
+            query += " & (Evidence == ev)"
+
+        return self._fetch_entry_nrs(
+            self._iter_rows_with_entrynr_filter(
+                gotab, query, condvars=vars, entrynr_filter=entrynr_filter
+            ),
+            limit,
+        )
+
+    def count_go_annotations(self, term: Union[AnyStr, int]) -> int:
+        """
+        Count the number of GeneOntology annoations of a certain term in the database.
+        Annotations are counted multiple time if several evidences or references are
+        recorded.
+
+        :param term: numeric term or GO-identifier, e.g. "GO:0003676", 50, b"GO:0003674"
+        :type term: (int, str, bytes)
+        :return number of annotations
+        :rtype int
+        """
         if (isinstance(term, str) and term.startswith("GO:")) or (
             isinstance(term, bytes) and term.startswith(b"GO:")
         ):
@@ -1781,13 +2298,34 @@ class Database(object):
             term = int(term)
         except ValueError:
             raise InvalidId("Invalid GO ID: {}".format(term))
-
         gotab = self.get_hdf5_handle().get_node("/Annotations/GeneOntology")
-        query = "(TermNr == {})".format(term)
-        if evidence is not None:
-            query += "& (Evidence == {!r})".format(evidence.encode("utf-8"))
-        entrynrs = {row["EntryNr"] for row in gotab.where(query)}
+        return count_rows_of_index_column_with_value(gotab, "TermNr", term)
+
+    def _fetch_entry_nrs(self, row_iter, limit: Optional[int] = None) -> Set[int]:
+        entrynrs = set([])
+        for row in row_iter:
+            entrynrs.add(int(row["EntryNr"]))
+            if limit is not None and len(entrynrs) >= limit:
+                break
         return entrynrs
+
+    def _iter_rows_with_entrynr_filter(
+        self,
+        tab: tables.Table,
+        query_stub: str,
+        condvars: Optional[Mapping] = None,
+        entrynr_filter: Union[Tuple[int, int], Set[int], None] = None,
+    ) -> Generator:
+        query = query_stub
+        cond = lambda row: True
+        if entrynr_filter is not None:
+            rng = min(entrynr_filter), max(entrynr_filter)
+            query += " & (EntryNr >= {}) & (EntryNr <= {})".format(*rng)
+            if isinstance(entrynr_filter, set):
+                cond = lambda row: row["EntryNr"] in entrynr_filter
+        for row in tab.where(query, condvars=condvars):
+            if cond(row):
+                yield row
 
     def get_gene_ontology_annotations(
         self, entry_nr, stop=None, as_dataframe=False, as_gaf=False
@@ -1797,9 +2335,9 @@ class Database(object):
         The method returns the gene ontology annotations stored in the database
         for a given entry (if `stop` parameter is not provided) or for all the
         entries between [entry_nr, stop). Like in slices, the stop entry_nr is
-        not inclusive, where as the entry_nr - the start of the slice - is.
+        not inclusive, whereas the entry_nr - the start of the slice - is.
 
-        By default the result are returned as numpy arrays of type
+        By default, the result are returned as numpy arrays of type
         :class:`tablefmt.GeneOntologyTable`. If as_dataframe is set to true, the
         result will be a pandas dataframe, and if as_gaf is set to true, a gaf
         formatted text file with the annotations is returned.
@@ -1824,7 +2362,7 @@ class Database(object):
                         "stop argument needs to be a entry number that is larger than 'entry_nr'"
                     )
                 query = "(EntryNr >= {:d}) & (EntryNr < {:d})".format(entry_nr, stop)
-            annots = self.db.root.Annotations.GeneOntology.read_where(query)
+            annots = read_table_where(self.db.root.Annotations.GeneOntology, query)
 
             # for test database we also have some obsolete terms. we need to filter those
             if len(annots) > 0:
@@ -2153,7 +2691,7 @@ class SequenceSearch(object):
                 if (jj < len(self.seq_idx) and z[jj] == seq) or z[jj - 1] != seq:
                     raise RuntimeError("suffix index broken. should not happen")
 
-                # Find entry numbers and filter to remove incorrect entries
+                # Find entry numbers and enr_filter to remove incorrect entries
                 return list(
                     filter(
                         lambda e: (
@@ -2167,22 +2705,24 @@ class SequenceSearch(object):
         # Nothing found.
         return []
 
-    def approx_search(
-        self,
-        seq,
-        n=None,
-        is_sanitised=None,
-        coverage=None,
-        compute_distance=False,
-        entrynr_range=None,
+    def approx_search_no_align(
+        self, seq, is_sanitised=False, coverage=0.0, entrynr_range=None
     ):
-        """
-        Performs an exact match search using the suffix array.
-        :param entrynr_range:
+        """Performs a quick ranking of the best matches based on kmer index.
+        The method does not compute an alignment, but just reports the
+        entry number with the fraction of kmer matching better than the set coverage
+
+        :param seq: the sequence to be searched
+        :type seq: str, bytes
+        :param is_sanitised: whether or not the sequence is already sanitised. defaults to false.
+        :type is_sanitised: bool
+        :param coverage: the minimum fraction of covered kmers by the target sequence
+        :type coverage: float
+        :param entrynr_range: target entry number range as a tuple (min, max) or set for filtering
+        :type entrynr_range: set[int], tuple[int, int]
+        :returns: A list of tuples with (entry_nr, fraction_of_matched_kmers)
         """
         seq = seq if is_sanitised else self._sanitise_seq(seq)
-        n = n if n is not None else 50
-        coverage = 0.0 if coverage is None else coverage
         tax_filt = (
             self._tax_filter_range
             if isinstance(entrynr_range, tuple)
@@ -2200,17 +2740,61 @@ class SequenceSearch(object):
         # 2. Filter to top n if necessary
         z = len(seq) - self.k + 1
         cut_off = coverage * z
-        c = [
+        entries = [
             (enr, (cnts / z))
             for enr, cnts in c.items()
             if cnts >= cut_off
             and (entrynr_range is None or tax_filt(enr, entrynr_range))
         ]
-        c = sorted(c, reverse=True, key=lambda x: x[1])[:n] if n > 0 else c
+        return entries
+
+    def approx_search(
+        self,
+        seq,
+        n=None,
+        is_sanitised=None,
+        coverage=None,
+        compute_distance=False,
+        entrynr_range=None,
+        return_kmer_hits=False,
+    ):
+        """
+        Performs an approximate match search using the kmer index.
+        For the n best matching candidates based on kmer lookup, a
+        Smith-Waterman alignment is computed.
+
+        If compute_distance is set to True, an ML distance estimate
+        of the alignment is returned as part of the resulting dictionary
+
+        :param seq: the query sequence to be searched
+        :type seq: str, bytes
+        :param int n: number of maximum returned entries that match query
+        :param bool is_sanitised: whether or not the sequence is already sanitised. defaults to false.
+        :param float coverage: the minimum fraction of covered kmers by the target sequence
+        :param entrynr_range: target entry number range as a tuple (min, max) or set for filtering
+        :type entrynr_range: set[int], tuple[int, int]
+        :param bool return_kmer_hits: whether or not the full list of matched kmer entries should be
+        returned. if set to True, the return value will be a tuple instead of a single list
+
+        :returns: list of matched entries, each element is a tuple with the entry_nr and a dictionary
+        containing the score, alignment and distance estimates.
+        If return_kmer_hits is set to True, also the full list of matching entries is returned.
+        """
+        seq = seq if is_sanitised else self._sanitise_seq(seq)
+        n = n if n is not None else 50
+        coverage = 0.0 if coverage is None else coverage
+
+        kmer_hits = self.approx_search_no_align(
+            seq, is_sanitised=True, coverage=coverage, entrynr_range=entrynr_range
+        )
+        c = sorted(kmer_hits, reverse=True, key=lambda x: x[1])
+        if n > 0:
+            c = c[:n]
 
         # 3. Do local alignments and return count / score / alignment
+        res = []
         if len(c) > 0:
-            return sorted(
+            res = sorted(
                 [
                     (
                         m[0],
@@ -2227,7 +2811,10 @@ class SequenceSearch(object):
                 key=lambda q: q[1]["score"],
                 reverse=True,
             )
-        return []
+        if return_kmer_hits:
+            return res, kmer_hits
+        else:
+            return res
 
     def _align_entries(self, seq, matches, compute_distance=False):
         # Does the alignment for the approximate search
@@ -2361,19 +2948,24 @@ class OmaIdMapper(object):
     def identify_genome(self, code):
         """identify genome based on either a UniProtSpeciesCode,
         NCBI Taxonomy Id or species name"""
-        if isinstance(code, int) or code.isdigit():
-            return self.genome_from_taxid(code)
-        else:
+        try:
+            code = int(code)
+        except ValueError:
             if len(code) == 5:
                 try:
-                    return self.genome_from_UniProtCode(code)
+                    return self.genome_from_UniProtCode(code.upper())
                 except UnknownSpecies:
                     pass
             return self.genome_from_SciName(code)
+        return self.genome_from_taxid(code)
 
-    def approx_search_genomes(self, pattern):
+    def approx_search_genomes(self, pattern, scores=False):
         candidates = self._approx_genome_matcher.search_approx(pattern)
-        return [Genome(self._db, self.genome_table[z[2]]) for z in candidates]
+        genomes = [Genome(self._db, self.genome_table[z[2]]) for z in candidates]
+        if scores:
+            return genomes, [z[0] for z in candidates]
+        else:
+            return genomes
 
     def omaid_to_entry_nr(self, omaid):
         """returns the internal numeric entrynr from a
@@ -2461,7 +3053,8 @@ class HogIdForwardMapper(object):
     def map_hogid(self, hogid):
         hogid = hogid.encode("utf-8") if isinstance(hogid, str) else hogid
         cand_iter = self.h5_hogmap.get_node("/hogmap").where(
-            "Old == {!r}".format(hogid)
+            "Old == hogid",
+            {"hogid": hogid},
         )
         return {c["New"].decode(): float(c["Jaccard"]) for c in cand_iter}
 
@@ -2516,12 +3109,6 @@ class FuzzyMatcher(object):
                         bests[src] = (score, val, src)
             matches = list(bests.values())
         return matches
-
-
-class AmbiguousID(Exception):
-    def __init__(self, message, candidates):
-        super(AmbiguousID, self).__init__(message, candidates)
-        self.candidates = candidates
 
 
 class IDResolver(object):
@@ -2587,29 +3174,42 @@ class IDResolver(object):
             nr = (nr, False)
         return nr
 
-    def search_protein(self, query: str, limit=None):
+    @timethis(logging.DEBUG)
+    def search_protein(self, query: str, limit=None, entrynr_range=None):
         candidates = collections.defaultdict(dict)
         try:
             nr = self._from_numeric(query)
-            candidates[nr]["numeric_id"] = [query]
+            if entrynr_range is None or entrynr_range[0] <= nr <= entrynr_range[1]:
+                candidates[nr]["numeric_id"] = [query]
         except ValueError:
             pass
         try:
             nr = self._from_omaid(query)
-            candidates[nr]["omaid"] = [query]
+            if entrynr_range is None or entrynr_range[0] <= nr <= entrynr_range[1]:
+                candidates[nr]["omaid"] = [query]
         except (InvalidOmaId, UnknownSpecies) as e:
             pass
-        id_res = self._db.id_mapper["XRef"].search_id(query, limit)
+        id_res = self._db.id_mapper["XRef"].search_id(
+            query, limit=limit, entrynr_range=entrynr_range
+        )
         for nr, res_dict in id_res.items():
             candidates[nr].update(res_dict)
-        try:
-            desc_res = DescriptionSearcher(self._db).search_term(query, limit)
-            for row_nr in desc_res[:limit]:
-                nr = row_nr + 1
-                candidates[nr]["Description"] = [self._db.get_description(nr).decode()]
-        except SuffixIndexError as e:
-            logger.warning(e)
-            logger.warning("No Descriptions searched")
+        if len(id_res) < 5 and self._db.desc_searcher is not None:
+            try:
+                desc_res = self._db.desc_searcher.search_term(query, limit)
+                desc_res.sort()
+                for row_nr in desc_res[:limit]:
+                    nr = row_nr + 1
+                    if (
+                        entrynr_range is None
+                        or entrynr_range[0] <= nr <= entrynr_range[1]
+                    ):
+                        candidates[nr]["Description"] = [
+                            self._db.get_description(nr).decode()
+                        ]
+            except SuffixIndexError as e:
+                logger.warning(e)
+                logger.warning("No Descriptions searched")
         return candidates
 
 
@@ -2626,13 +3226,14 @@ class Taxonomy(object):
         self.tax_table = data
         self.taxid_key = self.tax_table.argsort(order=("NCBITaxonId"))
         self.parent_key = self.tax_table.argsort(order=("ParentTaxonId"))
+        self._add_luca_if_needed()
         self.all_hog_levels = _valid_levels
         self._approx_matcher = None
         if _valid_levels is None:
             self._load_valid_taxlevels()
 
     def _load_valid_taxlevels(self):
-        forbidden_chars = re.compile(r"[^A-Za-z0-9()/,.: -]")
+        forbidden_chars = re.compile(r"[^A-Za-z0-9()/_,.: -]")
         try:
             with open(os.environ["DARWIN_BROWSERDATA_PATH"] + "/TaxLevels.drw") as f:
                 taxStr = f.read()
@@ -2678,6 +3279,19 @@ class Taxonomy(object):
             res = numpy.array([(0, -1, b"LUCA")], dtype=self.tax_table.dtype)[0]
         return res
 
+    def _add_luca_if_needed(self):
+        i1 = self.tax_table["ParentTaxonId"].searchsorted(0, sorter=self.parent_key)
+        i2 = self.tax_table["ParentTaxonId"].searchsorted(
+            0, sorter=self.parent_key, side="right"
+        )
+        if i2 - i1 > 1:
+            self.tax_table = numpy.append(
+                self.tax_table,
+                numpy.array([(0, -1, b"LUCA")], dtype=self.tax_table.dtype),
+            )
+            self.taxid_key = self.tax_table.argsort(order=("NCBITaxonId"))
+            self.parent_key = self.tax_table.argsort(order=("ParentTaxonId"))
+
     def _taxon_from_numeric(self, tid):
         idx = self._table_idx_from_numeric(tid)
         return self.tax_table[idx]
@@ -2700,15 +3314,18 @@ class Taxonomy(object):
         candidates = self._approx_matcher.search_approx(pattern)
         return candidates
 
-    def get_parent_taxa(self, query):
+    def get_parent_taxa(self, query, root=0):
         """Get array of taxonomy entries leading towards the
         root of the taxonomy.
 
-        :param query: the starting taxonomy level"""
+        :param query: the starting taxonomy level
+        :param root: parameter to identify the root-taxid. defaults to 0.
+                     if set to -1, LUCA will be included into the list.
+        """
         idx = []
         parent = query
         count = 0
-        while parent != 0:
+        while parent != root:
             i = self._table_idx_from_numeric(parent)
             idx.append(i)
             tmp = self.tax_table[i]["ParentTaxonId"]
@@ -2982,62 +3599,6 @@ class Taxonomy(object):
         return et.tostring(root, encoding="utf-8")
 
 
-class PyOmaException(Exception):
-    pass
-
-
-class IdException(PyOmaException):
-    pass
-
-
-class InvalidTaxonId(IdException):
-    pass
-
-
-class DBVersionError(PyOmaException):
-    pass
-
-
-class DBConsistencyError(PyOmaException):
-    pass
-
-
-class DBOutdatedError(PyOmaException):
-    pass
-
-
-class InvalidId(IdException):
-    pass
-
-
-class InvalidOmaId(InvalidId):
-    pass
-
-
-class UnknownIdType(IdException):
-    pass
-
-
-class UnknownSpecies(IdException):
-    pass
-
-
-class OutdatedHogId(InvalidId):
-    def __init__(self, hog_id):
-        super().__init__("Outdated HOG ID: {}".format(hog_id), hog_id)
-        self.outdated_hog_id = hog_id
-
-
-class Singleton(Exception):
-    def __init__(self, entry, msg=None):
-        super(Singleton, self).__init__(msg)
-        self.entry = entry
-
-
-class NoReprEntry(Exception):
-    pass
-
-
 class IdMapperFactory(object):
     def __init__(self, db_obj):
         self.db = db_obj
@@ -3050,250 +3611,17 @@ class IdMapperFactory(object):
         try:
             mapper = self.mappers[idtype]
         except KeyError:
-            try:
-                mapper = globals()[str(idtype).title() + "IdMapper"](self.db)
-                self.mappers[idtype] = mapper
-            except KeyError:
+            mapper = None
+            for inst in (str(idtype).title() + "IdMapper", str(idtype)):
+                try:
+                    mapper = globals()[inst](self.db)
+                    self.mappers[idtype] = mapper
+                    break
+                except KeyError:
+                    pass
+            if mapper is None:
                 raise UnknownIdType("{} is unknown".format(str(idtype)))
         return mapper
-
-
-class XrefIdMapper(object):
-    def __init__(self, db):
-        self._db = db
-        self.xref_tab = db.get_hdf5_handle().get_node("/XRef")
-        self.xrefEnum = self.xref_tab.get_enum("XRefSource")
-        self.idtype = frozenset(list(self.xrefEnum._values.keys()))
-        self.verif_enum = self.xref_tab.get_enum("Verification")
-        self._max_verif_for_mapping_entrynrs = 1000  # allow all verification values
-        try:
-            self.xref_index = SuffixSearcher.from_tablecolumn(self.xref_tab, "XRefId")
-        except SuffixIndexError:
-            # compability mode
-            idx_node = db.get_hdf5_handle().get_node("/XRef_Index")
-            self.xref_index = SuffixSearcher.from_index_node(idx_node)
-
-    def map_entry_nr(self, entry_nr):
-        """returns the XRef entries associated with the query protein.
-
-        The types of XRefs that are returned depends on the idtype
-        class member variable. In the base-class, idtype contains
-        all valid xref types. Typically, subclasses of XrefIdMapper
-        will change this set.
-
-        :param entry_nr: the numeric id of the query protein.
-        :returns: list of dicts with 'source' and 'xref' keys."""
-        res = [
-            {
-                "source": self.xrefEnum(row["XRefSource"]),
-                "xref": row["XRefId"].decode(),
-                "seq_match": self.verif_enum(row["Verification"]),
-            }
-            for row in self.xref_tab.where(
-                "(EntryNr=={:d}) & (Verification <= {:d})".format(
-                    entry_nr, self._max_verif_for_mapping_entrynrs
-                )
-            )
-            if row["XRefSource"] in self.idtype
-        ]
-        return res
-
-    def canonical_source_order(self):
-        """returns the list of xref sources in order of their importance.
-
-        Most important source - in the base class for example UniProtKB/SwissProt
-        are first. The canonical order is defined in the enum definition.
-
-        :returns: list of source strings"""
-        return [self.xrefEnum(z) for z in sorted(self.idtype)]
-
-    def iter_xrefs_for_entry_nr(self, entry_nr):
-        """Iterate over the xrefs of a given entry number.
-
-        This method returns a dict with 'source' and 'xref' fields
-        (both str) holding the information of the xref record.
-
-        :param entry_nr: the numeric id of the query protein"""
-        for row in self.xref_tab.where(
-            "(EntryNr=={:d}) & (Verification <= {:d})".format(
-                entry_nr, self._max_verif_for_mapping_entrynrs
-            )
-        ):
-            if row["XRefSource"] in self.idtype:
-                yield {
-                    "source": self.xrefEnum._values[row["XRefSource"]],
-                    "xref": row["XRefId"].decode(),
-                }
-
-    def _combine_query_values(self, field, values):
-        parts = ["({}=={})".format(field, z) for z in values]
-        return "(" + "|".join(parts) + ")"
-
-    def map_many_entry_nrs(self, entry_nrs):
-        """map several entry_nrs with as few db queries as possible
-        to their cross-references. The function returns a
-        :class:`numpy.recarray` containing all fields as defined in
-        the table.
-
-        :param entry_nrs: a list with numeric protein entry ids"""
-        mapped_junks = []
-        chunk_size = 32
-        source_condition = None
-        verif_condition = None
-        if len(self.idtype) < len(self.xrefEnum):
-            chunk_size -= len(self.idtype)  # respect max number of condition variables.
-            source_condition = self._combine_query_values("XRefSource", self.idtype)
-        if self._max_verif_for_mapping_entrynrs < max(x[1] for x in self.verif_enum):
-            chunk_size -= 1
-            verif_condition = "(Verification <= {:d})".format(
-                self._max_verif_for_mapping_entrynrs
-            )
-        for start in range(0, len(entry_nrs), chunk_size):
-            condition_list = [
-                self._combine_query_values(
-                    "EntryNr", entry_nrs[start : start + chunk_size]
-                )
-            ]
-            if source_condition:
-                condition_list.append(source_condition)
-            if verif_condition:
-                condition_list.append(verif_condition)
-            condition = " & ".join(condition_list)
-            mapped_junks.append(self.xref_tab.read_where(condition))
-        return numpy.lib.recfunctions.stack_arrays(mapped_junks, usemask=False)
-
-    def map_entry_nr_range(self, start, stop):
-        """maps for a whole range the entry numbers to the xrefs
-
-        param start: the first entry nr to be mapped
-        type start: int, numpy.int
-        param stop: the first entry nr that is not included in the result (exlusive)
-        type stop: int, numpy.int
-
-        returns: all the mapped xrefs that are respecting
-                 the filtering conditions of the actual subtype of
-                 XRefIdMapper.
-        rtype: :class:`numpy.lib.recarray`"""
-        conditions = ["(EntryNr >= {:d}) & (EntryNr < {:d})".format(start, stop)]
-        if len(self.idtype) < len(self.xrefEnum):
-            source_condition = self._combine_query_values("XRefSource", self.idtype)
-            conditions.append(source_condition)
-        if self._max_verif_for_mapping_entrynrs < max(x[1] for x in self.verif_enum):
-            verif_condition = "(Verification <= {:d})".format(
-                self._max_verif_for_mapping_entrynrs
-            )
-            conditions.append(verif_condition)
-        query = " & ".join(conditions)
-        it = self.xref_tab.where(query)
-        try:
-            first = next(it)
-        except StopIteration:
-            return numpy.array([], dtype=self.xref_tab.dtype)
-        res = numpy.fromiter(
-            map(lambda row: row.fetch_all_fields(), itertools.chain([first], it)),
-            dtype=self.xref_tab.dtype,
-        )
-        return res
-
-    @timethis(logging.DEBUG)
-    def search_xref(self, xref, is_prefix=False, match_any_substring=False):
-        """identify proteins associcated with `xref`.
-
-        The crossreferences are limited to the types in the class
-        member `idtype`. In the base class, all types are valid
-        xrefs. The method returns a :class:`numpy.recarry` defined
-        for the XRef table with all entries pointing to `xref`.
-
-        The method by default returns only exact matches. By setting
-        `is_prefix` to True, one can indicated that the requested xref
-        should be interpreted as a prefix and all entries matching this
-        prefix should be returned.
-
-        :param str xref: an xref to be located
-        :param bool is_prefix: treat xref as a prefix and return
-                     potentially several matching xrefs"""
-        if match_any_substring:
-            query = xref.encode("utf-8").lower()
-            res = self.xref_tab[self.xref_index.find(query)]
-        else:
-            if is_prefix:
-                up = xref[:-1] + chr(ord(xref[-1]) + 1)
-                cond = "(XRefId >= {!r}) & (XRefId < {!r})".format(
-                    xref.encode("utf-8"), up.encode("utf-8")
-                )
-            else:
-                cond = "XRefId=={!r}".format(xref.encode("utf-8"))
-            res = self.xref_tab.read_where(cond)
-        if len(res) > 0 and len(self.idtype) < len(self.xrefEnum):
-            res = res[numpy.in1d(res["XRefSource"], list(self.idtype))]
-
-        return res
-
-    def search_id(self, query, limit=None):
-        source_filter = None
-        try:
-            prefix, term = query.split(":", maxsplit=1)
-            if prefix in self.xrefEnum:
-                source_filter = self.xrefEnum[prefix]
-            else:
-                term = query
-        except ValueError:
-            term = query
-
-        result = collections.defaultdict(dict)
-        high_limit = None if limit is None else 4 * limit
-        xref_rows = self.xref_index.find(term, limit=high_limit)
-        xref_rows.sort()
-        for xref_row in xref_rows:
-            xref = self.xref_tab[xref_row]
-            if not source_filter or xref["XRefSource"] == source_filter:
-                source = self.xrefEnum(xref["XRefSource"])
-                try:
-                    result[xref["EntryNr"]][source].append(xref["XRefId"].decode())
-                except KeyError:
-                    result[xref["EntryNr"]][source] = [xref["XRefId"].decode()]
-            if limit is not None and len(result) >= limit:
-                break
-        return result
-
-    def source_as_string(self, source):
-        """string representation of xref source enum value
-
-        this auxiliary method converts the numeric value of
-        a xref source into a string representation.
-
-        :param int source: numeric value of xref source"""
-        try:
-            return self.xrefEnum._values[source]
-        except KeyError:
-            raise ValueError("'{}' is not a valid xref source value".format(source))
-
-    def verification_as_string(self, verif):
-        """string representation of xref verifiction enum value"""
-        return self.verif_enum(verif)
-
-    def xreftab_to_dict(self, tab):
-        """convert a xreftable to a dictionary per entry_nr.
-
-        All rows in `tab` are converted into a nested dictionary
-        where the outer key is a protein entry number and the
-        inner key the xref source type.
-
-        :param tab: a :class:`numpy.recarray` corresponding to XRef
-            table definition to be converted"""
-        xrefdict = collections.defaultdict(dict)
-        for row in tab:
-            try:
-                typ = self.xrefEnum(row["XRefSource"])
-            except IndexError:
-                logger.warning("invalid XRefSource value in {}".format(row))
-                continue
-            if typ not in xrefdict[row["EntryNr"]]:
-                xrefdict[row["EntryNr"]][typ] = {
-                    "id": row["XRefId"],
-                    "seq_match": self.verif_enum(row["Verification"]),
-                }
-        return xrefdict
 
 
 class BestIdPerEntryOnlyMixin:
@@ -3307,102 +3635,6 @@ class BestIdPerEntryOnlyMixin:
         return df.drop(columns="ord").to_records(
             index=False, column_dtypes=dict(arr.dtype.descr)
         )
-
-
-class XRefNoApproximateIdMapper(XrefIdMapper):
-    def __init__(self, db):
-        super(XRefNoApproximateIdMapper, self).__init__(db)
-        self._max_verif_for_mapping_entrynrs = self.verif_enum["unchecked"]
-
-
-class UniProtIdMapper(XrefIdMapper):
-    def __init__(self, db):
-        super(UniProtIdMapper, self).__init__(db)
-        self.idtype = frozenset(
-            [self.xrefEnum[z] for z in ["UniProtKB/SwissProt", "UniProtKB/TrEMBL"]]
-        )
-
-
-class LinkoutIdMapper(XrefIdMapper):
-    def __init__(self, db):
-        super(LinkoutIdMapper, self).__init__(db)
-        self.idtype = frozenset(
-            [
-                self.xrefEnum[z]
-                for z in [
-                    "UniProtKB/SwissProt",
-                    "UniProtKB/TrEMBL",
-                    "Ensembl Protein",
-                    "Ensembl Gene",
-                    "EntrezGene",
-                ]
-            ]
-        )
-
-    def url(self, typ, id_):
-        # TODO: improve url generator in external module with all xrefs
-        url = None
-        try:
-            id_ = id_.decode()
-        except AttributeError:
-            pass
-
-        if typ.startswith("UniProtKB"):
-            url = "http://uniprot.org/uniprot/{}".format(id_)
-        elif typ == "EntrezGene":
-            url = "http://www.ncbi.nlm.nih.gov/gene/{}".format(id_)
-        elif typ.startswith("Ensembl"):
-            url = "http://ensembl.org/id/{}".format(id_)
-        return url
-
-    def xreftab_to_dict(self, tab):
-        xref = super(LinkoutIdMapper, self).xreftab_to_dict(tab)
-        for d in list(xref.values()):
-            for typ, elem in list(d.items()):
-                elem["url"] = self.url(typ, elem["id"])
-        return xref
-
-    def iter_xrefs_for_entry_nr(self, entry_nr):
-        """same as base clase but includes also the url as a field"""
-        for xref in super(LinkoutIdMapper, self).iter_xrefs_for_entry_nr(entry_nr):
-            xref["url"] = self.url(xref["source"], xref["xref"])
-            yield xref
-
-
-class GeneNameOrSymbolIdMapper(XRefNoApproximateIdMapper):
-    def __init__(self, db):
-        super(GeneNameOrSymbolIdMapper, self).__init__(db)
-        self.order = [
-            "Gene Name",
-            "UniProtKB/SwissProt",
-            "UniProtKB/TrEMBL",
-            "HGNC",
-            "SourceID",
-        ]
-        self.idtype = frozenset(self.xrefEnum[z] for z in self.order)
-
-    def canonical_source_order(self):
-        return self.order
-
-
-class DomainNameIdMapper(object):
-    def __init__(self, db):
-        self.domain_src = db.get_hdf5_handle().root.Annotations.DomainDescription.read()
-        self.domain_src.sort(order="DomainId")
-
-    def _get_dominfo(self, domain_id):
-        idx = self.domain_src["DomainId"].searchsorted(domain_id)
-        if self.domain_src[idx]["DomainId"] != domain_id:
-            raise KeyError("no domain info available for {}".format(domain_id))
-        return self.domain_src[idx]
-
-    def get_info_dict_from_domainid(self, domain_id):
-        info = self._get_dominfo(domain_id)
-        return {
-            "name": info["Description"].decode(),
-            "source": info["Source"].decode(),
-            "domainid": domain_id.decode(),
-        }
 
 
 class DescriptionSearcher(object):
@@ -3482,7 +3714,8 @@ class FastMapper(object):
 
                         if go_df is not None:
                             go_df["With"] = "Approx:{}:{}".format(
-                                self.db.id_mapper["Oma"].map_entry_nr(enr), score,
+                                self.db.id_mapper["Oma"].map_entry_nr(enr),
+                                score,
                             )
                             break
                 if go_df is not None:

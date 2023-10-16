@@ -187,7 +187,7 @@ class AncestralTaxonomyResource(TaxonomyResource):
 
 class LinkoutBuffer(object):
     def __init__(
-        self, resource, outdir="/tmp", bulk_add=True, max_file_size=20 * 2 ** 20
+        self, resource, outdir="/tmp", bulk_add=True, max_file_size=20 * 2**20
     ):
         self.max_records = math.floor(
             (max_file_size - resource.DISKSIZE_HEADER) / resource.DISKSIZE_PER_LINK
@@ -298,7 +298,7 @@ class GenesPriorizationHandler(object):
 
 def prepare_linkout_files(outdir="/tmp", infile="../pyomabrowser/OmaServer.h5"):
     prov = Provider()
-    with open(os.path.join(outdir, "provider.xml"), "wb") as fh:
+    with open(os.path.join(outdir, "providerinfo.xml"), "wb") as fh:
         prov.write(fh)
 
     db = Database(infile)

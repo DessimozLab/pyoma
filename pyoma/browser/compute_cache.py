@@ -1,23 +1,25 @@
-import tables
+import collections
+import functools
+import itertools
+import json
+import logging
+import multiprocessing as mp
+import os
+import signal
+import sys
+import time
+from os.path import commonprefix, split
+from queue import Empty
+
 import numpy
 import numpy.lib.recfunctions
-import multiprocessing as mp
-import collections
-import logging
-import signal
-import shutil
-import time
-import os
-import sys
-import functools
-import json
-
+import tables
 from tqdm import tqdm
-from queue import Empty
+
 from .db import Database
+from .exceptions import DBConsistencyError
 from .models import ProteinEntry
 from .tablefmt import ProteinCacheInfo
-from os.path import commonprefix, split
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +83,13 @@ class CacheBuilderWorker(mp.Process):
 
     def load_fam_members(self, fam):
         members = []
-        hog_range = [self.db.format_hogid(x).encode("utf-8") for x in (fam, fam + 1)]
+        vals = {
+            k: self.db.format_hogid(x).encode("utf-8")
+            for k, x in zip(("fam", "fam_next"), (fam, fam + 1))
+        }
         for row in self.h5.get_node("/Protein/Entries").where(
-            "({!r} <= OmaHOG) & (OmaHOG < {!r})".format(*hog_range)
+            "(fam <= OmaHOG) & (OmaHOG < fam_next)",
+            condvars=vals,
         ):
             members.append(
                 Protein(row["EntryNr"], row["OmaHOG"].decode(), row["OmaGroup"])
@@ -101,21 +107,30 @@ class CacheBuilderWorker(mp.Process):
             )
         ]
 
-    def analyse_fam(self, fam):
+    def analyse_fam(self, fam, rng=None):
         logger.debug("analysing family {}".format(fam))
         fam_members = self.load_fam_members(fam)
-        logger.debug("family {} with {} members".format(fam, len(fam_members)))
+        logger.debug(
+            "family {} with {} members; doing range {}".format(
+                fam, len(fam_members), rng
+            )
+        )
         grp_members = {
             grp: set(self.load_grp_members(grp))
             for grp in set(z.group for z in fam_members if z.group > 0)
         }
-        counts = numpy.zeros(
-            len(fam_members), dtype=tables.dtype_from_descr(ProteinCacheInfo)
-        )
+        nr_memb = len(fam_members)
+        fam_iter = iter(fam_members)
+        if rng is not None:
+            nr_memb = rng[1] - rng[0]
+            fam_iter = itertools.islice(fam_members, rng[0], rng[1])
+
+        counts = numpy.zeros(nr_memb, dtype=tables.dtype_from_descr(ProteinCacheInfo))
         for i, p1 in tqdm(
-            enumerate(fam_members),
+            enumerate(fam_iter),
             disable=len(fam_members) < 500,
             desc="fam {}".format(fam),
+            total=nr_memb,
         ):
             vps = set(self.load_vps(p1.entry_nr))
             ind_orth = set(p2.entry_nr for p2 in fam_members if are_orthologous(p1, p2))
@@ -186,10 +201,6 @@ class CacheBuilderWorker(mp.Process):
             final_json_output.append(to_append)
 
         return json.dumps(final_json_output)
-
-
-class ConsistenceyError(Exception):
-    pass
 
 
 class ResultHandler:
@@ -292,7 +303,7 @@ class ResultHandler:
             a.append(self.jobs)
             h5.flush()
             if len(buf) != self.buffer_offset:
-                raise ConsistenceyError(
+                raise DBConsistencyError(
                     "buffer has unexpeced length: {}vs{}".format(
                         len(buf), self.buffer_offset
                     )
@@ -440,7 +451,7 @@ def update_hdf5_from_cachefile(db_fpath, tmp_cache):
         tab = h5.root.RootHOG.MetaData.read()
         for fam, off, length in json_off:
             if tab[fam - 1]["FamNr"] != fam:
-                raise ConsistenceyError("table not properly ordered")
+                raise DBConsistencyError("table not properly ordered")
             tab[fam - 1]["FamDataJsonOffset"] = off
             tab[fam - 1]["FamDataJsonLength"] = length
         h5.root.RootHOG.MetaData.modify_column(

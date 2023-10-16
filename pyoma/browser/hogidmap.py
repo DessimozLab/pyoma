@@ -28,7 +28,8 @@ class HogHasher(object):
     def analyze_fam(self, fam_nr):
         members = self.db.member_of_fam(fam_nr)
         minhashes = collections.defaultdict(MinHash256)
-        for e in members:
+        t_start = t0 = time.time()
+        for i, e in enumerate(members):
             hog_id = e["OmaHOG"]
             prot_id = e["CanonicalId"]
             if len(prot_id) == e.dtype["CanonicalId"].itemsize:
@@ -37,9 +38,14 @@ class HogHasher(object):
                     if ref["xref"].encode("utf-8").startswith(prot_id):
                         prot_id = ref["xref"].encode("utf-8")
                         break
-            for p in re.finditer(br"\.", hog_id):
+            for p in re.finditer(rb"\.", hog_id):
                 minhashes[hog_id[: p.start()]].update(prot_id)
             minhashes[hog_id].update(prot_id)
+            if time.time() - t0 > 10:
+                logger.debug(
+                    f"working since {time.time()-t_start}sec on fam {fam_nr}. Done {i} out of {len(members)} proteins"
+                )
+                t0 = time.time()
         return minhashes
 
 
@@ -214,17 +220,25 @@ def generator_of_unprocessed_fams(db_path, lsh_path=None):
 
 
 def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
-    pipeline = Pipeline()
     if nr_procs is None:
         nr_procs = multiprocessing.cpu_count()
 
     fams_to_process = generator_of_unprocessed_fams(db_path, output_path)
-    pipeline.add_stage(Stage(FamGenerator, nr_procs=1, fam_generator=fams_to_process))
-    pipeline.add_stage(Stage(HashWorker, nr_procs=nr_procs, db_path=db_path))
-    pipeline.add_stage(Stage(Collector, nr_procs=1, output_path=output_path))
-    print("setup pipeline, about to start it.")
-    pipeline.run()
-    print("finished with computing the MinHashLSH for {}".format(db_path))
+    while True:
+        pipeline = Pipeline()
+        pipeline.add_stage(
+            Stage(FamGenerator, nr_procs=1, fam_generator=fams_to_process)
+        )
+        pipeline.add_stage(Stage(HashWorker, nr_procs=nr_procs, db_path=db_path))
+        pipeline.add_stage(Stage(Collector, nr_procs=1, output_path=output_path))
+        print("setup pipeline, about to start it.")
+        pipeline.run()
+        print("finished with computing the MinHashLSH for {}".format(db_path))
+
+        fams_to_process = set(generator_of_unprocessed_fams(db_path, output_path))
+        if len(fams_to_process) == 0:
+            break
+    print("for sure all families processes. we're done!")
 
 
 def compare_versions(output_file, target_path, *old_path):

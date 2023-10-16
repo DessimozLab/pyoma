@@ -4,6 +4,9 @@ import csv
 import logging
 import math
 import re
+from functools import lru_cache
+from collections import deque
+
 import numpy
 
 
@@ -76,7 +79,7 @@ class GOterm(object):
     """A class representing a single Gene Ontology term.
 
     This class can serve as a factory for the OntologyParser. For that,
-    pass it as a factory on 'Term'. """
+    pass it as a factory on 'Term'."""
 
     def __init__(self, stanza):
         self.id = validate_go_id(stanza["id"][0])
@@ -84,6 +87,7 @@ class GOterm(object):
         self.definition = " ".join(stanza["def"])
         self.aspect = GOAspect.from_string(" ".join(stanza["namespace"]))
         self.is_a = [validate_go_id(parent) for parent in stanza["is_a"]]
+        self.min_depth = 100000
         for rel in stanza["relationship"]:
             reltype, partner = rel.strip().split()
             if not reltype in self.__dict__.keys():
@@ -243,6 +247,26 @@ class GeneOntology(object):
         for term in self.terms.values():
             term.replace_parentnames_by_refs(self.terms)
 
+        # compute mindepth of terms in a bfg traversal
+        self._compute_min_depths()
+
+    def _compute_min_depths(self):
+        root_terms = [
+            t
+            for t in self.terms.values()
+            if not any((len(getattr(t, rel, [])) > 0 for rel in self.up_rels))
+        ]
+        bfg_queue = deque(((t, 0) for t in root_terms))
+        while len(bfg_queue) > 0:
+            term, depth = bfg_queue.popleft()
+            if depth < term.min_depth:
+                term.min_depth = depth
+                bfg_queue.extend(
+                    (child, depth + 1)
+                    for rel in self.down_rels
+                    for child in getattr(term, rel, [])
+                )
+
     def ensure_term(self, term):
         """returns the term object associated with term. if term is already
         a GOterm object, it is simply return. term_ids can be either numeric
@@ -277,6 +301,7 @@ class GeneOntology(object):
         term = self.ensure_term(term)
         return self._traverseGraph(term, max_steps, self.down_rels)
 
+    @lru_cache(maxsize=4048)
     def _traverseGraph(self, node, max_steps, rels):
         """_traverseGraph traverses the graph in a breath first manner
         and reports all the nodes reachable within max_steps."""
@@ -320,7 +345,7 @@ class FreqAwareGeneOntology(GeneOntology):
                 self._update_counts(self.term_by_id(anno["TermNr"]))
             except ValueError:
                 logging.info(
-                    "invalid annotation term_id in freq estim:" + str(anno.term_id)
+                    "invalid annotation term_id in freq estim:" + str(anno["TermNr"])
                 )
 
     def _update_counts(self, term):
@@ -343,15 +368,31 @@ class FreqAwareGeneOntology(GeneOntology):
         lca = min(cand, key=self.get_term_frequency)
         return lca
 
-    def lin_similarity(self, term1, term2):
-        term1 = self.ensure_term(term1)
-        term2 = self.ensure_term(term2)
-        if term1.aspect != term2.aspect:
-            # early abort, since the two terms will be by
-            # definition not similar
-            sim = 0
-        else:
-            lca = self.last_common_ancestor(term1, term2)
+    def ic(self, term):
+        """returns the information content of the term based on the number of annotations in the OMA database
+
+        .. math::
+            ic(GO_i) = -\log_{10}(term_freq)
+        """
+        term = self.ensure_term(term)
+        return abs(-math.log(self.get_term_frequency(term)))
+
+    def _resolve_lca_term(self, *terms):
+        goterms = list(map(self.ensure_term, terms))
+        if not all(map(lambda t: goterms[0].aspect == t.aspect, goterms)):
+            raise DifferentAspectError()
+        lca = self.last_common_ancestor(*goterms)
+        return lca, *goterms
+
+    def lin_similarity(self, term1, term2) -> float:
+        """computes the Lin similarity between two GO terms:
+
+        .. math::
+            sim(GO_i, GO_j) = \frac{2 \log_{10}(IC(GO_{LCA}}{\log_{10}(IC(GO_i) + \log_{10}(IC(GO_j))}
+
+        """
+        try:
+            lca, term1, term2 = self._resolve_lca_term(term1, term2)
             sim = (
                 2
                 * math.log(self.get_term_frequency(lca))
@@ -360,7 +401,28 @@ class FreqAwareGeneOntology(GeneOntology):
                     + math.log(self.get_term_frequency(term2))
                 )
             )
+            return sim
+        except DifferentAspectError:
+            return 0
+
+    def semantic_similarity(self, term1, term2):
+        try:
+            lca, term1, term2 = self._resolve_lca_term(term1, term2)
+        except DifferentAspectError:
+            return 0
+        p_lca = self.get_term_frequency(lca)
+        sim = (1 - p_lca) * (
+            (2 * numpy.log2(p_lca))
+            / (
+                numpy.log2(self.get_term_frequency(term1))
+                + numpy.log2(self.get_term_frequency(term2))
+            )
+        )
         return sim
+
+
+class DifferentAspectError(Exception):
+    pass
 
 
 class AnnotationFilter(object):

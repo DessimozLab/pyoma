@@ -11,15 +11,15 @@ import numpy as np
 
 
 # "digits"
-DIGITS_AA = np.fromstring("ACDEFGHIKLMNPQRSTVWXY", dtype="S1")
-DIGITS_DNA = np.fromstring("ACGTX", dtype="S1")
+DIGITS_AA = np.frombuffer(b"ACDEFGHIKLMNPQRSTVWXY", dtype="S1")
+DIGITS_DNA = np.frombuffer(b"ACGTX", dtype="S1")
 
 
 class KmerEncoder(object):
     def __init__(self, k, is_protein=True):
         """
-            Initialise the kmer converter. k is the kmer length.
-            If is_dna=True then DNA else AA.
+        Initialise the kmer converter. k is the kmer length.
+        If is_dna=True then DNA else AA.
         """
         self.digits = DIGITS_AA if is_protein else DIGITS_DNA
         self.k = int(k)  # Cast incase np-type for n below.
@@ -29,14 +29,14 @@ class KmerEncoder(object):
 
     def __len__(self):
         """
-            Return the maximum integer-representation of the kmer length
-            in this converter.
+        Return the maximum integer-representation of the kmer length
+        in this converter.
         """
         return self.n
 
     def encode(self, seq):
         """
-            Encode integer kmer in protein chars.
+        Encode integer kmer in protein chars.
         """
         if seq <= self.max:
             self._prot[:] = self.digits[0]
@@ -53,8 +53,8 @@ class KmerEncoder(object):
 
     def decode(self, seq):
         """
-            Decode a protein kmer -> integer. NOTE: sanitisation to a byte
-            string required first.
+        Decode a protein kmer -> integer. NOTE: sanitisation to a byte
+        string required first.
         """
         x = 0
         for digit in seq[: self.k].decode("ascii"):
@@ -63,7 +63,7 @@ class KmerEncoder(object):
 
     def decompose(self, seq):
         """
-            Decompose a sequence into counts of its constituent (decoded) kmers.
+        Decompose a sequence into counts of its constituent (decoded) kmers.
         """
         for i in range(len(seq) - self.k + 1):
             yield self.decode(seq[i : (i + self.k)])

@@ -126,8 +126,9 @@ class DatabaseChecks(unittest.TestCase):
                 if pair["Score"] < 1:
                     self.assertGreaterEqual(score, 120)
                 else:
-                    self.assertAlmostEqual(pair["Score"], score, places=1)
-                    self.assertAlmostEqual(pair["Distance"], dist, places=1)
+                    # relaxed checks, as we compute only with fix PAM matrix
+                    self.assertGreaterEqual(pair["Score"], score)
+                    self.assertLessEqual(abs(pair["Distance"] - dist), 10)
             SAMPLES -= 1
             if SAMPLES <= 0:
                 break

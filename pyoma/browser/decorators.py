@@ -33,3 +33,18 @@ def timethis(level, name=None):
         return wrapper
 
     return decorate
+
+
+def outdated_database_warning():
+    def decorate(func):
+        log = logging.getLogger(func.__module__)
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            log.warning("outdated database warning in {}".format(func.__name__))
+            result = func(*args, **kwargs)
+            return result
+
+        return wrapper
+
+    return decorate

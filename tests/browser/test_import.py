@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import logging
 from hashlib import md5
 
 import numpy
@@ -20,6 +21,7 @@ from pyoma.browser.convert import (
     load_tsv_to_numpy,
     HogConverter,
 )
+from .test_db import find_path_to_test_db
 
 
 def store_in_json(data, fn):
@@ -84,9 +86,10 @@ class ImportIntegrationBase(ImportDummyBase):
         super(ImportIntegrationBase, cls).setUpClass()
         test_data_available = False
         for folder in (
-            "/pub/projects/cbrg-oma-browser",
+            "/work/FAC/FBM/DBC/cdessim2/oma/oma-browser",
             "/cs/research/biosciences/oma/oma-server",
-            "/scratch/ul/projects/cdessimo/oma-browser",
+            "/mnt/oma-browser",
+            "/Volumes/oma-browser",
         ):
             if os.path.isdir(folder):
                 test_data_available = True
@@ -105,7 +108,7 @@ class GenomeDirectImportTest(ImportIntegrationBase):
         self.assertEqual(len(gstab), len(data["GS"]), "unexpected number of genomes")
         for genome in data["GS"]:
             gs = gstab.read_where(
-                "UniProtSpeciesCode == {!r}".format(genome[1].encode("utf-8"))
+                "UniProtSpeciesCode == code", genome[1].encode("utf-8")
             )
             for key in (
                 (2, "TotEntries"),
@@ -351,3 +354,17 @@ class HogConverterTest(unittest.TestCase):
             with self.subTest(release_char=release_char):
                 with self.assertRaises(ValueError):
                     conv = HogConverter(self.h5.root.Entries, release_char=release_char)
+
+
+class ReadOnlyTestDbImporter(unittest.TestCase):
+    importer = None
+    h5_file_name = "TestDb.h5"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        path = find_path_to_test_db(cls.h5_file_name)
+        cls.importer = DarwinExporter(path, mode="read")
+
+    def test_count_goterm_freqs(self):
+        cnts, tot_per_ont = self.importer.collect_goterm_freqs()
+        self.assertLess(sum(tot_per_ont), sum(cnts.values()))

@@ -6,6 +6,7 @@ import errno
 import fileinput
 import gzip
 import hashlib
+import io
 import itertools
 import json
 import multiprocessing as mp
@@ -36,7 +37,7 @@ from . import suffixsearch
 from . import tablefmt
 from .KmerEncoder import KmerEncoder
 from .OrthoXMLSplitter import OrthoXMLSplitter
-from .geneontology import GeneOntology, OntologyParser
+from .geneontology import GeneOntology, OntologyParser, FreqAwareGeneOntology
 from .homoeologs import HomeologsConfidenceCalculator
 from .synteny import SyntenyScorer
 from . import hoghelper
@@ -46,7 +47,7 @@ with hooks():
     import urllib.request
 
 hog_re = re.compile(
-    br"((?P<prefix>HOG):)?(?P<rel>[A-Z]?)(?P<fam>\d+)(\.(?P<subfamid>[0-9a-z.]+))?$"
+    rb"((?P<prefix>HOG):)?(?P<rel>[A-Z]?)(?P<fam>\d+)(\.(?P<subfamid>[0-9a-z.]+))?$"
 )
 
 
@@ -215,9 +216,9 @@ def load_tsv_to_numpy(args):
 
 
 def read_vps_from_tsv(gs, ref_genome, basedir=None):
-    ref_genome_idx = gs.get_where_list("(UniProtSpeciesCode=={!r})".format(ref_genome))[
-        0
-    ]
+    ref_genome_idx = gs.get_where_list(
+        "(UniProtSpeciesCode==code)", condvars={"code": ref_genome}
+    )[0]
     job_args = []
     if basedir is None:
         basedir = os.path.join(os.environ["DARWIN_OMADATA_PATH"], "Phase4")
@@ -246,9 +247,14 @@ def load_hogs_at_level(fname, level):
     with tables.open_file(fname, "r") as h5:
         lev = level.encode("utf-8") if isinstance(level, str) else level
         tab = h5.get_node("/HogLevel")
-        hog_it = (row.fetch_all_fields() for row in tab.where("Level == lev"))
-        hogs = numpy.fromiter(hog_it, dtype=tab.dtype)
+        extended_dtype = numpy.dtype(tab.dtype.descr + [("HogLevelRowIdx", "i4")])
+        hog_it = (
+            tuple(row.fetch_all_fields()) + (row.nrow,)
+            for row in tab.where("Level == lev")
+        )
+        hogs = numpy.fromiter(hog_it, dtype=extended_dtype)
         hogs.sort(order="ID")
+        hogs["IdxPerLevelTable"] = numpy.arange(len(hogs))
         return hogs
 
 
@@ -357,7 +363,7 @@ def create_and_store_fast_famhoglevel_lookup(h5, hoglevtab, array_path):
 
 
 class DarwinExporter(object):
-    DB_SCHEMA_VERSION = "3.4"
+    DB_SCHEMA_VERSION = "3.6"
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
 
     def __init__(self, path, logger=None, mode=None):
@@ -755,6 +761,7 @@ class DarwinExporter(object):
             )
 
             cnt_missmatch_locus = 0
+            cnt_genes = 0
             for nr in range(gs["TotEntries"]):
                 eNr = data["off"] + nr + 1
                 protTab.row["EntryNr"] = eNr
@@ -771,6 +778,11 @@ class DarwinExporter(object):
                 protTab.row["AltSpliceVariant"] = data["alts"][nr]
                 protTab.row["OmaHOG"] = b" "  # will be assigned later
                 protTab.row["CanonicalId"] = b" "  # will be assigned later
+                if (
+                    protTab.row["AltSpliceVariant"] == 0
+                    or protTab.row["AltSpliceVariant"] == protTab.row["EntryNr"]
+                ):
+                    cnt_genes += 1  # main isoforms of gene
 
                 locus_str = data["locs"][nr]
                 try:
@@ -794,6 +806,8 @@ class DarwinExporter(object):
                 protTab.row.append()
             protTab.flush()
             seqArr.flush()
+            gs["TotGenes"] = cnt_genes
+            gs.update()
             if cnt_missmatch_locus > 0:
                 self.logger.warning(
                     "{} missmatches in exon-lengths compared to locus info".format(
@@ -975,6 +989,7 @@ class DarwinExporter(object):
             for row in self.h5.get_node("/Taxonomy").read()
         }
         lev2tax[b"LUCA"] = 0
+        idx_per_level = numpy.zeros(len(hl_tab), "i4")
         with concurrent.futures.ProcessPoolExecutor(max_workers=nr_procs) as pool:
             future_to_level = {
                 pool.submit(
@@ -989,8 +1004,8 @@ class DarwinExporter(object):
                     # fallback to level if taxid is not known
                     tab_name = "tax{}".format(lev2tax.get(level, level.decode()))
                     tab = self.h5.create_table(
-                        where="/Hogs_per_Level",
-                        name=tab_name,
+                        where=f"/AncestralGenomes/{tab_name}",
+                        name="Hogs",
                         title="cached HogLevel data for {}".format(level.decode()),
                         obj=hogs,
                         createparents=True,
@@ -999,10 +1014,12 @@ class DarwinExporter(object):
                     create_index_for_columns(
                         tab, "Fam", "IsRoot", "NrMemberGenes", "CompletenessScore"
                     )
+                    idx_per_level[hogs["HogLevelRowIdx"]] = hogs["IdxPerLevelTable"]
                 except Exception as exc:
                     msg = "cannot store cached hogs for {}".format(level)
                     self.logger.exception(msg)
                     pass
+        hl_tab.modify_column(column=idx_per_level, colname="IdxPerLevelTable")
 
     def xref_databases(self):
         return os.path.join(os.environ["DARWIN_BROWSERDATA_PATH"], "ServerIndexed.db")
@@ -1057,6 +1074,19 @@ class DarwinExporter(object):
             dbs_iter = fileinput.input(files=files)
             db_parser.parse_entrytags(dbs_iter)
             xref_importer.flush_buffers()
+
+        # create /XRef_EntryNr_offset array
+        enr_col = xref_tab.col("EntryNr")
+        if not (enr_col[:-1] <= enr_col[1:]).all():
+            raise DataImportError("EntryNr column is not sorted in /XRef")
+        enrs = numpy.arange(enr_col[-1] + 2)
+        idx = numpy.searchsorted(enr_col, enrs).astype("i4")
+        self.h5.create_carray(
+            "/",
+            "XRef_EntryNr_offset",
+            obj=idx,
+            title="Array containing the row index in the XRef table at entry_nr: XRef[a[enr]] = first row of EntryNr",
+        )
 
     def add_group_metadata(self):
         m = OmaGroupMetadataLoader(self.h5)
@@ -1250,7 +1280,7 @@ class DarwinExporter(object):
         all / in OMA Group / in HOGs for all of them.
         """
         for tab_name, sum_fun in [
-            ("/Annotations/GeneOntology", self.count_xref_summary),
+            ("/Annotations/GeneOntology", self.count_gene_ontology_summary),
             ("/XRef", self.count_xref_summary),
         ]:
             summary = sum_fun()
@@ -1287,6 +1317,26 @@ class DarwinExporter(object):
         dom_cov_hist_tab.set_attr(
             "mean_coverage_w_domain", numpy.mean(cov_fracs[cov_fracs > 0])
         )
+
+    def collect_goterm_freqs(self):
+        self.logger.info("Computing gene ontology annotations term frequencies")
+        go_tab = self.h5.get_node("/Annotations/GeneOntology")
+        fp = io.StringIO(self.h5.get_node("/Ontologies/GO").read().tobytes().decode())
+        gof = FreqAwareGeneOntology(OntologyParser(fp), rels=None)
+        gof.parse()
+
+        def iter_entry_terms(go_tab, filter=None):
+            for (enr, term), row_iter in itertools.groupby(
+                go_tab, operator.itemgetter("EntryNr", "TermNr")
+            ):
+                if filter is not None:
+                    evid = {row["Evidence"] for row in row_iter}
+                    if evid not in filter:
+                        continue
+                yield {"TermNr": int(term)}
+
+        gof.estimate_freqs(iter_entry_terms(go_tab))
+        return gof.cnts, gof.tot_cnts
 
     def count_gene_ontology_summary(self):
         self.logger.info("Bulding gene ontology annotations summary info")
@@ -1431,6 +1481,27 @@ class DarwinExporter(object):
         dom_cov_tab[0 : len(cov_sites)] = cov_sites
         return cov_sites / (prot_tab.col("SeqBufferLength") - 1)
 
+    def add_gene_ontology_term_cnts(self):
+        """
+        Stores the counts of a gene ontology annotation per term in the database.
+
+        This function also includes the implied parental terms.
+
+        :return: hdf5 Table instance with the counts
+        """
+        cnts, tot_cnts = self.collect_goterm_freqs()
+        cnts = sorted(cnts.items())
+        tab = self.create_table_if_needed(
+            "/Ontologies",
+            "GeneOntologyTermCounts",
+            description=tablefmt.GeneOntologyTermCounts,
+        )
+        tab.append(cnts)
+        self.h5.set_node_attr(tab, "total_molecular_function", tot_cnts[0])
+        self.h5.set_node_attr(tab, "total_biological_process", tot_cnts[1])
+        self.h5.set_node_attr(tab, "total_cellular_component", tot_cnts[2])
+        return tab
+
     def add_sequence_suffix_array(self, k=6, fn=None, sa=None):
         """
         Adds the sequence suffix array to the database. NOTE: this
@@ -1474,7 +1545,7 @@ class DarwinExporter(object):
         # Create lookup table for fa2go
         dtype = numpy.uint32 if (n < numpy.iinfo(numpy.uint32).max) else numpy.uint64
         idx = numpy.zeros(sa.shape, dtype=dtype)
-        mask = numpy.zeros(sa.shape, dtype=numpy.bool)
+        mask = numpy.zeros(sa.shape, dtype=bool)
 
         # Compute mask and entry index for sequence buff
         for i in range(n):
@@ -1586,7 +1657,7 @@ class DarwinExporter(object):
         # Gather entry-domain for each HOG.
         hog2dom = []
         hog2info = []
-        for (hog_id, hdf) in tqdm(df.groupby("OmaHOG")):
+        for hog_id, hdf in tqdm(df.groupby("OmaHOG")):
             size = len(set(hdf["EntryNr"]))
 
             hdf = hdf[~hdf["DomainId"].isnull()]
@@ -1595,7 +1666,7 @@ class DarwinExporter(object):
             if (size > 2) and (cov > 1):
                 # There are some annotations
                 da = collections.defaultdict(list)
-                for (enum, edf) in hdf.groupby("EntryNr"):
+                for enum, edf in hdf.groupby("EntryNr"):
                     d = edf["DomainId"]
                     d = tuple(d) if (type(d) != bytes) else (d,)
                     da[d].append(enum)
@@ -1809,7 +1880,9 @@ class RootHOGMetaDataLoader(object):
             data = self._load_data()
             encoded_data = {}
             for key in self.expected_keys:
-                encoded_data[key] = [x.encode("utf-8") for x in data[key]]
+                encoded_data[key] = [
+                    x.encode("utf-8") if isinstance(x, str) else b"-" for x in data[key]
+                ]
                 if nr_groups != len(encoded_data[key]):
                     raise DataImportError(
                         "nr of oma groups does not match the number of {}".format(key)
@@ -2014,7 +2087,7 @@ class DescriptionManager(object):
 
     def _store_description(self):
         buf = "; ".join(self.cur_desc).encode("utf-8")
-        buf = buf[0 : 2 ** 16 - 1]  # limit to max value of buffer length field
+        buf = buf[0 : 2**16 - 1]  # limit to max value of buffer length field
         len_buf = len(buf)
         idx = self.cur_eNr - 1
         self.buf_index[idx]["DescriptionOffset"] = len(self.desc_buf)
@@ -2069,7 +2142,7 @@ class GeneOntologyManager(object):
 
     def _get_obo_version(self, obo_arr):
         header = obo_arr[0:1000].tobytes()
-        rel_info = re.search(b"data-version:\s*(?P<version>[\w/_ -]+)", header)
+        rel_info = re.search(rb"data-version:\s*(?P<version>[\w/_ -]+)", header)
         if rel_info is not None:
             rel_info = rel_info.group("version").decode()
         return rel_info
@@ -2103,7 +2176,7 @@ class GeneOntologyManager(object):
                 continue
             rem = rem.replace("{", "[")
             rem = rem.replace("}", "]")
-            rem = self.quote_re.sub('\g<1>"\g<2>"\g<3>', rem)
+            rem = self.quote_re.sub(r'\g<1>"\g<2>"\g<3>', rem)
             for evi, refs in eval(rem):
                 for ref in refs:
                     self._go_buf.append((enr, term_nr, evi, ref.encode("utf-8")))
@@ -2194,6 +2267,7 @@ class HogConverter(object):
                     + (
                         self.get_nr_member_genes(ognode),
                         bool(taxnode.get("IsRoot", False)),
+                        -1,
                     )
                 )
 
@@ -2459,46 +2533,6 @@ class XRefImporter(object):
 
     def add_approx_xrefs(self, enr):
         self.xrefs.extend(self.approx_adder.iter_approx_xrefs_for(enr))
-
-    def build_suffix_index(self, force=False):
-        parent, name = os.path.split(self.xref_tab._v_pathname)
-        file_ = self.xref_tab._v_file
-        idx_node = get_or_create_tables_node(
-            file_, os.path.join(parent, "{}_Index".format(name))
-        )
-        for arr_name, typ in (
-            ("buffer", tables.StringAtom(1)),
-            ("offset", tables.UInt32Atom()),
-        ):
-            try:
-                n = idx_node._f_get_child(arr_name)
-                if not force:
-                    raise tables.NodeError(
-                        "Suffix index for xrefs does already exist. Use 'force' to overwrite"
-                    )
-                n.remove()
-            except tables.NoSuchNodeError:
-                pass
-            file_.create_earray(idx_node, arr_name, typ, (0,), expectedrows=100e6)
-        buf, off = (idx_node._f_get_child(node) for node in ("buffer", "offset"))
-        self._build_lowercase_xref_buffer(buf, off)
-        sa = sais(buf)
-        try:
-            idx_node._f_get_child("suffix").remove()
-        except tables.NoSuchNodeError:
-            pass
-        file_.create_carray(idx_node, "suffix", obj=sa)
-
-    def _build_lowercase_xref_buffer(self, buf, off):
-        cur_pos = 0
-        for xref_row in tqdm(self.xref_tab):
-            lc_ref = xref_row["XRefId"].lower()
-            ref = numpy.ndarray(
-                (len(lc_ref),), buffer=lc_ref, dtype=tables.StringAtom(1)
-            )
-            buf.append(ref)
-            off.append([cur_pos])
-            cur_pos += len(lc_ref)
 
 
 class UniProtAdditionalXRefImporter(object):
@@ -2779,9 +2813,12 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
         genomes = json.load(fh)
     os.rename(fpath, fpath + ".bak")
 
-    def traverse(node, parent_hogs=None):
+    def traverse(node, parent_hogs=None, parent_hogs_support=None):
         if parent_hogs is None:
             parent_hogs = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
+        if parent_hogs_support is None:
+            parent_hogs_support = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
+
         try:
             n = node["name"].encode("utf-8")
             idx = numpy.searchsorted(tax["Name"], n, sorter=sorter)
@@ -2796,40 +2833,58 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
             else:
                 node["nr_hogs"] = 0
                 raise ValueError("not in taxonomy: {}".format(n))
-            hog_level = h5.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()
-            node["nr_hogs"] = len(hog_level)
-            diff_parent, dupl_events = hoghelper.compare_levels(
-                parent_hogs, hog_level, return_duplication_events=True
-            )
-            changes = collections.defaultdict(int)
-            for x in diff_parent["Event"]:
-                changes[x.decode()] += 1
-            changes["duplications"] = dupl_events
-            if "children" not in node:
-                # dealing with an extend species, special way to assess gains, based on
-                # HOG singletons that are main isoforms
-                assert changes["gained"] == 0
-                g = numpy.extract(
-                    gs["UniProtSpeciesCode"] == node["id"].encode("utf-8"), gs
-                )[0]
-                query_main_iso_of_genome = "(EntryNr > {}) & (EntryNr <= {}) & ((AltSpliceVariant == 0) | (AltSpliceVariant == EntryNr))".format(
-                    g["EntryOff"], g["EntryOff"] + g["TotEntries"]
+
+            for modif, completeness, parent in zip(
+                ["", "_support"], [0.0, 0.2], [parent_hogs, parent_hogs_support]
+            ):
+                hogs = h5.get_node(f"/AncestralGenomes/tax{taxid}/Hogs").read_where(
+                    "CompletenessScore > completeness"
                 )
-                nr_genes, nr_gains = 0, 0
-                for p in pe.where(query_main_iso_of_genome):
-                    nr_genes += 1
-                    if p["OmaHOG"] == b"":
-                        nr_gains += 1
-                changes["gained"] = nr_gains
-                node["nr_genes"] = nr_genes
-            node["evolutionaryEvents"] = changes
+                if modif == "":
+                    hog_level = hogs
+                else:
+                    hog_level_support = hogs
+                node["nr_hogs{}".format(modif)] = len(hogs)
+                diff_parent, dupl_events = hoghelper.compare_levels(
+                    parent, hogs, return_duplication_events=True
+                )
+                changes = collections.defaultdict(int)
+                for x in diff_parent["Event"]:
+                    changes[x.decode()] += 1
+                changes["duplications"] = dupl_events
+                if "children" not in node and modif != "_support":
+                    # dealing with an extend species, special way to assess gains, based on
+                    # HOG singletons that are main isoforms
+                    assert changes["gained"] == 0
+                    g = numpy.extract(
+                        gs["UniProtSpeciesCode"] == node["id"].encode("utf-8"), gs
+                    )[0]
+                    query_main_iso_of_genome = "(EntryNr > {}) & (EntryNr <= {}) & ((AltSpliceVariant == 0) | (AltSpliceVariant == EntryNr))".format(
+                        g["EntryOff"], g["EntryOff"] + g["TotEntries"]
+                    )
+                    nr_genes, nr_gains = 0, 0
+                    for p in pe.where(query_main_iso_of_genome):
+                        nr_genes += 1
+                        if p["OmaHOG"] == b"":
+                            nr_gains += 1
+                    changes["gained"] = nr_gains
+                    node["nr_genes{}".format(modif)] = nr_genes
+                node["evolutionaryEvents{}".format(modif)] = changes
+            common.package_logger.info(
+                "node: {}: events: {}; events_support: {}".format(
+                    n, node["evolutionaryEvents"], node["evolutionaryEvents_support"]
+                )
+            )
         except Exception:
             common.package_logger.exception("Cannot identify taxonomy id")
             hog_level = parent_hogs.copy()
+            hog_level_support = parent_hogs_support.copy()
 
         if "children" in node:
             for child in node["children"]:
-                traverse(child, parent_hogs=hog_level)
+                traverse(
+                    child, parent_hogs=hog_level, parent_hogs_support=hog_level_support
+                )
 
     traverse(genomes)
     with open(fpath, "wt") as fh:
@@ -2926,6 +2981,7 @@ def main(
         x.add_group_metadata()
         x.add_hog_domain_prevalence()
         x.add_roothog_metadata()
+        x.add_gene_ontology_term_cnts()
 
     def phase7():
         x.create_indexes()

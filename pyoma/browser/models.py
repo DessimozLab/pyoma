@@ -3,6 +3,8 @@ from __future__ import division
 import collections
 import numpy
 import time
+from .exceptions import UnknownSpecies, InvalidTaxonId, InvalidId
+from .exceptions import Singleton as HOGSingleton
 
 
 def format_sciname(sci, short=False):
@@ -121,6 +123,8 @@ class ProteinEntry(object):
 
     @property
     def entry_nr(self):
+        if isinstance(self._stored_entry, (int, numpy.integer)):
+            return int(self._stored_entry)
         return int(self._entry["EntryNr"])
 
     @property
@@ -215,8 +219,6 @@ class ProteinEntry(object):
 
     @LazyProperty
     def hog_family_nr(self):
-        from .db import Singleton as HOGSingleton
-
         try:
             fam = self._db.hog_family(self._entry)
         except HOGSingleton:
@@ -317,11 +319,21 @@ class Genome(object):
 
     @property
     def url(self):
-        return self._genome["Url"].decode()
+        try:
+            return self._genome["Url"].decode()
+        except ValueError:
+            if self._db.db_schema_version < (3, 2):
+                return ""
+            raise
 
     @property
     def source(self):
-        return self._genome["Source"].decode()
+        try:
+            return self._genome["Source"].decode()
+        except ValueError:
+            if self._db.db_schema_version < (3, 2):
+                return ""
+            raise
 
     @property
     def release(self):
@@ -349,7 +361,12 @@ class Genome(object):
     @LazyProperty
     def nr_genes(self):
         """returns the number of genes of the genome in the database"""
-        return self._db.count_main_isoforms(self.uniprot_species_code)
+        try:
+            return int(self._genome["TotGenes"])
+        except ValueError:
+            if self._db.db_schema_version < (3, 6):
+                return self._db.count_main_isoforms(self.uniprot_species_code)
+            raise
 
     @property
     def entry_nr_offset(self):
@@ -364,7 +381,7 @@ class Genome(object):
 
     @property
     def is_polyploid(self):
-        """returns whether or not this is a polyploid genome"""
+        """returns whether this is a polyploid genome"""
         return self._genome["IsPolyploid"]
 
     @LazyProperty
@@ -401,11 +418,16 @@ class Genome(object):
             chr = chromosome.encode("utf-8")
         else:
             chr = "{}".format(chromosome).encode("utf-8")
-        query = "(EntryNr > {}) & (EntryNr <= {}) & (Chromosome == {!r})".format(
-            self.entry_nr_offset, self.entry_nr_offset + self.nr_entries, chr
-        )
+        query = "(EntryNr > enr_off) & (EntryNr <= enr_max) & (Chromosome == chr)"
+        condvars = {
+            "enr_off": self.entry_nr_offset,
+            "enr_max": self.entry_nr_offset + self.nr_entries,
+            "chr": chr,
+        }
         tab = self._db.get_hdf5_handle().get_node("/Protein/Entries")
-        chr_len = int(max((row["LocusEnd"] for row in tab.where(query))))
+        chr_len = int(
+            max((row["LocusEnd"] for row in tab.where(query, condvars=condvars)))
+        )
         return chr_len
 
     def __repr__(self):
@@ -449,8 +471,6 @@ class AncestralGenome(object):
                     [(0, -1, b"LUCA")], dtype=self.db.tax.tax_table.dtype
                 )[0]
             else:
-                from .db import InvalidTaxonId, UnknownSpecies
-
                 try:
                     data = self.db.tax.get_taxnode_from_name_or_taxid(
                         self._stored_genome
@@ -477,6 +497,10 @@ class AncestralGenome(object):
 
     @property
     def sciname(self):
+        return self.scientific_name
+
+    @property
+    def level(self):
         return self.scientific_name
 
     @LazyProperty
@@ -508,6 +532,10 @@ class AncestralGenome(object):
             for lev in self.db.tax.get_parent_taxa(self.ncbi_taxon_id)
         ]
 
+    @LazyProperty
+    def nr_genes(self):
+        return self.db.count_hogs_at_level(self.scientific_name)
+
 
 class OmaGroup(object):
     """OmaGroup object model
@@ -531,6 +559,10 @@ class OmaGroup(object):
     @property
     def group_nbr(self):
         """numeric representation of the OmaGroup"""
+        if isinstance(self._stored_group, (int, numpy.integer)):
+            if not 0 < self._stored_group <= self._db.get_nr_oma_groups():
+                raise InvalidId("{} is an invalid oma group".format(self._stored_group))
+            return int(self._stored_group)
         return int(self._group["group_nr"])
 
     @property
@@ -631,7 +663,7 @@ class HOG(object):
 
     @property
     def is_root(self):
-        """whether or not this is the deepest taxonomic range for
+        """whether this is the deepest taxonomic range for
         this (sub-)HOG."""
         return bool(self._hog["IsRoot"])
 
@@ -736,6 +768,17 @@ class GeneOntologyAnnotation(object):
     @property
     def entry_nr(self):
         return int(self.anno["EntryNr"])
+
+    @LazyProperty
+    def object_id(self):
+        return self.db.id_mapper["OMA"].map_entry_nr(self.entry_nr)
+
+    @LazyProperty
+    def ic(self):
+        try:
+            return self.db.freq_aware_gene_ontology.ic(self.term)
+        except ValueError:
+            return 0
 
     @LazyProperty
     def aspect(self):

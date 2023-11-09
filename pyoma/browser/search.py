@@ -149,8 +149,9 @@ class HogIDSearch(BaseSearch):
                 except (InvalidTaxonId, KeyError):
                     pass
             new_hogs = {}
-            if match.group("rel") != self.db.release_char and match.group("prefix"):
-                new_hogs = self._map_forward_outdated_hogid(match.group("id"))
+            if match.group("rel") != self.db.release_char:
+                old_hogid = ("" if match.group("prefix") else "HOG:") + match.group("id")
+                new_hogs = self._map_forward_outdated_hogid(old_hogid)
                 self.outdated_query_hog = True
                 ids = new_hogs.keys()
             else:

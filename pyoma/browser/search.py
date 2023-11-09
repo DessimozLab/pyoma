@@ -141,6 +141,7 @@ class HogIDSearch(BaseSearch):
         hogs = []
         if match is not None:
             level = None
+            logger.debug("analyse token %s: %s", self.term, match.groupdict())
             if match.group("taxid") is not None:
                 try:
                     n = self.db.tax.get_taxnode_from_name_or_taxid(match.group("taxid"))
@@ -293,11 +294,11 @@ class TaxSearch(BaseSearch):
                 genomes, genome_approx_scores = self.db.id_mapper[
                     "OMA"
                 ].approx_search_genomes(self.term, scores=True)
-                logger.debug("{} matches approximately to {}", self.term, genomes)
+                logger.debug("%s matches approximately to %s", self.term, genomes)
                 # fuzzy match of all taxonomic names in OMA.
                 approx_matches = self.db.tax.approx_search(self.term)
                 logger.debug(
-                    "'{}' matches approximately to {}".format(self.term, approx_matches)
+                    "'{}' matches approximately to {}", self.term, approx_matches
                 )
                 tax_nodes = self.db.tax.get_taxnode_from_name_or_taxid(
                     [z[1] for z in approx_matches]
@@ -384,7 +385,7 @@ class SequenceSearch(BaseSearch):
             return self._matched_seqs
 
         if len(self.seq) < 5:
-            logger.debug("too short sequence motif to search: {}".format(self.seq))
+            logger.debug("too short sequence motif to search: {}", self.seq)
             raise ValueError("too short sequence motif")
         if self.strategy not in ("exact", "approx", "mixed"):
             raise ValueError("Invalid search strategy parameter")
@@ -484,9 +485,8 @@ class XRefSearch(BaseSearch):
                 else:
                     if len(self.entry_filter) == 0:
                         logger.info(
-                            "short-circuit XRefSearch as entry_filter is empty: {}".format(
-                                self.entry_filter
-                            )
+                            "short-circuit XRefSearch as entry_filter is empty: {}",
+                            self.entry_filter,
                         )
                         self._matched_entries = {}
                         return self._matched_entries
@@ -499,7 +499,7 @@ class XRefSearch(BaseSearch):
                 )
             except TooUnspecificQuery:
                 logger.exception(
-                    f"XRefSearch with term {self.term} and entry_range {rng}"
+                    "XRefSearch with term {} and entry_range {}", self.term, rng
                 )
                 self._matched_entries = {}
             if filt is not None:

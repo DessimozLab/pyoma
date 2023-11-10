@@ -36,7 +36,7 @@ def extract_hogs_at_level(db, level, families, fh_out, xref_types=None):
         cols.extend(xref_types)
         for k, xtype in enumerate(xref_types):
             xref_df = load_xref(db, xtype)
-            logger.info("loaded {} xrefs for {}".format(len(xref_df), xtype))
+            logger.info("loaded %s xrefs for %s", len(xref_df), xtype)
             if k == 0:
                 xrefs_df = xref_df
             else:
@@ -51,7 +51,7 @@ def extract_hogs_at_level(db, level, families, fh_out, xref_types=None):
     csv_writer = csv.DictWriter(fh_out, cols, extrasaction="ignore", delimiter="\t")
     csv_writer.writeheader()
     for hog_id, level in tqdm(family_filter.analyse_families(families)):
-        logger.info("{} {}".format(hog_id, level))
+        logger.info("%s %s", hog_id, level)
         df = pandas.DataFrame(db.member_of_hog_id(hog_id, level))
         df["OmaID"] = df["EntryNr"].apply(db.id_mapper["Oma"].map_entry_nr)
         df["HOG"] = hog_id.decode() if isinstance(hog_id, bytes) else hog_id

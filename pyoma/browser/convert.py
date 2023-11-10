@@ -78,10 +78,8 @@ def callDarwinExport(func, drwfile=None):
             drwfile = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
         # with open(os.devnull, 'w') as DEVNULL:
         stacksize = resource.getrlimit(resource.RLIMIT_STACK)
-        common.package_logger.debug("current stacklimit: {}".format(stacksize))
-        common.package_logger.debug(
-            "setting stacklimit: {}".format((max(stacksize) - 1, stacksize[1]))
-        )
+        common.package_logger.debug("current stacklimit: %s", stacksize)
+        common.package_logger.debug("setting stacklimit: %s", (max(stacksize) - 1, stacksize[1]))
         resource.setrlimit(resource.RLIMIT_STACK, (min(stacksize), stacksize[1]))
         p = subprocess.Popen(
             ["darwin", "-q", "-E"],
@@ -92,7 +90,7 @@ def callDarwinExport(func, drwfile=None):
         drw_cmd = "outfn := '{}': ReadProgram('{}'): {}; done;".format(
             tmpfile.name, drwfile, func
         ).encode("utf-8")
-        common.package_logger.debug("calling darwin function: {}".format(func))
+        common.package_logger.debug("calling darwin function: %s", func)
         stdout, stderr = p.communicate(input=drw_cmd)
         if p.returncode > 0:
             raise DarwinException(stderr, stdout)
@@ -199,7 +197,7 @@ def load_tsv_to_numpy(args):
                 break
         except OSError as e:
             if curNr < 1:
-                common.package_logger.info("tried to load {}".format(curFn))
+                common.package_logger.info("tried to load %s", curFn)
                 pass
             else:
                 raise e
@@ -233,13 +231,13 @@ def read_vps_from_tsv(gs, ref_genome, basedir=None):
             gs.cols.UniProtSpeciesCode[g2].decode() + ".orth.txt.gz",
         )
         tup = (fn, off1, off2, g1 != ref_genome_idx)
-        common.package_logger.debug("adding job: {}".format(tup))
+        common.package_logger.debug("adding job: %s", tup)
         job_args.append(tup)
 
     pool = mp.Pool(processes=min(os.cpu_count(), 12))
     all_pairs = pool.map(load_tsv_to_numpy, job_args)
     pool.close()
-    common.package_logger.info("loaded vps for {}".format(ref_genome.decode()))
+    common.package_logger.info("loaded vps for %s", ref_genome.decode())
     return numpy.lib.recfunctions.stack_arrays(all_pairs, usemask=False)
 
 
@@ -544,7 +542,7 @@ class DarwinExporter(object):
                 basedir = os.path.join(os.getenv(base), "Phase4")
                 break
 
-        self.logger.info("using {} as base dir for pairwise orthology".format(basedir))
+        self.logger.info("using %s as base dir for pairwise orthology", basedir)
         for gs in self.h5.root.Genome.iterrows():
             genome = gs["UniProtSpeciesCode"].decode()
             rel_node_for_genome = self._get_or_create_node(
@@ -633,7 +631,7 @@ class DarwinExporter(object):
         polyploid_genomes = self.h5.root.Genome.where("IsPolyploid==True")
         for genome in polyploid_genomes:
             genome_code = genome["UniProtSpeciesCode"].decode()
-            self.logger.info("compute synteny score for {}".format(genome_code))
+            self.logger.info("compute synteny score for %s", genome_code)
             synteny_scorer = SyntenyScorer(self.h5, genome_code)
             rels = synteny_scorer.compute_scores()
             self._callback_store_rel_data(
@@ -651,7 +649,7 @@ class DarwinExporter(object):
         polyploid_genomes = self.h5.root.Genome.where("IsPolyploid==True")
         for genome in polyploid_genomes:
             genome_code = genome["UniProtSpeciesCode"].decode()
-            self.logger.info("compute homoeolog confidence for {}".format(genome_code))
+            self.logger.info("compute homoeolog confidence for %s", genome_code)
             homoeolg_scorer = HomeologsConfidenceCalculator(self.h5, genome_code)
             rels = homoeolg_scorer.calculate_scores()
             self._callback_store_rel_data(
@@ -830,7 +828,7 @@ class DarwinExporter(object):
                 % (tab._v_pathname, 100 * tab.size_on_disk / tab.size_in_memory)
             )
         else:
-            self.logger.info("no data written for {}".format(tab._v_pathname))
+            self.logger.info("no data written for %s", tab._v_pathname)
 
     def add_hogs(self, hog_path=None, hog_file=None, tree_filename=None):
         """adds the HOGs to the database
@@ -1100,7 +1098,7 @@ class DarwinExporter(object):
         self.h5.root._f_setattr("conversion_end", time.strftime("%c"))
         self.h5.flush()
         self.h5.close()
-        self.logger.info("closed {}".format(self.h5.filename))
+        self.logger.info("closed %s", self.h5.filename)
 
     def create_indexes(self):
         self.logger.info("creating indexes for HogLevel table")
@@ -1244,7 +1242,7 @@ class DarwinExporter(object):
                     domtab.append(buffer)
                     buffer = []
             if i % 50000 == 0:
-                self.logger.info("processed {:d} domain annotations so far".format(i))
+                self.logger.info("processed %s domain annotations so far", i)
         if len(buffer) > 0:
             domtab.append(buffer)
         domtab.flush()
@@ -1521,7 +1519,7 @@ class DarwinExporter(object):
             db = tables.open_file(fn, "w", filters=idx_compr)
             db.create_group("/", "Protein")
             db.root._f_setattr("conversion_start", time.strftime("%c"))
-            self.logger.info("opened {}".format(db.filename))
+            self.logger.info("opened %s", db.filename)
 
         # Load sequence buffer to memory - this is required to calculate the SA.
         # Do it here (instead of in PySAIS) so that we can use it for computing
@@ -1602,7 +1600,7 @@ class DarwinExporter(object):
             )
             db.root._f_setattr("conversion_end", time.strftime("%c"))
             db.close()
-            self.logger.info("closed {}".format(db.filename))
+            self.logger.info("closed %s", db.filename)
 
     def _relative_path_to_external_node(self, node):
         rel_path = os.path.relpath(
@@ -1752,7 +1750,7 @@ def download_url_if_not_present(url, force_copy=False):
                 'using file "{}" directly from source without copying.'.format(url)
             )
             return fname
-        common.package_logger.warning("file {} does not exist".format(fname))
+        common.package_logger.warning("file %s does not exist", fname)
         return None
     tmpfolder = os.path.join(
         os.getenv("DARWIN_NETWORK_SCRATCH_PATH", "/tmp"), "Browser", "xref"
@@ -1762,11 +1760,11 @@ def download_url_if_not_present(url, force_copy=False):
     if not os.path.exists(tmpfolder):
         os.makedirs(tmpfolder)
     if not os.path.exists(fname):
-        common.package_logger.info("downloading {} into {}".format(url, fname))
+        common.package_logger.info("downloading %s into %s", url, fname)
         try:
             urllib.request.urlretrieve(url, fname)
         except urllib.request.URLError:
-            common.package_logger.warn("cannot download {}".format(url))
+            common.package_logger.warn("cannot download %s", url)
     return fname
 
 
@@ -1873,7 +1871,7 @@ class RootHOGMetaDataLoader(object):
         self.db = db
 
     def add_data(self):
-        common.package_logger.info("adding {}".format(self.meta_data_path))
+        common.package_logger.info("adding %s", self.meta_data_path)
         nr_groups = self._get_nr_of_groups()
         has_meta_data = self._check_textfiles_avail()
         if has_meta_data:
@@ -2684,13 +2682,10 @@ class DarwinDbEntryParser:
                 )
                 tag_text = [t.text for t in entry.findall("./" + tag.lower())]
                 for value in tag_text:
-                    # common.package_logger.debug('value of tag: {}'.format(value.encode('utf-8')))
                     if value is None:
                         continue
                     for handler in handlers:
                         handler(value, eNr)
-                        # common.package_logger.debug('called handler {} with ({},{})'.format(
-                        #    handler, value.encode('utf-8'), eNr))
             for notifier in self.end_of_entry_notifier:
                 notifier(eNr)
 

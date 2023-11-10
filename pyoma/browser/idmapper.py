@@ -451,7 +451,7 @@ class XrefIdMapper(object):
             try:
                 typ = self.xrefEnum(row["XRefSource"])
             except IndexError:
-                logger.warning("invalid XRefSource value in {}".format(row))
+                logger.warning("invalid XRefSource value in %s", row)
                 continue
             if typ not in xrefdict[row["EntryNr"]]:
                 xrefdict[row["EntryNr"]][typ] = {

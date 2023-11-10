@@ -15,7 +15,7 @@ logger = logging.getLogger("dump-hogids-at-level")
 def extract_hogids_at_level(db, level, families, fh_out):
     family_filter = pyoma.browser.hoghelper.HogLevelFilter(db, level)
     for hog_id, level in tqdm(family_filter.analyse_families(families)):
-        logger.info("{} {}".format(hog_id, level))
+        logger.info("%s %s", hog_id, level)
         fh_out.write(hog_id.decode())
         fh_out.write("\n")
 

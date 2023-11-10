@@ -101,9 +101,9 @@ class BaseProfileBuilderProcess(mp.Process):
                 logger.info("received sentinel from previous pipeline step")
                 with self.outstanding_dones.get_lock():
                     self.outstanding_dones.value -= 1
-                logger.info("outstanding_dones: {}".format(self.outstanding_dones))
+                logger.info("outstanding_dones: %s", self.outstanding_dones)
                 self.control_queue.put((self.proc_id, "DONE"))
-                logger.debug(f"sent DONE info to control queue ({self.proc_id})")
+                logger.debug("sent DONE info to control queue (%s)", self.proc_id)
             else:
                 result = self.handle_input(item)
                 if result is not None:
@@ -312,7 +312,7 @@ class HogGenerator(SourceProcess):
         db = Database(self.db_path)
         nr_groups = db.get_nr_toplevel_hogs()
         chunk = {}
-        logger.debug("nr of toplevel hogs: {}".format(nr_groups))
+        logger.debug("nr of toplevel hogs: %d", nr_groups)
         for fam in range(1, nr_groups + 1):
             try:
                 orthoxml = db.get_orthoxml(fam).decode()
@@ -383,17 +383,16 @@ class PipelineControllerThread(threading.Thread):
         for proc_id, proc_info in self.processes.items():
             last_seen, proc = proc_info[0], proc_info[1]
             if last_seen == 0:
-                logger.info(f"process {proc.name}[{proc.proc_id}] not yet started?")
+                logger.info("process %s[%s] not yet started?", proc.name, proc.proc_id)
             elif time.time() - last_seen > self.time_until_kill:
-                logger.warning(
-                    f"process {proc.name}[{proc.proc_id}] seems to be dead. No alive signal since {time.time()-last_seen}sec."
-                )
+                logger.warning("process %s[%s] seems to be dead. No alive signal since %fsec.",
+                               proc.name, proc.proc_id, time.time()-last_seen)
                 proc.terminate()
                 proc.out_queue.put(None)
                 to_rem.append(proc_id)
         for proc_id in to_rem:
             self.processes.pop(proc_id)
-        logger.info(f"killed {len(to_rem)} orphan processes")
+        logger.info("killed %d orphan processes", len(to_rem))
 
     def run(self):
         logger.info("starting controler thread")

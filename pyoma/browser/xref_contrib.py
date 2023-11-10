@@ -121,7 +121,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         off, skipped = 0, 0
         for k in keys:
             if len(dic[k]) < skip_short:
-                logger.debug("skipping {} from index".format(k))
+                logger.debug("skipping %s from index", k)
                 skipped += 1
                 continue
             tab_lookup.append(sorted(dic[k]))

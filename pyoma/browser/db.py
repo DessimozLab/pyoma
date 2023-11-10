@@ -247,7 +247,7 @@ class Database(object):
 
     def __init__(self, db):
         if isinstance(db, str):
-            logger.info("opening {} for read-only".format(db))
+            logger.info("opening %s for read-only", db)
             self.db = tables.open_file(db, "r")
             self._close_fh = True
         elif isinstance(db, (tables.File, tables.file.File)):
@@ -271,12 +271,8 @@ class Database(object):
         except AttributeError:
             db_version = "1.0"
 
-        logger.info("database version: {}".format(db_version))
-        logger.info(
-            "release: {}; release_char in HOG-IDs: '{}'".format(
-                self.get_release_name(), self.release_char
-            )
-        )
+        logger.info("database version: %s", db_version)
+        logger.info("release: %s; release_char in HOG-IDs: '%s'", self.get_release_name(), self.release_char)
         if db_version != self.EXPECTED_DB_SCHEMA:
             exp_tup = self.EXPECTED_DB_SCHEMA.split(".")
             db_tup = db_version.split(".")
@@ -288,10 +284,8 @@ class Database(object):
                 )
             else:
                 logger.warning(
-                    "outdated database version, but only minor version change: "
-                    "{} != {}. Some functions might fail".format(
-                        db_version, self.EXPECTED_DB_SCHEMA
-                    )
+                    "outdated database version, but only minor version change: %s != %s. Some functions might fail",
+                    db_version, self.EXPECTED_DB_SCHEMA
                 )
         self.db_schema_version = tuple(int(z) for z in db_version.split("."))
         self._on_close_notify = []
@@ -327,14 +321,14 @@ class Database(object):
 
     def register_on_close(self, callback):
         self._on_close_notify.append(callback)
-        logger.debug("registered call to {} on close".format(callback))
+        logger.debug("registered call to %s on close", callback)
 
     def unregister_on_close(self, callback):
         try:
             self._on_close_notify.remove(callback)
-            logger.debug("un-register {} on close".format(callback))
+            logger.debug("un-register %s on close", callback)
         except ValueError:
-            logger.debug("could not un-register {}".format(callback))
+            logger.debug("could not un-register %s", callback)
 
     def close(self):
         for listener in self._on_close_notify:
@@ -2584,7 +2578,7 @@ class SequenceSearch(object):
         # Kmer lookup arrays / kmer setup
         self.k = self.kmer_lookup._f_getattr("k")
         self.encoder = KmerEncoder(self.k)
-        logger.info("KmerLookup of size k={} loaded".format(self.k))
+        logger.info("KmerLookup of size k=%s loaded", self.k)
         self.multienv_align = None
 
     def get_entry_length(self, ii):
@@ -3430,7 +3424,7 @@ class Taxonomy(object):
                         set(self.get_parent_taxa(cur_tax)["NCBITaxonId"])
                     )
                 except KeyError:
-                    logger.info("{} seems not to exist in Taxonomy".format(cur_tax))
+                    logger.info("%s seems not to exist in Taxonomy", cur_tax)
                     pass
             # add and remove duplicates
             all_levels = numpy.append(taxids_to_keep, list(additional_levels))
@@ -3665,17 +3659,13 @@ class FastMapper(object):
             entrynr_range = self.db.id_mapper["OMA"].genome_range(target_species)
 
         for rec in records:
-            logger.debug("projecting function to {}".format(rec))
+            logger.debug("projecting function to %s", rec)
             if len(rec) < 25:
-                logger.warning("Skipping short sequence (len={} AA)".format(len(rec)))
+                logger.warning("Skipping short sequence (len=%s AA)", len(rec))
                 continue
             t0 = time.time()
             r = self.db.seq_search.search(str(rec.seq), entrynr_range=entrynr_range)
-            logger.info(
-                "sequence matching of {} ({} AA) took {:.3f}sec".format(
-                    rec.id, len(rec), time.time() - t0
-                )
-            )
+            logger.info("sequence matching of %s (%d AA) took %fsec", rec.id, len(rec), time.time() - t0)
             if r is not None:
                 logger.debug(str(r))
                 go_df = None
@@ -3779,7 +3769,7 @@ class ClosestSeqMapper(object):
             entrynr_range = self.db.id_mapper["OMA"].genome_range(target_species)
 
         for rec in seqrecords:
-            logger.debug("projecting {} to closest sequence".format(rec))
+            logger.debug("projecting %s to closest sequence", rec)
             r = self.db.seq_search.search(
                 str(rec.seq), compute_distance=True, entrynr_range=entrynr_range
             )

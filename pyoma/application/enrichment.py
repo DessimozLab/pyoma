@@ -215,7 +215,7 @@ def extant_species_go_enrichment(
         for row in db._main_isoform_iter(rng[0], rng[1])
     ]
     goea = GOEnrichmentAnalysis(db, main_iso, annots=anno, ensure_term=True)
-    logger.debug(f"go_traverse_cache: {goea._go._traverseGraph.cache_info()}")
+    logger.debug("go_traverse_cache: %s", goea._go._traverseGraph.cache_info())
     return goea.run_study(map(omaid_mapper.map_entry_nr, foreground), alpha=alpha)
 
 

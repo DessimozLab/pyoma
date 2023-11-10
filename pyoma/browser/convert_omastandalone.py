@@ -129,7 +129,7 @@ def mark_isoforms(dbfn):
                 common.package_logger.debug(main_variant)
                 main_variants[main_variant] = idmapper.omaid_to_entry_nr(main_variant)
             except Exception:
-                common.package_logger.warning("cannot convert line: {}".format(line))
+                common.package_logger.warning("cannot convert line: %s", line)
                 pass
     common.package_logger.info(
         "found {} main splicing variants".format(len(main_variants))
@@ -141,17 +141,13 @@ def mark_isoforms(dbfn):
     for file in os.scandir(os.path.join(os.getenv("DARWIN_BROWSERDATA_PATH"), "DB")):
         if not file.name.endswith(".splice"):
             continue
-        common.package_logger.warning("handling {}".format(file.name))
+        common.package_logger.warning("handling %s", file.name)
         with open(file) as fh:
             for line in fh:
                 splice_variants = [z.strip() for z in line.split(";")]
                 main = [v for v in splice_variants if v in main_variants]
                 if len(main) != 1:
-                    common.package_logger.warning(
-                        "not a single main variant for {}: {}".format(
-                            splice_variants, main
-                        )
-                    )
+                    common.package_logger.warning("not a single main variant for %s: %s", splice_variants, main)
                     continue
                 for v in splice_variants:
                     enr = idmapper.omaid_to_entry_nr(v)

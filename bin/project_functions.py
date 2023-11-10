@@ -80,7 +80,7 @@ if __name__ == "__main__":
                     mapper.write_annotations(fout, myjobs, target_species=conf.target)
 
                 except KeyboardInterrupt as e:
-                    logger.info("received KeyboardInterrupt: {}".format(e))
+                    logger.info("received KeyboardInterrupt: %s",e)
                     logger.info("writing checkpoint")
                     with open(outfn + ".ckpt", "w") as ckpt:
                         ckpt.write(last_id)

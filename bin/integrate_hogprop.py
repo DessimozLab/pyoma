@@ -25,7 +25,7 @@ class AncGOData:
             obj=data,
             expectedrows=len(data),
         )
-        logger.info(f"wrote {tab._v_pathname}")
+        logger.info("wrote %s", tab._v_pathname)
         for col in ("HogRow", "TermNr", "Score", "RawScore"):
             tab.colinstances[col].create_csindex()
         logger.info(f" create indexes")
@@ -50,7 +50,7 @@ class AncGOManager:
             for row in self.h5.get_node("/Taxonomy").read()
         }
         lev2tax[b"LUCA"] = 0
-        logger.info(f"Found {len(lev2tax)} taxonomic levels")
+        logger.info("Found %s taxonomic levels", len(lev2tax))
         return lev2tax
 
     def _load_hoglevel2hogrow(self):
@@ -64,7 +64,7 @@ class AncGOManager:
         for anno in go_tab:
             taxid = self.tax_ids[anno["HogNr"]]
             if taxid == self.sentinel:
-                logger.warning(f"skip annotation {anno} for level {self.h5.root.HogLevel[anno['HogNr']]}")
+                logger.warning("skip annotation %s for level %s", anno, self.h5.root.HogLevel[anno['HogNr']])
                 continue
             self.data_containers[taxid].add(
                 self.hog_rows[anno["HogNr"]],
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     conf = parser.parse_args()
     log_level = 30 - (10 * min(conf.v, 2))
     logging.basicConfig(level=log_level)
-    logger.info("Params: {}".format(conf))
+    logger.info("Params: %s", conf)
 
     with tables.open_file(conf.godb, "r") as go_h5, tables.open_file(
         conf.omadb, "a"

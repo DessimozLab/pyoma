@@ -39,7 +39,7 @@ if __name__ == "__main__":
     )
     conf = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
-    logger.info("Params: {}".format(conf))
+    logger.info("Params: %s", conf)
 
     with tables.open_file(conf.hdf5, "r") as h5:
         augment_orthoxml(h5, conf.taxonomy, conf.orthoxml_file, conf.release, conf.out)

@@ -161,15 +161,15 @@ class HashWorker(BaseProfileBuilderProcess):
         self.handled_queries = 0
 
     def handle_input(self, fam):
-        logger.info("computing hashes for family {}".format(fam))
+        logger.info("computing hashes for family %s", fam)
         if self.handled_queries > 10000:
             self.db.close()
             logger.info("resetting database handle")
             self.setup()
-        logger.info("start chewing on fam {}...".format(fam))
+        logger.info("start chewing on fam %s...", fam)
         t0 = time.time()
         hashes = self.hasher.analyze_fam(fam)
-        logger.info("... done with fam {}. Took {} sec".format(fam, time.time() - t0))
+        logger.info("... done with fam %s. Took %f sec", fam, time.time() - t0)
         self.handled_queries += 1
         return hashes
 
@@ -200,7 +200,7 @@ def generator_of_unprocessed_fams(db_path, lsh_path=None):
         db = Database(db_path)
         nr_hogs = db.get_nr_toplevel_hogs()
         db.close()
-        logger.info("Found {} families to process".format(nr_hogs))
+        logger.info("Found %d families to process", nr_hogs)
         return nr_hogs
 
     def _load_unprocessed_fams(db_path, lsh_path):
@@ -209,7 +209,7 @@ def generator_of_unprocessed_fams(db_path, lsh_path=None):
             processed_fams = set(db.parse_hog_id(x) for x in lsh_h5.get_node("/hogids"))
         remaining = set(range(1, db.get_nr_toplevel_hogs() + 1)) - processed_fams
         db.close()
-        logger.info("Found {} unprocessed families".format(len(remaining)))
+        logger.info("Found %d unprocessed families", len(remaining))
         return remaining
 
     if lsh_path is None or not os.path.exists(lsh_path):
@@ -270,7 +270,7 @@ def compare_versions(output_file, target_path, *old_path):
             ):
                 minhash = LeanMinHash256(hashvalues=old_hashvals)
                 candidates = sorted(lsh.query(old_id, minhash), key=lambda x: -x[2])
-                logger.debug("old_id: {}: candidates: {}".format(old_id, candidates))
+                logger.debug("old_id: %s: candidates: %s", old_id, candidates)
                 if len(candidates) > 10 and candidates[6][2] > 0.9:
                     # this is a dubious node, store it for now, maybe try to recover later.
                     # it seems that this happens if the CanonicalId is truncated and hence maps to several ids.

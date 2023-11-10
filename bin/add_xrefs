@@ -15,7 +15,7 @@ def add_xrefs_and_rebuild_indexes(filename, tsv_paths):
         "/_si_XRef",
     ]
     for node in nodes_to_remove:
-        logger.info('removing node "{}"'.format(node))
+        logger.info('removing node "%s"', node)
         try:
             exporter.h5.remove_node(node, recursive=True)
         except tables.NoSuchNodeError:

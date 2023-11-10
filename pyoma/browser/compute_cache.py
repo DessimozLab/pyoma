@@ -68,7 +68,7 @@ class CacheBuilderWorker(mp.Process):
                 for job in iter(timelimit_get_from_in_queue, None):
                     fun, params = job
                     res = getattr(self, fun)(*params)
-                    logger.debug("result for job ({}) ready".format(job))
+                    logger.debug("result for job (%s) ready", job)
                     self.out_queue.put((job, res))
             except Empty:
                 logger.warning(
@@ -79,7 +79,7 @@ class CacheBuilderWorker(mp.Process):
         except KeyboardInterrupt:
             logger.info("received interrupt. Terminating")
         self.db.close()
-        logger.info("terminating worker process {}".format(self.name))
+        logger.info("terminating worker process %s", self.name)
 
     def load_fam_members(self, fam):
         members = []
@@ -108,7 +108,7 @@ class CacheBuilderWorker(mp.Process):
         ]
 
     def analyse_fam(self, fam, rng=None):
-        logger.debug("analysing family {}".format(fam))
+        logger.debug("analysing family %s", fam)
         fam_members = self.load_fam_members(fam)
         logger.debug(
             "family {} with {} members; doing range {}".format(
@@ -154,7 +154,7 @@ class CacheBuilderWorker(mp.Process):
         return counts
 
     def analyse_singleton(self, entry_nr, group_nr):
-        logger.debug("analysing singleton {} (grp {})".format(entry_nr, group_nr))
+        logger.debug("analysing singleton %s (grp %s)", entry_nr, group_nr)
         vps = set(self.load_vps(entry_nr))
         grp_members = set([])
         if group_nr > 0:
@@ -167,9 +167,9 @@ class CacheBuilderWorker(mp.Process):
 
     def compute_familydata_json(self, fam):
         famhog_id = self.db.format_hogid(fam)
-        logger.debug("analysing family {}".format(fam))
+        logger.debug("analysing family %s", fam)
         fam_members = self.load_fam_members(fam)
-        logger.debug("family {} with {} members".format(fam, len(fam_members)))
+        logger.debug("family %s with %d members", fam, len(fam_members))
         if len(fam_members) > 50000:
             # this will likely fail to compute the MDS for so many points
             # let's skip it for now.
@@ -181,7 +181,7 @@ class CacheBuilderWorker(mp.Process):
                     gene_similarity_vals,
                 ) = self.db.get_gene_similarities_hog(famhog_id)
             except Exception as e:
-                print("gene_similarity failed for {}: {}".format(fam, e))
+                logger.error("gene_similarity failed for %s: %s", fam, e)
                 raise
         final_json_output = []
         for p1 in fam_members:
@@ -310,7 +310,7 @@ class ResultHandler:
                 )
             self.in_memory_json_buffer = []
             self._last_cache_timestamp = time.time()
-            logger.info("finished writing milestone to {}".format(self.cache_file))
+            logger.info("finished writing milestone to %s", self.cache_file)
 
 
 def build_cache(db_fpath, nr_procs=None, from_cache=None):
@@ -371,18 +371,14 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
         for reply in tqdm(iter(result_queue.get, None), total=len(jobs)):
             if reply == "DONE":
                 finished += 1
-                logger.info("{} workers finished".format(finished))
+                logger.info("%d workers finished", finished)
                 if finished == nr_procs:
                     if len(pending_jobs) > 0:
-                        logger.error(
-                            "still {} pending jobs...: {}".format(
-                                len(pending_jobs), pending_jobs
-                            )
-                        )
+                        logger.error("still %d pending jobs...: %s", len(pending_jobs), pending_jobs)
                     break
             else:
                 job, res = reply
-                logger.debug("received result for job {})".format(job))
+                logger.debug("received result for job %s", job)
                 result_handler.handle_result(job, res)
         result_handler.write_to_disk()
         logger.info("exit receiver loop. joining workers...")
@@ -398,7 +394,7 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
         result_handler.ortholog_count_result, usemask=False
     )
     ret.sort(order="EntryNr")
-    logger.info("sorted results: {}".format(ret))
+    logger.info("sorted results: %s", ret)
     assert check_all_there(nr_entries, ret)
     return ret
 
@@ -407,7 +403,7 @@ def check_all_there(nr_prots, cache):
     if len(cache) == nr_prots:
         return True
     missings = set(range(1, nr_prots + 1)) - set(cache["EntryNr"])
-    logger.error("Missing cache value for {}".format(missings))
+    logger.error("Missing cache value for %s", missings)
     return False
 
 

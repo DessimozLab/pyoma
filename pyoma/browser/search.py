@@ -290,7 +290,7 @@ class TaxSearch(BaseSearch):
                 logger.debug("%s matches approximately to %s", self.term, genomes)
                 # fuzzy match of all taxonomic names in OMA.
                 approx_matches = self.db.tax.approx_search(self.term)
-                logger.debug("'{}' matches approximately to {}", self.term, approx_matches)
+                logger.debug("'%s' matches approximately to %s", self.term, approx_matches)
                 tax_nodes = self.db.tax.get_taxnode_from_name_or_taxid([z[1] for z in approx_matches])
                 tax = [(int(z["NCBITaxonId"]), approx_match[0]) for z, approx_match in zip(tax_nodes, approx_matches)]
                 tax.extend((g.ncbi_taxon_id, score) for g, score in zip(genomes, genome_approx_scores))
@@ -368,7 +368,7 @@ class SequenceSearch(BaseSearch):
             return self._matched_seqs
 
         if len(self.seq) < 5:
-            logger.debug("too short sequence motif to search: {}", self.seq)
+            logger.debug("too short sequence motif to search: %s", self.seq)
             raise ValueError("too short sequence motif")
         if self.strategy not in ("exact", "approx", "mixed"):
             raise ValueError("Invalid search strategy parameter")
@@ -465,10 +465,7 @@ class XRefSearch(BaseSearch):
                     rng = self.entry_filter
                 else:
                     if len(self.entry_filter) == 0:
-                        logger.info(
-                            "short-circuit XRefSearch as entry_filter is empty: {}",
-                            self.entry_filter,
-                        )
+                        logger.info("short-circuit XRefSearch as entry_filter is empty: %s", self.entry_filter)
                         self._matched_entries = {}
                         return self._matched_entries
                     rng = (min(self.entry_filter), max(self.entry_filter))
@@ -479,7 +476,7 @@ class XRefSearch(BaseSearch):
                     self.term, limit=self.max_matches, entrynr_range=rng
                 )
             except TooUnspecificQuery:
-                logger.exception("XRefSearch with term {} and entry_range {}", self.term, rng)
+                logger.exception("XRefSearch with term %s and entry_range %s", self.term, rng)
                 self._matched_entries = {}
             if filt is not None:
                 self._matched_entries = {enr: v for enr, v in self._matched_entries.items() if filt(enr)}

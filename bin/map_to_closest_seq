@@ -159,7 +159,7 @@ if __name__ == "__main__":
                         csv_writer.writerow(formatter.get_row_data(map_res))
                         last_id = map_res.query
                 except KeyboardInterrupt as e:
-                    logger.info("received KeyboardInterrupt: {}".format(e))
+                    logger.info("received KeyboardInterrupt: %s", e)
                     logger.info("writing checkpoint")
                     with open(outfn + ".ckpt", "w") as ckpt:
                         ckpt.write(last_id)

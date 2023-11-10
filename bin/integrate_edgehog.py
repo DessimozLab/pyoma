@@ -19,14 +19,14 @@ if __name__ == "__main__":
     conf = parser.parse_args()
     log_level = 30 - (10 * min(conf.v, 2))
     logging.basicConfig(level=log_level)
-    logger.info("Params: {}".format(conf))
+    logger.info("Params: %s", conf)
     with tables.open_file(conf.edgehog, "r") as edge_h5, tables.open_file(
         conf.omadb, "a"
     ) as h5:
         for node in edge_h5.walk_nodes("/", 'Table'):
             path, name = node._v_pathname.rsplit("/", 1)
             target_node = h5.get_node(path)
-            logger.debug(f"copy {name} from {path} to {target_node}")
+            logger.debug("copy %s from %s to %s", name, path, target_node)
             node._f_copy(target_node, name)
             tab = h5.get_node(path, name)
             for col in ("HogRow1", "HogRow2", "Weight", "Evidence"):

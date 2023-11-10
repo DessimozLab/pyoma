@@ -232,7 +232,7 @@ class GenesPriorizationHandler(object):
         self.max_links = (
             int(max_linkouts) if max_linkouts else 20357436 // 10
         )  # obtained in Jan2018
-        logger.info("Limiting Genes to {} links max".format(self.max_links))
+        logger.info("Limiting Genes to %d links max", self.max_links)
         self.genes_buffer = LinkoutBuffer(GenesResource, **kwargs)
         self.genes = []
         self.db = db
@@ -293,7 +293,7 @@ class GenesPriorizationHandler(object):
         c = collections.defaultdict(int)
         for acc, target in self.genes[self.max_links :]:
             c[target[0:5]] += 1
-        logger.info("Skipping genes link in the following species: {}".format(c))
+        logger.info("Skipping genes link in the following species: %s", c)
 
 
 def prepare_linkout_files(outdir="/tmp", infile="../pyomabrowser/OmaServer.h5"):

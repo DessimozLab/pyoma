@@ -54,7 +54,7 @@ class TestWithDbInstance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         path = find_path_to_test_db(cls.db_file_name)
-        logger.info("Loading {} for DatabaseTests".format(path))
+        logger.info("Loading %s for DatabaseTests", path)
         cls.db = Database(path)
 
     @classmethod

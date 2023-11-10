@@ -48,15 +48,11 @@ def assign_ancestral_synteny(ham):
         try:
             genome = tree_node.genome
         except AttributeError:
-            logger.warning("No genome stored for {}".format(tree_node.name))
+            logger.warning("No genome stored for %s", tree_node.name)
             continue
 
         if isinstance(tree_node.genome, pyham.ExtantGenome):
-            logger.info(
-                "synteny for extant genome '{}' already assigned".format(
-                    tree_node.genome
-                )
-            )
+            logger.info("synteny for extant genome '%s' already assigned", tree_node.genome)
             continue
         elif isinstance(tree_node.genome, pyham.AncestralGenome):
             graph = nx.Graph()
@@ -82,16 +78,14 @@ def assign_ancestral_synteny(ham):
                             graph[parent_edge[0]][parent_edge[1]]["weight"] += weight
                         else:
                             graph.add_edge(*parent_edge, weight=weight)
-            logger.info("build graph for {}: {}".format(tree_node.name, nx.info(graph)))
+            logger.info("build graph for %s: %s", tree_node.name, nx.info(graph))
             remove_forks_from_gene_losses(graph)
             tree_node.add_feature("synteny", graph)
-            logger.info(
-                "Synteny for ancestral genome '{}' created. |V|={}, |E|={}, |CC|={}".format(
-                    tree_node.name,
-                    graph.number_of_nodes(),
-                    graph.number_of_edges(),
-                    nx.number_connected_components(graph),
-                )
+            logger.info("Synteny for ancestral genome '%s' created. |V|=%d, |E|=%d, |CC|=%d",
+                        tree_node.name,
+                        graph.number_of_nodes(),
+                        graph.number_of_edges(),
+                        nx.number_connected_components(graph),
             )
             yield tree_node.name, graph
 
@@ -181,7 +175,7 @@ def delete_irrelevant_edges(G: nx.Graph, min_importance=10, max_neighbors=10):
                         eattr["remove"] = 1
         G.remove_edges_from(to_remove)
         cnt_removed_edges += len(to_remove)
-    logger.info("removed {} irrelevant edges".format(cnt_removed_edges))
+    logger.info("removed %d irrelevant edges", cnt_removed_edges)
 
 
 def remove_forks_from_gene_losses(G: nx.Graph):
@@ -256,7 +250,7 @@ def extract_hog_row_links(graph, hogid_2_hogrow_lookup, level):
                 "unmappable relation ({}, {}) on level {}: {}".format(u, v, level, e)
             )
     if nr_errors > 0:
-        logger.warning("{} errors on level {}".format(nr_errors, level))
+        logger.warning("%s errors on level %s", nr_errors, level)
     return numpy.array(edges, dtype=tables.dtype_from_descr(AncestralSyntenyRels()))
 
 
@@ -269,7 +263,7 @@ def taxid_from_level(h5, level):
             taxid = 0
         else:
             raise
-    logger.info("level '{}' -> taxid = {}".format(level, taxid))
+    logger.info("level '%s' -> taxid = %s", level, taxid)
     return taxid
 
 
@@ -281,7 +275,7 @@ def hogid_2_rownr(h5, level):
     )
     for row in row_iter:
         lookup[row["ID"].decode()] = row.nrow
-    logger.info("hogmap: found {} hog at level {}".format(len(lookup), level))
+    logger.info("hogmap: found %s hog at level %s", len(lookup), level)
     return lookup
 
 
@@ -314,12 +308,12 @@ def infer_synteny(orthoxml, h5name, tree):
                 "hogid_2_rownr took longer than %d seconds".format(error.args[1])
             )
         except ProcessExpired as error:
-            logger.error("{}. Exit code: {}}".format(error, error.exitcode))
+            logger.error("%s. Exit code: %s}", error, error.exitcode)
         except Exception as error:
-            logger.exception("hogid_2_rownr raised {}".format(error))
+            logger.exception("hogid_2_rownr raised %s", error)
 
         if cnt % 200 == 0:
-            logger.info("closing and reopening {} file".format(h5name))
+            logger.info("closing and reopening %s file", h5name)
             h5.close()
             h5 = db.Database(h5name)
     h5.close()

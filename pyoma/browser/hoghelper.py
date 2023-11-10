@@ -62,7 +62,7 @@ class HogLevelFilter(object):
                     min_dist = self.sub_level_distances[lev]
             except KeyError:
                 pass
-        logger.debug("closest level {} at {}".format(closest, min_dist))
+        logger.debug("closest level %s at %s", closest, min_dist)
         return closest
 
     def analyse_families(self, it):

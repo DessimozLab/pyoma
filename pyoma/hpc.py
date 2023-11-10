@@ -26,7 +26,7 @@ class JobArray(object):
         h = hashlib.md5(chunk)
         as_int = int(h.hexdigest(), 16)
         res = (as_int % self.nr_procs) == (self.this_proc_nr - 1)
-        logger.debug("chunk {} to be processed: {}".format(chunk, res))
+        logger.debug("chunk %s to be processed: %s", chunk, res)
         return res
 
     def __repr__(self):

@@ -23,7 +23,7 @@ def update_xrefs(filename):
         "/OmaGroups",
     ]
     for node in nodes_to_remove:
-        logger.info('removing node "{}"'.format(node))
+        logger.info('removing node "%s"', node)
         try:
             exporter.h5.remove_node(node, recursive=True)
         except tables.NoSuchNodeError:

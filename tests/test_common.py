@@ -11,9 +11,7 @@ class AutoOpenBaseTest(unittest.TestCase):
     filesuffix = None
 
     def setUp(self) -> None:
-        self.expected_text = (
-            """This is a test text. Let's see if we can properly load it."""
-        )
+        self.expected_text = """This is a test text. Let's see if we can properly load it."""
         with tempfile.NamedTemporaryFile(suffix=self.filesuffix, delete=False) as fh:
             self.testfilename = fh.name
 

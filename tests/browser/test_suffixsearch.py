@@ -17,9 +17,7 @@ import string
 import itertools
 from pyoma.browser import suffixsearch
 
-CHARS = numpy.fromiter(
-    itertools.chain(string.ascii_letters, string.digits, "-_."), dtype="S1"
-)
+CHARS = numpy.fromiter(itertools.chain(string.ascii_letters, string.digits, "-_."), dtype="S1")
 
 
 class StringGenerator(object):
@@ -41,43 +39,27 @@ class StringGenerator(object):
 
 
 def create_h5_with_table(nr_row):
-    f = tables.open_file(
-        "testsuffix.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0
-    )
-    tab_def = numpy.dtype(
-        [("CharCol50", "S50"), ("DblCol", "f8"), ("CharCol200", "S200")]
-    )
+    f = tables.open_file("testsuffix.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0)
+    tab_def = numpy.dtype([("CharCol50", "S50"), ("DblCol", "f8"), ("CharCol200", "S200")])
     tab = numpy.zeros(nr_row, tab_def)
     generator = StringGenerator()
-    tab["CharCol50"] = [
-        generator.get_string(l) for l in numpy.random.randint(0, 51, size=nr_row)
-    ]
+    tab["CharCol50"] = [generator.get_string(l) for l in numpy.random.randint(0, 51, size=nr_row)]
     tab["DblCol"] = numpy.random.rand(nr_row)
-    tab["CharCol200"] = [
-        generator.get_string(l) for l in numpy.random.randint(0, 201, size=nr_row)
-    ]
+    tab["CharCol200"] = [generator.get_string(l) for l in numpy.random.randint(0, 201, size=nr_row)]
     f.create_table("/test", "table", obj=tab, createparents=True)
     return f
 
 
 def create_h5_with_varlen_string_col(nr_row, off_col_type, max_str_len=800):
-    f = tables.open_file(
-        "testsuffix.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0
-    )
-    tab_def = numpy.dtype(
-        [("CharCol", "S800"), ("VarCharOff", off_col_type), ("VarCharLen", "i4")]
-    )
-    buf = f.create_earray(
-        "/test", "buffer", tables.StringAtom(1), (0,), createparents=True
-    )
+    f = tables.open_file("testsuffix.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0)
+    tab_def = numpy.dtype([("CharCol", "S800"), ("VarCharOff", off_col_type), ("VarCharLen", "i4")])
+    buf = f.create_earray("/test", "buffer", tables.StringAtom(1), (0,), createparents=True)
     tab = numpy.zeros(nr_row + 1, tab_def)
     generator = StringGenerator()
     off = 0
     for i in range(nr_row):
         l = random.randint(0, max_str_len)
-        val = numpy.ndarray(
-            (l,), buffer=generator.get_string(l), dtype=tables.StringAtom(1)
-        )
+        val = numpy.ndarray((l,), buffer=generator.get_string(l), dtype=tables.StringAtom(1))
         buf.append(val)
         tab["VarCharOff"][i] = off
         tab["VarCharLen"][i] = l
@@ -100,15 +82,9 @@ class SuffixArraySearchTests(unittest.TestCase):
             self.h5.get_node("/test/table"), "CharCol50", "/test", ignore_case=True
         )
         suf()
-        self.assertEqual(
-            self.h5.get_node_attr("/test/table", "CharCol50_suffixindexnode"), "/test"
-        )
-        self.assertEqual(
-            self.h5.get_node_attr("/test", "CharCol50_buffer"), "/test/CharCol50_buffer"
-        )
-        self.assertEqual(
-            self.h5.get_node_attr("/test", "CharCol50_offset"), "/test/CharCol50_offset"
-        )
+        self.assertEqual(self.h5.get_node_attr("/test/table", "CharCol50_suffixindexnode"), "/test")
+        self.assertEqual(self.h5.get_node_attr("/test", "CharCol50_buffer"), "/test/CharCol50_buffer")
+        self.assertEqual(self.h5.get_node_attr("/test", "CharCol50_offset"), "/test/CharCol50_offset")
         self.assertEqual(self.h5.get_node_attr("/test", "CharCol50_ignore_case"), True)
         try:
             suf = self.h5.get_node("/test/CharCol50_suffix")
@@ -136,14 +112,10 @@ class SuffixArraySearchTests(unittest.TestCase):
 
     def test_search_case_insensitive(self):
         tab = self.h5.get_node("/test/table")
-        suffixsearch.SuffixIndexBuilderStringCol(
-            tab, "CharCol50", "/test", ignore_case=True
-        )()
+        suffixsearch.SuffixIndexBuilderStringCol(tab, "CharCol50", "/test", ignore_case=True)()
         search = suffixsearch.SuffixSearcher.from_tablecolumn(tab, "CharCol50")
         target_row = numpy.random.randint(0, len(tab), size=200)
-        for k, full_query in enumerate(
-            tab.read_coordinates(target_row, field="CharCol50")
-        ):
+        for k, full_query in enumerate(tab.read_coordinates(target_row, field="CharCol50")):
             if len(full_query) < 2:
                 continue
             qlen = random.randint(2, len(full_query) + 1)
@@ -158,15 +130,11 @@ class SuffixArraySearchTests(unittest.TestCase):
                 ),
             )
             for target in res:
-                self.assertIsNotNone(
-                    re.search(query, tab[target]["CharCol50"], re.IGNORECASE)
-                )
+                self.assertIsNotNone(re.search(query, tab[target]["CharCol50"], re.IGNORECASE))
 
     def test_search_string_instance(self):
         tab = self.h5.get_node("/test/table")
-        suffixsearch.SuffixIndexBuilderStringCol(
-            tab, "CharCol50", "/test", ignore_case=True
-        )()
+        suffixsearch.SuffixIndexBuilderStringCol(tab, "CharCol50", "/test", ignore_case=True)()
         search = suffixsearch.SuffixSearcher.from_tablecolumn(tab, "CharCol50")
         for trial in range(100):
             row_nr = random.randint(0, len(tab))
@@ -181,9 +149,7 @@ class SuffixArraySearchTests(unittest.TestCase):
     def test_raises_on_non_char_column(self):
         tab = self.h5.get_node("/test/table")
         with self.assertRaises(TypeError):
-            suffixsearch.SuffixIndexBuilderStringCol(
-                tab, "DblCol", "/test", ignore_case=True
-            )()
+            suffixsearch.SuffixIndexBuilderStringCol(tab, "DblCol", "/test", ignore_case=True)()
 
 
 class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
@@ -210,15 +176,11 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
         tab = self.h5.get_node("/test/table")
         buf = self.h5.get_node("/test/buffer")
         for row in tab:
-            from_buf = buf[
-                row["VarCharOff"] : (row["VarCharOff"] + row["VarCharLen"])
-            ].tobytes()
+            from_buf = buf[row["VarCharOff"] : (row["VarCharOff"] + row["VarCharLen"])].tobytes()
             self.assertEqual(row["CharCol"], from_buf)
 
     def test_existance_of_auxillary_buffers(self):
-        self.assertEqual(
-            self.h5.get_node_attr("/test/table", "VarCharOff_suffixindexnode"), "/test"
-        )
+        self.assertEqual(self.h5.get_node_attr("/test/table", "VarCharOff_suffixindexnode"), "/test")
         if self.ignore_case:
             self.assertEqual(
                 self.h5.get_node_attr("/test", "VarCharOff_buffer"),
@@ -228,9 +190,7 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
             self.h5.get_node_attr("/test", "VarCharOff_offset"),
             "/test/VarCharOff_offset",
         )
-        self.assertEqual(
-            self.h5.get_node_attr("/test", "VarCharOff_ignore_case"), self.ignore_case
-        )
+        self.assertEqual(self.h5.get_node_attr("/test", "VarCharOff_ignore_case"), self.ignore_case)
         try:
             suf = self.h5.get_node("/test/VarCharOff_suffix")
             off = self.h5.get_node("/test/VarCharOff_offset")
@@ -247,9 +207,7 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
         tab = self.h5.get_node("/test/table")
         search = suffixsearch.SuffixSearcher.from_tablecolumn(tab, "VarCharOff")
         target_row = numpy.random.randint(0, len(tab), size=200)
-        for k, full_query in enumerate(
-            tab.read_coordinates(target_row, field="CharCol")
-        ):
+        for k, full_query in enumerate(tab.read_coordinates(target_row, field="CharCol")):
             if len(full_query) < 2:
                 continue
             qlen = random.randint(2, len(full_query) + 1)
@@ -267,9 +225,7 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
                 if self.ignore_case:
                     self.assertIsNotNone(
                         re.search(query, tab[target]["CharCol"], flags=re.IGNORECASE),
-                        "Query {} not found in {}. target: {}".format(
-                            query, tab[target]["CharCol"], target
-                        ),
+                        "Query {} not found in {}. target: {}".format(query, tab[target]["CharCol"], target),
                     )
                 else:
                     if query not in tab[target]["CharCol"]:
@@ -284,23 +240,17 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
         self.assertEqual(0, len(res))
 
 
-class SuffixArrayVarLenSearchTestsCaseSensitive(
-    SuffixArrayVarLenSearchTestsCaseInsensitive
-):
+class SuffixArrayVarLenSearchTestsCaseSensitive(SuffixArrayVarLenSearchTestsCaseInsensitive):
     ignore_case = False
 
 
-class SuffixArrayVarLenSearchTestsWithEmptyData(
-    SuffixArrayVarLenSearchTestsCaseInsensitive
-):
+class SuffixArrayVarLenSearchTestsWithEmptyData(SuffixArrayVarLenSearchTestsCaseInsensitive):
     def setUp(self):
         self.h5 = create_h5_with_varlen_string_col(5000, numpy.int32, 0)
         self.build_index()
 
 
-class SuffixArrayVarLenSearchTestsWithEmptyDataInsensitiveCase(
-    SuffixArrayVarLenSearchTestsWithEmptyData
-):
+class SuffixArrayVarLenSearchTestsWithEmptyDataInsensitiveCase(SuffixArrayVarLenSearchTestsWithEmptyData):
     ignore_case = False
 
 
@@ -318,9 +268,7 @@ class SuffixBuilderFactoryTester(unittest.TestCase):
     def test_fix_string_column(self, FixStrSuffixMock, VarStrSuffixMock):
         tab = self.h5.get_node("/test/table")
         suffixsearch.create_suffix_index(tab, "CharCol", ignore_case=True)
-        FixStrSuffixMock.assert_called_once_with(
-            tab, "CharCol", self.h5.get_node("/test/_si_table"), ignore_case=True
-        )
+        FixStrSuffixMock.assert_called_once_with(tab, "CharCol", self.h5.get_node("/test/_si_table"), ignore_case=True)
         VarStrSuffixMock.assert_not_called()
 
     @mock.patch("pyoma.browser.suffixsearch.SuffixIndexBuilderVarStringCol")

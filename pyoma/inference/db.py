@@ -51,15 +51,11 @@ class RelationsOfEntry(object):
             value_idx = self.data["EntryNr2"].searchsorted(value)
             if not (self.data["EntryNr2"][value_idx] == value).all():
                 missing_matches = value[self.data["EntryNr2"][value_idx] != value]
-                raise ValueError(
-                    "Not all entries found in Matches: {0!r:s}".format(missing_matches)
-                )
+                raise ValueError("Not all entries found in Matches: {0!r:s}".format(missing_matches))
         elif value.dtype == self.data.dtype:
             raise NotImplementedError("setitem with replacement view not implemented")
         else:
-            raise ValueError(
-                "Unexpected dtype in parameter: {0!:s}".format(value.dtype)
-            )
+            raise ValueError("Unexpected dtype in parameter: {0!:s}".format(value.dtype))
         self._set_relationflags_on_rows(value_idx)
 
     def _set_relationflags_on_rows(self, row_indexes):
@@ -194,21 +190,13 @@ class OmaDB(object):
     @lru_cache(maxsize=256)
     def matches(self, genome1, genome2):
         try:
-            mtab = self.db_handle.get_node(
-                "/Matches/{}/{}/Relations".format(genome1, genome2)
-            )
-            itab = self.db_handle.get_node(
-                "/Matches/{}/{}/ProteinIndex".format(genome1, genome2)
-            )
+            mtab = self.db_handle.get_node("/Matches/{}/{}/Relations".format(genome1, genome2))
+            itab = self.db_handle.get_node("/Matches/{}/{}/ProteinIndex".format(genome1, genome2))
         except tables.NoSuchNodeError:
             raise KeyError("genome pair does not exist in database")
         gs = self.genome_data.read_where("UniProtSpeciesCode==b'{}'".format(genome1))
         if len(itab) != gs["TotEntries"]:
-            raise OmaDBError(
-                "Nr of Protein does not match: {} vs {}".format(
-                    len(itab), gs["TotEntries"]
-                )
-            )
+            raise OmaDBError("Nr of Protein does not match: {} vs {}".format(len(itab), gs["TotEntries"]))
         return GenomePair(mtab, itab)
 
     def close(self):

@@ -17,11 +17,7 @@ def load_xref(db, idtype=None):
         raise TypeError("db must be a hdf5 oma database")
 
     xref_tab = db.db.get_node("/XRef")
-    xrefs = pandas.DataFrame(
-        xref_tab.read_where(
-            "(XRefSource == {})".format(xref_tab.get_enum("XRefSource")[idtype])
-        )
-    )
+    xrefs = pandas.DataFrame(xref_tab.read_where("(XRefSource == {})".format(xref_tab.get_enum("XRefSource")[idtype])))
     xrefs.drop(columns=["XRefSource", "Verification"], inplace=True)
     xrefs["XRefId"] = xrefs["XRefId"].str.decode("utf-8")
     xrefs.rename(columns={"XRefId": idtype}, inplace=True)
@@ -36,7 +32,7 @@ def extract_hogs_at_level(db, level, families, fh_out, xref_types=None):
         cols.extend(xref_types)
         for k, xtype in enumerate(xref_types):
             xref_df = load_xref(db, xtype)
-            logger.info("loaded {} xrefs for {}".format(len(xref_df), xtype))
+            logger.info("loaded %s xrefs for %s", len(xref_df), xtype)
             if k == 0:
                 xrefs_df = xref_df
             else:
@@ -51,7 +47,7 @@ def extract_hogs_at_level(db, level, families, fh_out, xref_types=None):
     csv_writer = csv.DictWriter(fh_out, cols, extrasaction="ignore", delimiter="\t")
     csv_writer.writeheader()
     for hog_id, level in tqdm(family_filter.analyse_families(families)):
-        logger.info("{} {}".format(hog_id, level))
+        logger.info("%s %s", hog_id, level)
         df = pandas.DataFrame(db.member_of_hog_id(hog_id, level))
         df["OmaID"] = df["EntryNr"].apply(db.id_mapper["Oma"].map_entry_nr)
         df["HOG"] = hog_id.decode() if isinstance(hog_id, bytes) else hog_id
@@ -90,9 +86,7 @@ if __name__ == "__main__":
         type=int,
         help="This process nr. If not passed explictly, it tries to figure out from jobarray info",
     )
-    parser.add_argument(
-        "-v", action="count", default=0, help="Increase verbosity to INFO/DEBUG"
-    )
+    parser.add_argument("-v", action="count", default=0, help="Increase verbosity to INFO/DEBUG")
     parser.add_argument("db", help="Path to the hdf5 database file")
     parser.add_argument("level", help="Level at which to produce the groups")
     conf = parser.parse_args()
@@ -107,6 +101,4 @@ if __name__ == "__main__":
     db = pyoma.browser.db.Database(conf.db)
     families = filter(lambda x: pInf.is_my_job(x), range(db.get_nr_toplevel_hogs()))
     with open(outfn, "w") as fh_out:
-        extract_hogs_at_level(
-            db, conf.level, families, fh_out, xref_types=conf.xref_type
-        )
+        extract_hogs_at_level(db, conf.level, families, fh_out, xref_types=conf.xref_type)

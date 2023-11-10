@@ -49,7 +49,7 @@ class OrthoXMLSplitter(object):
                     release_char
                 )
             )
-        logger.info("loading xml file {}...".format(xml_file))
+        logger.info("loading xml file %s...", xml_file)
         parser = etree.XMLParser(remove_blank_text=True)
         self.Etree_XML = etree.parse(self.xml_file, parser=parser)
         self.Etree_root = self.Etree_XML.getroot()
@@ -124,18 +124,12 @@ class OrthoXMLSplitter(object):
 
         if single_hog_files:
             if hogs_to_extract is None:
-                raise RuntimeError(
-                    "useless to extract all hogs into single output file"
-                )
+                raise RuntimeError("useless to extract all hogs into single output file")
             if basename is None or not isinstance(basename, (str, bytes)):
                 raise ValueError("basename needs to be specified: {}".format(basename))
-            ogs = [
-                og
-                for og in self._iter_toplevel_groups()
-                if int(og.get("id")) in hogs_to_extract
-            ]
+            ogs = [og for og in self._iter_toplevel_groups() if int(og.get("id")) in hogs_to_extract]
             fn = os.path.join(self.cache_dir, basename)
-            logger.info("extracting {:d} hogs into {:s}".format(len(ogs), fn))
+            logger.info("extracting %d hogs into %s", len(ogs), fn)
             self.create_new_orthoxml(fn, ogs)
         else:
             for og in self._iter_toplevel_groups():
@@ -143,7 +137,7 @@ class OrthoXMLSplitter(object):
                     hog_nr = int(og.get("id"))
                     hog_id = "HOG{:07d}.orthoxml".format(hog_nr)
                     fname = os.path.join(self.cache_dir, hog_id)
-                    logger.info("extracting {} into {}".format(hog_id, fname))
+                    logger.info("extracting %s into %s", hog_id, fname)
                     self.create_new_orthoxml(fname, [og])
 
     def iter_generefs_in_og(self, og_node):
@@ -163,10 +157,7 @@ class OrthoXMLSplitter(object):
             new output file."""
         # Get element to store
         for og_node in OGs:
-            gene_ids = [
-                gene_ref_elem.get("id")
-                for gene_ref_elem in self.iter_generefs_in_og(og_node)
-            ]
+            gene_ids = [gene_ref_elem.get("id") for gene_ref_elem in self.iter_generefs_in_og(og_node)]
         gene_els = self.get_gene_via_generef(gene_ids)
 
         # Get all information to store
@@ -220,6 +211,4 @@ class OrthoXMLSplitter(object):
             groupsxml.append(og_et)
 
         tree = etree.ElementTree(etree_2_dump)
-        tree.write(
-            fn, xml_declaration=True, encoding="utf-8", method="xml", pretty_print=True
-        )
+        tree.write(fn, xml_declaration=True, encoding="utf-8", method="xml", pretty_print=True)

@@ -62,16 +62,12 @@ class DatabaseChecks(unittest.TestCase):
             self.assertLess(
                 seq_off,
                 row["SeqBufferOffset"],
-                "SeqBufferOffset decreases in row {}: {} vs {}".format(
-                    row.nrow, seq_off, row["SeqBufferOffset"]
-                ),
+                "SeqBufferOffset decreases in row {}: {} vs {}".format(row.nrow, seq_off, row["SeqBufferOffset"]),
             )
             self.assertLess(
                 cds_off,
                 row["CDNABufferOffset"],
-                "CDNABufferOffset decreases in row {}: {} vs {}".format(
-                    row.nrow, seq_off, row["CDNABufferOffset"]
-                ),
+                "CDNABufferOffset decreases in row {}: {} vs {}".format(row.nrow, seq_off, row["CDNABufferOffset"]),
             )
             seq_off = row["SeqBufferOffset"]
             cds_off = row["CDNABufferOffset"]
@@ -94,17 +90,13 @@ class DatabaseChecks(unittest.TestCase):
     def test_synteny_scores_exist(self):
         for g in ("WHEAT", "BRANA", "GOSHI"):
             try:
-                t = self.db.get_hdf5_handle().get_node(
-                    "/PairwiseRelation/{}/within".format(g)
-                )
+                t = self.db.get_hdf5_handle().get_node("/PairwiseRelation/{}/within".format(g))
             except tables.NoSuchNodeError:
                 # if species does not exist, we skip - not all datasets will have these genomes
                 continue
             syn_col = t.col("SyntenyConservationLocal")
             computed_pairs = numpy.where(syn_col >= 0)
-            self.assertLess(
-                0, len(computed_pairs[0]), "No synteny values computed for {}".format(g)
-            )
+            self.assertLess(0, len(computed_pairs[0]), "No synteny values computed for {}".format(g))
 
     def test_alignment_of_pairwise_orthologs(self):
         SAMPLES = 500
@@ -118,9 +110,7 @@ class DatabaseChecks(unittest.TestCase):
             with self.subTest(pair=pair):
                 s1 = self.db.get_sequence(pair["EntryNr1"])
                 matches = [(pair["EntryNr2"],)]
-                alignment = list(
-                    seq_search._align_entries(s1, matches, compute_distance=True)
-                )[0]
+                alignment = list(seq_search._align_entries(s1, matches, compute_distance=True))[0]
                 score = alignment[1][0]
                 dist = alignment[1][2]
                 if pair["Score"] < 1:

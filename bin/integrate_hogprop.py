@@ -15,9 +15,7 @@ class AncGOData:
         self.data = []
 
     def write_to_disk(self, h5, taxid):
-        data = numpy.array(
-            self.data, dtype=tables.dtype_from_descr(AncestralGeneOntologyTable)
-        )
+        data = numpy.array(self.data, dtype=tables.dtype_from_descr(AncestralGeneOntologyTable))
         data.sort(order=["HogRow", "TermNr"])
         tab = h5.create_table(
             f"/AncestralGenomes/tax{taxid}",
@@ -25,7 +23,7 @@ class AncGOData:
             obj=data,
             expectedrows=len(data),
         )
-        logger.info(f"wrote {tab._v_pathname}")
+        logger.info("wrote %s", tab._v_pathname)
         for col in ("HogRow", "TermNr", "Score", "RawScore"):
             tab.colinstances[col].create_csindex()
         logger.info(f" create indexes")
@@ -37,20 +35,15 @@ class AncGOData:
 class AncGOManager:
     def __init__(self, h5):
         self.h5 = h5
-        self.sentinel = -9999 
+        self.sentinel = -9999
         self.tax_ids, self.hog_rows = self._load_hoglevel2hogrow()
-        logger.info(
-            f"loaded level2taxid and hog_row mapping for {len(self.tax_ids)} rows in /HogLevel table"
-        )
+        logger.info(f"loaded level2taxid and hog_row mapping for {len(self.tax_ids)} rows in /HogLevel table")
         self.data_containers = collections.defaultdict(AncGOData)
 
     def _load_lev_to_tax(self):
-        lev2tax = {
-            row["Name"]: int(row["NCBITaxonId"])
-            for row in self.h5.get_node("/Taxonomy").read()
-        }
+        lev2tax = {row["Name"]: int(row["NCBITaxonId"]) for row in self.h5.get_node("/Taxonomy").read()}
         lev2tax[b"LUCA"] = 0
-        logger.info(f"Found {len(lev2tax)} taxonomic levels")
+        logger.info("Found %s taxonomic levels", len(lev2tax))
         return lev2tax
 
     def _load_hoglevel2hogrow(self):
@@ -64,7 +57,7 @@ class AncGOManager:
         for anno in go_tab:
             taxid = self.tax_ids[anno["HogNr"]]
             if taxid == self.sentinel:
-                logger.warning(f"skip annotation {anno} for level {self.h5.root.HogLevel[anno['HogNr']]}")
+                logger.warning("skip annotation %s for level %s", anno, self.h5.root.HogLevel[anno["HogNr"]])
                 continue
             self.data_containers[taxid].add(
                 self.hog_rows[anno["HogNr"]],
@@ -81,23 +74,17 @@ class AncGOManager:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Integrate results from HogProp into oma browser database"
-    )
+    parser = argparse.ArgumentParser(description="Integrate results from HogProp into oma browser database")
     parser.add_argument("-v", action="count", default=0, help="increase verbosity")
     parser.add_argument("--omadb", required=True, help="path to OmaServer.h5 file")
-    parser.add_argument(
-        "--godb", required=True, help="Path to hogprop GO result in hdf5 format (go.h5)"
-    )
+    parser.add_argument("--godb", required=True, help="Path to hogprop GO result in hdf5 format (go.h5)")
 
     conf = parser.parse_args()
     log_level = 30 - (10 * min(conf.v, 2))
     logging.basicConfig(level=log_level)
-    logger.info("Params: {}".format(conf))
+    logger.info("Params: %s", conf)
 
-    with tables.open_file(conf.godb, "r") as go_h5, tables.open_file(
-        conf.omadb, "a"
-    ) as h5:
+    with tables.open_file(conf.godb, "r") as go_h5, tables.open_file(conf.omadb, "a") as h5:
         manager = AncGOManager(h5)
         manager.process_data(go_h5.get_node("/HOGAnnotations/GeneOntology"))
         manager.finalize()

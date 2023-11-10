@@ -33,22 +33,10 @@ def hash_tree_profile(tp: ete3.PhyloNode, taxa_index, species_index, treeweights
 
     """
 
-    losses = [
-        taxa_index[n.name] for n in tp.traverse() if n.lost and n.name in taxa_index
-    ]
-    dupl = [
-        taxa_index[n.name] for n in tp.traverse() if n.dupl and n.name in taxa_index
-    ]
-    presence = [
-        taxa_index[n.name]
-        for n in tp.traverse()
-        if n.nbr_genes > 0 and n.name in taxa_index
-    ]
-    covered_species = [
-        species_index[n.name]
-        for n in tp.iter_leaves()
-        if n.nbr_genes > 0 and n.name in species_index
-    ]
+    losses = [taxa_index[n.name] for n in tp.traverse() if n.lost and n.name in taxa_index]
+    dupl = [taxa_index[n.name] for n in tp.traverse() if n.dupl and n.name in taxa_index]
+    presence = [taxa_index[n.name] for n in tp.traverse() if n.nbr_genes > 0 and n.name in taxa_index]
+    covered_species = [species_index[n.name] for n in tp.iter_leaves() if n.nbr_genes > 0 and n.name in species_index]
     indices = dict(zip(["presence", "loss", "dup"], [presence, losses, dupl]))
     hog_matrix_weighted = np.zeros((1, 3 * len(taxa_index)))
     hog_matrix_binary = np.zeros((1, 3 * len(taxa_index)))
@@ -75,9 +63,5 @@ def row2hash(row, taxa_index, species_index, treeweights, wmg):
     """
     # convert a dataframe row to a weighted minhash
     fam, treemap = row.tolist()
-    hog_matrix, weighted_hash, species_matrix = hash_tree_profile(
-        treemap, taxa_index, species_index, treeweights, wmg
-    )
-    return pd.Series(
-        [weighted_hash, hog_matrix, species_matrix], index=["hash", "rows", "species"]
-    )
+    hog_matrix, weighted_hash, species_matrix = hash_tree_profile(treemap, taxa_index, species_index, treeweights, wmg)
+    return pd.Series([weighted_hash, hog_matrix, species_matrix], index=["hash", "rows", "species"])

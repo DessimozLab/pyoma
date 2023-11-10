@@ -54,7 +54,7 @@ class TestWithDbInstance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         path = find_path_to_test_db(cls.db_file_name)
-        logger.info("Loading {} for DatabaseTests".format(path))
+        logger.info("Loading %s for DatabaseTests", path)
         cls.db = Database(path)
 
     @classmethod
@@ -102,9 +102,7 @@ class DatabaseTests(TestWithDbInstance):
             for vp in self.db.get_hog_induced_pairwise_orthologs(en):
                 if rng2[0] <= vp["EntryNr"] <= rng2[1]:
                     expected.append((en, int(vp["EntryNr"])))
-        expected = numpy.fromiter(
-            expected, dtype=[("EntryNr1", "u4"), ("EntryNr2", "u4")]
-        )
+        expected = numpy.fromiter(expected, dtype=[("EntryNr1", "u4"), ("EntryNr2", "u4")])
         t1 = time.time()
         actual = self.db.get_hog_induced_orthologs_between_genome_pair(g1, g2)
         actual = actual[["EntryNr1", "EntryNr2"]].copy()
@@ -125,14 +123,10 @@ class DatabaseTests(TestWithDbInstance):
         entrynr = 12
         vps = self.db.get_vpairs(entrynr)
         vp_tab = self.db._get_vptab(entrynr)
-        self.assertEqual(
-            len(vps), count_rows_of_index_column_with_value(vp_tab, "EntryNr1", entrynr)
-        )
+        self.assertEqual(len(vps), count_rows_of_index_column_with_value(vp_tab, "EntryNr1", entrynr))
 
         # check that it raises KeyError if operated on a column that is not indexed
-        with self.assertRaises(
-            KeyError, msg="Operating on non-indexed column should raise KeyError"
-        ):
+        with self.assertRaises(KeyError, msg="Operating on non-indexed column should raise KeyError"):
             count_rows_of_index_column_with_value(vp_tab, "EntryNr2", entrynr)
 
     def test_hog_family(self):
@@ -227,9 +221,7 @@ class DatabaseTests(TestWithDbInstance):
             ("HOG:0000165", "Fungi", "HOG:0000165.1a"),
         ):
             with self.subTest(hog_id=hog_id, level=level):
-                hogs = list(
-                    self.db.get_subhogs(hog_id, level=level, include_subids=True)
-                )
+                hogs = list(self.db.get_subhogs(hog_id, level=level, include_subids=True))
                 self.assertIn(exp_subhogid, [h.hog_id for h in hogs])
                 self.assertNotIn(level, [h.level for h in hogs])
 
@@ -314,15 +306,11 @@ class DatabaseTests(TestWithDbInstance):
         # Test for random subsequence of 10 random sequences.
         for _ in range(10):
             s, enr, start_idx, end_idx = self.get_random_subsequence()
-            approx_search_results = self.db.seq_search.approx_search(
-                s, is_sanitised=True
-            )
+            approx_search_results = self.db.seq_search.approx_search(s, is_sanitised=True)
             self.assertIn(
                 enr,
                 {z[0] for z in approx_search_results},
-                "approx search for entry {}[{}:{}] failed.".format(
-                    enr - 1, start_idx, end_idx
-                ),
+                "approx search for entry {}[{}:{}] failed.".format(enr - 1, start_idx, end_idx),
             )
 
     def test_specific_approx_search_that_failed_on_jenkins(self):
@@ -331,9 +319,7 @@ class DatabaseTests(TestWithDbInstance):
         ranges = [(39, 376), (55, 140)]
         for enr, (start_idx, end_idx) in zip(enrs, ranges):
             seq = self.db.get_sequence(enr)[start_idx:end_idx]
-            approx_search_results = self.db.seq_search.approx_search(
-                seq, is_sanitised=True
-            )
+            approx_search_results = self.db.seq_search.approx_search(seq, is_sanitised=True)
             enrs_with_approx_match = {z[0] for z in approx_search_results}
             self.assertIn(enr, enrs_with_approx_match)
 
@@ -383,9 +369,7 @@ class DatabaseTests(TestWithDbInstance):
     def test_go_term_search(self):
         query = "GO:0004575"
         nrs = self.db.entrynrs_with_go_annotation(query, evidence="IDA")
-        self.assertGreaterEqual(
-            len(nrs), 1, "query GO term is known to occure at least in MAL32_YEAST"
-        )
+        self.assertGreaterEqual(len(nrs), 1, "query GO term is known to occure at least in MAL32_YEAST")
         for enr in nrs:
             self.assertIn(4575, self.db.get_gene_ontology_annotations(enr)["TermNr"])
 
@@ -401,17 +385,13 @@ class DatabaseTests(TestWithDbInstance):
         self.assertEqual(1, self.db.freq_aware_gene_ontology.lin_similarity(55, 55))
 
     def test_go_semantic_sim_of_same_term(self):
-        self.assertGreater(
-            1, self.db.freq_aware_gene_ontology.semantic_similarity(55, 55)
-        )
+        self.assertGreater(1, self.db.freq_aware_gene_ontology.semantic_similarity(55, 55))
 
     def test_mindepth_of_go(self):
         examples = [(8150, 0), (168, 7), (5689, 5)]
         for term, exp_depth in examples:
             with self.subTest(case=term):
-                self.assertEqual(
-                    exp_depth, self.db.gene_ontology.ensure_term(term).min_depth
-                )
+                self.assertEqual(exp_depth, self.db.gene_ontology.ensure_term(term).min_depth)
 
     def test_induced_pairwise_orthologs(self):
         query = "YEAST3523"
@@ -488,9 +468,7 @@ class XRefIdMapperTest(unittest.TestCase):
 
     def test_map_many_entries(self):
         all_mapped = self.xrefmapper.map_many_entry_nrs(numpy.arange(1, 4))
-        expected_len = (
-            4 if isinstance(self.xrefmapper, XRefNoApproximateIdMapper) else 6
-        )
+        expected_len = 4 if isinstance(self.xrefmapper, XRefNoApproximateIdMapper) else 6
         self.assertEqual((expected_len,), all_mapped.shape)
         self.assertEqual(self.xrefmapper.xref_tab.dtype, all_mapped.dtype)
 
@@ -553,9 +531,7 @@ class IdResolverTests(unittest.TestCase):
         xref = "XA001g1.4"
         res = self.id_resolver.search_xrefs(xref, return_seq_modified=True)
         self.assertEqual(1, res[0])
-        self.assertFalse(
-            res[1], "expected that {} is a unchecked sequence".format(xref)
-        )
+        self.assertFalse(res[1], "expected that {} is a unchecked sequence".format(xref))
 
 
 class TaxonomyTest(unittest.TestCase):
@@ -593,24 +569,14 @@ class TaxonomyTest(unittest.TestCase):
         )
 
     def test_newick(self):
-        member = frozenset(
-            [
-                self.tax._taxon_from_numeric(x)["Name"]
-                for x in self.tax.tax_table["NCBITaxonId"]
-            ]
-        )
+        member = frozenset([self.tax._taxon_from_numeric(x)["Name"] for x in self.tax.tax_table["NCBITaxonId"]])
         phylo = self.tax.get_induced_taxonomy(member, collapse=True)
         expected = "(((Ashbya gossypii [strain ATCC 10895 / CBS 109.51 / FGSC 9923 / NRRL Y-1056],Saccharomyces cerevisiae [strain ATCC 204508 / S288c])Saccharomycetaceae,Schizosaccharomyces pombe [strain 972 / ATCC 24843])Ascomycota,Plasmodium falciparum [isolate 3D7])Eukaryota;"
         expected = expected.replace(" ", "_")
         self.assertEqual(expected, phylo.newick())
 
     def test_phylogeny(self):
-        member = frozenset(
-            [
-                self.tax._taxon_from_numeric(x)["Name"]
-                for x in self.tax.tax_table["NCBITaxonId"]
-            ]
-        )
+        member = frozenset([self.tax._taxon_from_numeric(x)["Name"] for x in self.tax.tax_table["NCBITaxonId"]])
         phylo = self.tax.get_induced_taxonomy(member, collapse=True)
         expected = {
             "id": 2759,
@@ -884,9 +850,7 @@ class LucaBasedTaxonomyTests(unittest.TestCase):
 
     def test_subtaxonomy_does_not_contain_luca_anymore(self):
         # subset of only eukaryotes
-        subtax = self.tax.get_induced_taxonomy(
-            [451864, 55529, 158441], collapse=True, augment_parents=True
-        )
+        subtax = self.tax.get_induced_taxonomy([451864, 55529, 158441], collapse=True, augment_parents=True)
         self.assertNotIn(b"LUCA", subtax._get_root_taxon()["Name"])
 
     def test_as_newick_works(self):
@@ -988,19 +952,12 @@ class FastMapperTester(unittest.TestCase):
         with self.assertLogs("pyoma", level=logging.INFO) as cm:
             anno = list(self.fast_mapper.iter_projected_goannotations(seqs))
         for a in anno:
-            with_ = self.fast_mapper.db.id_mapper["OMA"].map_entry_nr(
-                int(a["DB_Object_ID"])
-            )
+            with_ = self.fast_mapper.db.id_mapper["OMA"].map_entry_nr(int(a["DB_Object_ID"]))
             self.assertEqual(f"{way}:{with_}".split(":"), a["With"].split(":")[:2])
         self.assertGreaterEqual(len(a), 1)
 
     def test_search_existing_sequences(self):
-        seqs = [
-            SeqRecord(
-                id=f"{enr}", seq=Seq(self.fast_mapper.db.get_sequence(enr).decode())
-            )
-            for enr in range(1, 5)
-        ]
+        seqs = [SeqRecord(id=f"{enr}", seq=Seq(self.fast_mapper.db.get_sequence(enr).decode())) for enr in range(1, 5)]
         self.check_mapped_seqs(seqs, way="Exact")
 
     def test_search_inexact_search_seq(self):

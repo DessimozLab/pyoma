@@ -55,10 +55,7 @@ class ToplevelOrthoXMLParser(object):
             if self.cur_hog_depth == 0:
                 self.cur_hog_id = int(attrib["id"])
             self.cur_hog_depth += 1
-        elif (
-            tag == "{http://orthoXML.org/2011/}property"
-            and attrib["name"] == "TaxRange"
-        ):
+        elif tag == "{http://orthoXML.org/2011/}property" and attrib["name"] == "TaxRange":
             if self.cur_hog_depth == 1:
                 self.levels[self.cur_hog_id] = attrib["value"]
 

@@ -4,9 +4,7 @@ import pyoma.browser.xref_contrib
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="build reduced xref lookup data structure"
-    )
+    parser = argparse.ArgumentParser(description="build reduced xref lookup data structure")
     parser.add_argument("--db", required=True, help="Path to the hdf5 database")
     parser.add_argument(
         "--out",

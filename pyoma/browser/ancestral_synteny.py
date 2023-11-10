@@ -48,15 +48,11 @@ def assign_ancestral_synteny(ham):
         try:
             genome = tree_node.genome
         except AttributeError:
-            logger.warning("No genome stored for {}".format(tree_node.name))
+            logger.warning("No genome stored for %s", tree_node.name)
             continue
 
         if isinstance(tree_node.genome, pyham.ExtantGenome):
-            logger.info(
-                "synteny for extant genome '{}' already assigned".format(
-                    tree_node.genome
-                )
-            )
+            logger.info("synteny for extant genome '%s' already assigned", tree_node.genome)
             continue
         elif isinstance(tree_node.genome, pyham.AncestralGenome):
             graph = nx.Graph()
@@ -70,11 +66,7 @@ def assign_ancestral_synteny(ham):
                 # cleanup graph if they get too big
                 delete_irrelevant_edges(G, min_importance=7, max_neighbors=8)
                 for u, v, weight in G.edges.data("weight", default=1):
-                    if (
-                        u.parent is not None
-                        and v.parent is not None
-                        and u.parent != v.parent
-                    ):
+                    if u.parent is not None and v.parent is not None and u.parent != v.parent:
                         assert u.parent in graph.nodes
                         assert v.parent in graph.nodes
                         parent_edge = (u.parent, v.parent)
@@ -82,16 +74,15 @@ def assign_ancestral_synteny(ham):
                             graph[parent_edge[0]][parent_edge[1]]["weight"] += weight
                         else:
                             graph.add_edge(*parent_edge, weight=weight)
-            logger.info("build graph for {}: {}".format(tree_node.name, nx.info(graph)))
+            logger.info("build graph for %s: %s", tree_node.name, nx.info(graph))
             remove_forks_from_gene_losses(graph)
             tree_node.add_feature("synteny", graph)
             logger.info(
-                "Synteny for ancestral genome '{}' created. |V|={}, |E|={}, |CC|={}".format(
-                    tree_node.name,
-                    graph.number_of_nodes(),
-                    graph.number_of_edges(),
-                    nx.number_connected_components(graph),
-                )
+                "Synteny for ancestral genome '%s' created. |V|=%d, |E|=%d, |CC|=%d",
+                tree_node.name,
+                graph.number_of_nodes(),
+                graph.number_of_edges(),
+                nx.number_connected_components(graph),
             )
             yield tree_node.name, graph
 
@@ -135,11 +126,7 @@ def remove_nodes_on_path_without_parents(G: nx.Graph):
                 )
                 G.remove_node(node)
                 cnt_removed_nodes += 1
-    logger.info(
-        "removed {} nodes that have synteny but no parent hog.".format(
-            cnt_removed_nodes
-        )
-    )
+    logger.info("removed {} nodes that have synteny but no parent hog.".format(cnt_removed_nodes))
 
 
 def delete_irrelevant_edges(G: nx.Graph, min_importance=10, max_neighbors=10):
@@ -181,7 +168,7 @@ def delete_irrelevant_edges(G: nx.Graph, min_importance=10, max_neighbors=10):
                         eattr["remove"] = 1
         G.remove_edges_from(to_remove)
         cnt_removed_edges += len(to_remove)
-    logger.info("removed {} irrelevant edges".format(cnt_removed_edges))
+    logger.info("removed %d irrelevant edges", cnt_removed_edges)
 
 
 def remove_forks_from_gene_losses(G: nx.Graph):
@@ -199,9 +186,7 @@ def remove_forks_from_gene_losses(G: nx.Graph):
     """
     logger.info("starting remove_fork_from_gene_losses...")
     deg_3_nodes = (n[0] for n in G.degree if n[1] == 3)
-    pot_cases = list(
-        filter(lambda uv: G.has_edge(*uv), itertools.combinations(deg_3_nodes, 2))
-    )
+    pot_cases = list(filter(lambda uv: G.has_edge(*uv), itertools.combinations(deg_3_nodes, 2)))
     removed_forks = 0
     for u, v in pot_cases:
         pgen = nx.shortest_simple_paths(G, u, v)
@@ -224,15 +209,9 @@ def remove_forks_from_gene_losses(G: nx.Graph):
             G.edges[next_path[i], next_path[i + 1]]["weight"] += w
         removed_forks += 1
         logger.debug(
-            "removed edge from ({},{}), found other path of len {}: {}".format(
-                u, v, len(next_path), next_path
-            )
+            "removed edge from ({},{}), found other path of len {}: {}".format(u, v, len(next_path), next_path)
         )
-    logger.info(
-        "removed {} forks in G(|V|={},|E|={})".format(
-            removed_forks, G.number_of_nodes(), G.number_of_edges()
-        )
-    )
+    logger.info("removed {} forks in G(|V|={},|E|={})".format(removed_forks, G.number_of_nodes(), G.number_of_edges()))
     logger.info("finished remove_fork_from_gene_losses")
 
 
@@ -252,11 +231,9 @@ def extract_hog_row_links(graph, hogid_2_hogrow_lookup, level):
             edges.append((map_id(u), map_id(v), w))
         except KeyError as e:
             nr_errors += 1
-            logger.error(
-                "unmappable relation ({}, {}) on level {}: {}".format(u, v, level, e)
-            )
+            logger.error("unmappable relation ({}, {}) on level {}: {}".format(u, v, level, e))
     if nr_errors > 0:
-        logger.warning("{} errors on level {}".format(nr_errors, level))
+        logger.warning("%s errors on level %s", nr_errors, level)
     return numpy.array(edges, dtype=tables.dtype_from_descr(AncestralSyntenyRels()))
 
 
@@ -269,19 +246,17 @@ def taxid_from_level(h5, level):
             taxid = 0
         else:
             raise
-    logger.info("level '{}' -> taxid = {}".format(level, taxid))
+    logger.info("level '%s' -> taxid = %s", level, taxid)
     return taxid
 
 
 @concurrent.process(timeout=1200)
 def hogid_2_rownr(h5, level):
     lookup = {}
-    row_iter = h5.get_hdf5_handle().root.HogLevel.where(
-        "Level == lev", {"lev": level.encode("utf-8")}
-    )
+    row_iter = h5.get_hdf5_handle().root.HogLevel.where("Level == lev", {"lev": level.encode("utf-8")})
     for row in row_iter:
         lookup[row["ID"].decode()] = row.nrow
-    logger.info("hogmap: found {} hog at level {}".format(len(lookup), level))
+    logger.info("hogmap: found %s hog at level %s", len(lookup), level)
     return lookup
 
 
@@ -310,16 +285,14 @@ def infer_synteny(orthoxml, h5name, tree):
             edges = extract_hog_row_links(shallow_graph, hogid_lookup, level)
             synteny_graphs_mapped[taxid] = edges
         except TimeoutError as error:
-            logger.error(
-                "hogid_2_rownr took longer than %d seconds".format(error.args[1])
-            )
+            logger.error("hogid_2_rownr took longer than %d seconds".format(error.args[1]))
         except ProcessExpired as error:
-            logger.error("{}. Exit code: {}}".format(error, error.exitcode))
+            logger.error("%s. Exit code: %s}", error, error.exitcode)
         except Exception as error:
-            logger.exception("hogid_2_rownr raised {}".format(error))
+            logger.exception("hogid_2_rownr raised %s", error)
 
         if cnt % 200 == 0:
-            logger.info("closing and reopening {} file".format(h5name))
+            logger.info("closing and reopening %s file", h5name)
             h5.close()
             h5 = db.Database(h5name)
     h5.close()
@@ -355,9 +328,7 @@ def write_syntenygraphs_to_hdf5(h5name, hog_edges_per_level):
             title="Graph of HOGs (identified by rowidx in HogLevel table). Per tax level",
         )
         for level, edges in hog_edges_per_level.items():
-            h5.create_table(
-                node, "tax{}".format(level), obj=edges, expectedrows=len(edges)
-            )
+            h5.create_table(node, "tax{}".format(level), obj=edges, expectedrows=len(edges))
 
 
 if __name__ == "__main__":

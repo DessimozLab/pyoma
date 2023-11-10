@@ -15,7 +15,7 @@ logger = logging.getLogger("dump-hogids-at-level")
 def extract_hogids_at_level(db, level, families, fh_out):
     family_filter = pyoma.browser.hoghelper.HogLevelFilter(db, level)
     for hog_id, level in tqdm(family_filter.analyse_families(families)):
-        logger.info("{} {}".format(hog_id, level))
+        logger.info("%s %s", hog_id, level)
         fh_out.write(hog_id.decode())
         fh_out.write("\n")
 
@@ -35,9 +35,7 @@ if __name__ == "__main__":
         default="hog-dump.txt",
         help="Output file path, defaults to hog-dump.txt",
     )
-    parser.add_argument(
-        "-v", action="count", default=0, help="Increase verbosity to INFO/DEBUG"
-    )
+    parser.add_argument("-v", action="count", default=0, help="Increase verbosity to INFO/DEBUG")
     parser.add_argument("db", help="Path to the hdf5 database file")
     parser.add_argument("level", help="Level at which to produce the groups")
     conf = parser.parse_args()

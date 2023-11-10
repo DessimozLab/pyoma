@@ -19,22 +19,15 @@ class HogLevelFilter(object):
         self.db = db
         self.level = level
         tax_below_level = self.db.tax.get_subtaxonomy_rooted_at(level)
-        self.sub_level_distances = self._build_distance_to_query_level_lookup(
-            tax_below_level
-        )
+        self.sub_level_distances = self._build_distance_to_query_level_lookup(tax_below_level)
         self.parent_levels = set(
-            db.tax.get_parent_taxa(
-                db.tax.get_taxnode_from_name_or_taxid(level)[0]["NCBITaxonId"]
-            )["Name"]
+            db.tax.get_parent_taxa(db.tax.get_taxnode_from_name_or_taxid(level)[0]["NCBITaxonId"])["Name"]
         )
         # cache all the families nrs that are defined in the clade of interest
         self.fams_in_clade = set(
             int(roothog["Fam"])
-            for roothog in db.get_hdf5_handle().root.HogLevel.where(
-                '~contains(ID, b".") & (IsRoot == True)'
-            )
-            if roothog["Level"] in self.sub_level_distances
-            or roothog["Level"] in self.parent_levels
+            for roothog in db.get_hdf5_handle().root.HogLevel.where('~contains(ID, b".") & (IsRoot == True)')
+            if roothog["Level"] in self.sub_level_distances or roothog["Level"] in self.parent_levels
         )
 
     def _build_distance_to_query_level_lookup(self, tax):
@@ -62,7 +55,7 @@ class HogLevelFilter(object):
                     min_dist = self.sub_level_distances[lev]
             except KeyError:
                 pass
-        logger.debug("closest level {} at {}".format(closest, min_dist))
+        logger.debug("closest level %s at %s", closest, min_dist)
         return closest
 
     def analyse_families(self, it):
@@ -87,7 +80,7 @@ def build_hog_to_og_map(db):
     for protein in entries.where("(OmaHOG != b'') & (OmaGroup > 0)"):
         hog_id = protein["OmaHOG"]
         og = int(protein["OmaGroup"])
-        for p in re.finditer(br"\.", hog_id):
+        for p in re.finditer(rb"\.", hog_id):
             cur_id = hog_id[: p.start()]
             hog_to_og_cnts[cur_id].update((og,))
         hog_to_og_cnts[hog_id].update((og,))
@@ -120,9 +113,9 @@ def compare_levels(
                 j += 1
             else:
                 dupl_fnd = 0
-                while j < len(children_level_hogs) and children_level_hogs[j][
-                    "ID"
-                ].startswith(parent_level_hogs[i]["ID"]):
+                while j < len(children_level_hogs) and children_level_hogs[j]["ID"].startswith(
+                    parent_level_hogs[i]["ID"]
+                ):
                     annotated.append(tuple(children_level_hogs[j]) + (b"duplicated",))
                     j += 1
                     dupl_fnd += 1
@@ -147,9 +140,7 @@ def compare_levels(
     return diff
 
 
-hog_re = re.compile(
-    r"(?P<id>HOG:(?P<rel>[A-Z]+)?(?P<fam>\d+)(?P<sub>[a-z0-9.]*))(?:_(?P<taxid>\d+))?"
-)
+hog_re = re.compile(r"(?P<id>HOG:(?P<rel>[A-Z]+)?(?P<fam>\d+)(?P<sub>[a-z0-9.]*))(?:_(?P<taxid>\d+))?")
 sub_re = re.compile(r"^(?P<nr>\d+)(?P<char>[a-z]+)$")
 
 

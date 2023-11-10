@@ -68,57 +68,38 @@ class CacheBuilderWorker(mp.Process):
                 for job in iter(timelimit_get_from_in_queue, None):
                     fun, params = job
                     res = getattr(self, fun)(*params)
-                    logger.debug("result for job ({}) ready".format(job))
+                    logger.debug("result for job (%s) ready", job)
                     self.out_queue.put((job, res))
             except Empty:
-                logger.warning(
-                    "No item nor termination signal received in Queue. Giving up"
-                )
+                logger.warning("No item nor termination signal received in Queue. Giving up")
                 logger.exception("Work-queue is empty")
             self.out_queue.put("DONE")
         except KeyboardInterrupt:
             logger.info("received interrupt. Terminating")
         self.db.close()
-        logger.info("terminating worker process {}".format(self.name))
+        logger.info("terminating worker process %s", self.name)
 
     def load_fam_members(self, fam):
         members = []
-        vals = {
-            k: self.db.format_hogid(x).encode("utf-8")
-            for k, x in zip(("fam", "fam_next"), (fam, fam + 1))
-        }
+        vals = {k: self.db.format_hogid(x).encode("utf-8") for k, x in zip(("fam", "fam_next"), (fam, fam + 1))}
         for row in self.h5.get_node("/Protein/Entries").where(
             "(fam <= OmaHOG) & (OmaHOG < fam_next)",
             condvars=vals,
         ):
-            members.append(
-                Protein(row["EntryNr"], row["OmaHOG"].decode(), row["OmaGroup"])
-            )
+            members.append(Protein(row["EntryNr"], row["OmaHOG"].decode(), row["OmaGroup"]))
         return members
 
     def load_vps(self, entry_nr):
         return self.db.get_vpairs(entry_nr)["EntryNr2"]
 
     def load_grp_members(self, group):
-        return [
-            row["EntryNr"]
-            for row in self.h5.get_node("/Protein/Entries").where(
-                "OmaGroup == {:d}".format(group)
-            )
-        ]
+        return [row["EntryNr"] for row in self.h5.get_node("/Protein/Entries").where("OmaGroup == {:d}".format(group))]
 
     def analyse_fam(self, fam, rng=None):
-        logger.debug("analysing family {}".format(fam))
+        logger.debug("analysing family %s", fam)
         fam_members = self.load_fam_members(fam)
-        logger.debug(
-            "family {} with {} members; doing range {}".format(
-                fam, len(fam_members), rng
-            )
-        )
-        grp_members = {
-            grp: set(self.load_grp_members(grp))
-            for grp in set(z.group for z in fam_members if z.group > 0)
-        }
+        logger.debug("family {} with {} members; doing range {}".format(fam, len(fam_members), rng))
+        grp_members = {grp: set(self.load_grp_members(grp)) for grp in set(z.group for z in fam_members if z.group > 0)}
         nr_memb = len(fam_members)
         fam_iter = iter(fam_members)
         if rng is not None:
@@ -154,7 +135,7 @@ class CacheBuilderWorker(mp.Process):
         return counts
 
     def analyse_singleton(self, entry_nr, group_nr):
-        logger.debug("analysing singleton {} (grp {})".format(entry_nr, group_nr))
+        logger.debug("analysing singleton %s (grp %s)", entry_nr, group_nr)
         vps = set(self.load_vps(entry_nr))
         grp_members = set([])
         if group_nr > 0:
@@ -167,9 +148,9 @@ class CacheBuilderWorker(mp.Process):
 
     def compute_familydata_json(self, fam):
         famhog_id = self.db.format_hogid(fam)
-        logger.debug("analysing family {}".format(fam))
+        logger.debug("analysing family %s", fam)
         fam_members = self.load_fam_members(fam)
-        logger.debug("family {} with {} members".format(fam, len(fam_members)))
+        logger.debug("family %s with %d members", fam, len(fam_members))
         if len(fam_members) > 50000:
             # this will likely fail to compute the MDS for so many points
             # let's skip it for now.
@@ -181,7 +162,7 @@ class CacheBuilderWorker(mp.Process):
                     gene_similarity_vals,
                 ) = self.db.get_gene_similarities_hog(famhog_id)
             except Exception as e:
-                print("gene_similarity failed for {}: {}".format(fam, e))
+                logger.error("gene_similarity failed for %s: %s", fam, e)
                 raise
         final_json_output = []
         for p1 in fam_members:
@@ -223,12 +204,8 @@ class ResultHandler:
             return res
 
         with tables.open_file(self.cache_file) as cache:
-            self.ortholog_count_result = resilient_load_data_node(
-                cache, "/ortholog_counts"
-            )
-            self.family_json_offset = resilient_load_data_node(
-                cache, "/family_json/offset"
-            )
+            self.ortholog_count_result = resilient_load_data_node(cache, "/ortholog_counts")
+            self.family_json_offset = resilient_load_data_node(cache, "/family_json/offset")
             self.buffer_offset = len(cache.root.family_json.buffer)
             self.jobs = cache.root.pending_jobs.read(0)[0]
 
@@ -243,23 +220,16 @@ class ResultHandler:
         else:
             raise ValueError("Unexpected result type")
         self.jobs.remove(job)
-        if (
-            time.time() - self._last_cache_timestamp > 300
-            or sum(len(z) for z in self.in_memory_json_buffer) > 100e6
-        ):
+        if time.time() - self._last_cache_timestamp > 300 or sum(len(z) for z in self.in_memory_json_buffer) > 100e6:
             self.write_to_disk()
 
     def store_familydata_json_result(self, job, result):
         fam = job[1][0]
         encoded_json = result.encode("utf-8")
-        json_as_np = numpy.ndarray(
-            (len(encoded_json),), buffer=encoded_json, dtype=tables.StringAtom(1)
-        )
+        json_as_np = numpy.ndarray((len(encoded_json),), buffer=encoded_json, dtype=tables.StringAtom(1))
         self.in_memory_json_buffer.append(json_as_np)
         self.family_json_offset.append(
-            numpy.array(
-                [(fam, self.buffer_offset, len(encoded_json))], dtype=self._offset_dtype
-            )
+            numpy.array([(fam, self.buffer_offset, len(encoded_json))], dtype=self._offset_dtype)
         )
         self.buffer_offset += len(encoded_json)
 
@@ -288,29 +258,21 @@ class ResultHandler:
                 buf.append(el)
             buf.flush()
             if len(self.family_json_offset) > 0:
-                off = numpy.lib.recfunctions.stack_arrays(
-                    self.family_json_offset, usemask=False
-                )
+                off = numpy.lib.recfunctions.stack_arrays(self.family_json_offset, usemask=False)
                 h5.create_table("/family_json", "offset", None, obj=off)
 
             if len(self.ortholog_count_result) > 0:
-                cnts = numpy.lib.recfunctions.stack_arrays(
-                    self.ortholog_count_result, usemask=False
-                )
+                cnts = numpy.lib.recfunctions.stack_arrays(self.ortholog_count_result, usemask=False)
                 h5.create_table("/", "ortholog_counts", ProteinCacheInfo, obj=cnts)
 
             a = h5.create_vlarray("/", "pending_jobs", tables.ObjectAtom())
             a.append(self.jobs)
             h5.flush()
             if len(buf) != self.buffer_offset:
-                raise DBConsistencyError(
-                    "buffer has unexpeced length: {}vs{}".format(
-                        len(buf), self.buffer_offset
-                    )
-                )
+                raise DBConsistencyError("buffer has unexpeced length: {}vs{}".format(len(buf), self.buffer_offset))
             self.in_memory_json_buffer = []
             self._last_cache_timestamp = time.time()
-            logger.info("finished writing milestone to {}".format(self.cache_file))
+            logger.info("finished writing milestone to %s", self.cache_file)
 
 
 def build_cache(db_fpath, nr_procs=None, from_cache=None):
@@ -329,24 +291,14 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
         nr_fams = db.get_nr_toplevel_hogs()
         singletons = [
             (int(r["EntryNr"]), int(r["OmaGroup"]))
-            for r in db.get_hdf5_handle()
-            .get_node("/Protein/Entries")
-            .where('OmaHOG == b""')
+            for r in db.get_hdf5_handle().get_node("/Protein/Entries").where('OmaHOG == b""')
         ]
 
-        logger.info(
-            "found {} hog and {} singleton jobs to be computed".format(
-                nr_fams, len(singletons)
-            )
-        )
+        logger.info("found {} hog and {} singleton jobs to be computed".format(nr_fams, len(singletons)))
         jobs = [("analyse_fam", (fam + 1,)) for fam in range(nr_fams)]
         jobs.extend([("compute_familydata_json", (fam + 1,)) for fam in range(nr_fams)])
         jobs.extend([("analyse_singleton", singleton) for singleton in singletons])
-        logger.info(
-            "nr of jobs: {} (expected {})".format(
-                len(jobs), 2 * nr_fams + len(singletons)
-            )
-        )
+        logger.info("nr of jobs: {} (expected {})".format(len(jobs), 2 * nr_fams + len(singletons)))
         result_handler.add_jobs(jobs)
     db.close()
 
@@ -371,18 +323,14 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
         for reply in tqdm(iter(result_queue.get, None), total=len(jobs)):
             if reply == "DONE":
                 finished += 1
-                logger.info("{} workers finished".format(finished))
+                logger.info("%d workers finished", finished)
                 if finished == nr_procs:
                     if len(pending_jobs) > 0:
-                        logger.error(
-                            "still {} pending jobs...: {}".format(
-                                len(pending_jobs), pending_jobs
-                            )
-                        )
+                        logger.error("still %d pending jobs...: %s", len(pending_jobs), pending_jobs)
                     break
             else:
                 job, res = reply
-                logger.debug("received result for job {})".format(job))
+                logger.debug("received result for job %s", job)
                 result_handler.handle_result(job, res)
         result_handler.write_to_disk()
         logger.info("exit receiver loop. joining workers...")
@@ -394,11 +342,9 @@ def build_cache(db_fpath, nr_procs=None, from_cache=None):
         result_handler.write_to_disk()
         sys.exit(99)
 
-    ret = numpy.lib.recfunctions.stack_arrays(
-        result_handler.ortholog_count_result, usemask=False
-    )
+    ret = numpy.lib.recfunctions.stack_arrays(result_handler.ortholog_count_result, usemask=False)
     ret.sort(order="EntryNr")
-    logger.info("sorted results: {}".format(ret))
+    logger.info("sorted results: %s", ret)
     assert check_all_there(nr_entries, ret)
     return ret
 
@@ -407,7 +353,7 @@ def check_all_there(nr_prots, cache):
     if len(cache) == nr_prots:
         return True
     missings = set(range(1, nr_prots + 1)) - set(cache["EntryNr"])
-    logger.error("Missing cache value for {}".format(missings))
+    logger.error("Missing cache value for %s", missings)
     return False
 
 
@@ -435,15 +381,11 @@ def update_hdf5_from_cachefile(db_fpath, tmp_cache):
     ortholog_cnts_cache_path = "/Protein/OrthologsCountCache"
     path, name = split(ortholog_cnts_cache_path)
 
-    with tables.open_file(db_fpath, "a") as h5, tables.open_file(
-        tmp_cache, "r"
-    ) as cache_h5:
+    with tables.open_file(db_fpath, "a") as h5, tables.open_file(tmp_cache, "r") as cache_h5:
         cached_cnts = cache_h5.get_node("/ortholog_counts").read()
         cached_cnts.sort(order="EntryNr")
 
-        tab = h5.create_table(
-            path, name, ProteinCacheInfo, createparents=True, obj=cached_cnts
-        )
+        tab = h5.create_table(path, name, ProteinCacheInfo, createparents=True, obj=cached_cnts)
         tab.colinstances["EntryNr"].create_csindex()
 
         json_off = cache_h5.get_node("/family_json/offset").read()
@@ -454,14 +396,8 @@ def update_hdf5_from_cachefile(db_fpath, tmp_cache):
                 raise DBConsistencyError("table not properly ordered")
             tab[fam - 1]["FamDataJsonOffset"] = off
             tab[fam - 1]["FamDataJsonLength"] = length
-        h5.root.RootHOG.MetaData.modify_column(
-            column=tab["FamDataJsonOffset"], colname="FamDataJsonOffset"
-        )
-        h5.root.RootHOG.MetaData.modify_column(
-            column=tab["FamDataJsonLength"], colname="FamDataJsonLength"
-        )
+        h5.root.RootHOG.MetaData.modify_column(column=tab["FamDataJsonOffset"], colname="FamDataJsonOffset")
+        h5.root.RootHOG.MetaData.modify_column(column=tab["FamDataJsonLength"], colname="FamDataJsonLength")
 
         json_in_buf = cache_h5.root.family_json.buffer
-        json_in_buf._f_copy(
-            h5.root.RootHOG, "JsonBuffer", expectedrows=len(json_in_buf)
-        )
+        json_in_buf._f_copy(h5.root.RootHOG, "JsonBuffer", expectedrows=len(json_in_buf))

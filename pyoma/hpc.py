@@ -10,15 +10,9 @@ class JobArray(object):
     def __init__(self, nr_procs, this_proc_nr):
         self.nr_procs = int(nr_procs)
         self.this_proc_nr = int(this_proc_nr)
-        if (
-            self.nr_procs < 1
-            or self.this_proc_nr < 1
-            or self.this_proc_nr > self.nr_procs
-        ):
+        if self.nr_procs < 1 or self.this_proc_nr < 1 or self.this_proc_nr > self.nr_procs:
             raise ValueError(
-                "cannot determine HPC parallel job ids: nr_procs={}, this_proc_nr={}".format(
-                    nr_procs, this_proc_nr
-                )
+                "cannot determine HPC parallel job ids: nr_procs={}, this_proc_nr={}".format(nr_procs, this_proc_nr)
             )
 
     def is_my_job(self, chunk):
@@ -26,13 +20,11 @@ class JobArray(object):
         h = hashlib.md5(chunk)
         as_int = int(h.hexdigest(), 16)
         res = (as_int % self.nr_procs) == (self.this_proc_nr - 1)
-        logger.debug("chunk {} to be processed: {}".format(chunk, res))
+        logger.debug("chunk %s to be processed: %s", chunk, res)
         return res
 
     def __repr__(self):
-        return "{}({},{})".format(
-            self.__class__.__name__, self.nr_procs, self.this_proc_nr
-        )
+        return "{}({},{})".format(self.__class__.__name__, self.nr_procs, self.this_proc_nr)
 
     def __str__(self):
         return "Jobarray process {} of {}".format(self.this_proc_nr, self.nr_procs)

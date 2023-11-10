@@ -151,9 +151,7 @@ _tables_file._open_files = ThreadsafeFileRegistry()
 ####
 
 
-def count_rows_of_index_column_with_value(
-    tab: Union[str, tables.Table], col: str, start, end=None
-):
+def count_rows_of_index_column_with_value(tab: Union[str, tables.Table], col: str, start, end=None):
     idx = tab.colindexes[col]
     stop = end if end is not None else start
     return idx.search((start, stop))
@@ -169,19 +167,13 @@ def _get_limited_synteny_graph(
     G.add_edges_from(edges_data)
     if ref_hog_idx is not None:
         try:
-            neighbors = [ref_hog_idx] + [
-                v for u, v in nx.bfs_edges(G, source=ref_hog_idx, depth_limit=steps)
-            ]
+            neighbors = [ref_hog_idx] + [v for u, v in nx.bfs_edges(G, source=ref_hog_idx, depth_limit=steps)]
         except nx.exception.NetworkXError as e:
             logger.error(
                 "Trying to access a non-stored HOG in the ancestral synteny graph: "
-                "hog_row: {}, Size of Graph: N={}, E={}".format(
-                    ref_hog_idx, len(G), len(G.edges)
-                )
+                "hog_row: {}, Size of Graph: N={}, E={}".format(ref_hog_idx, len(G), len(G.edges))
             )
-            raise DBConsistencyError(
-                "Cannot find HogIdx {}  in Ancestral synteny graph".format(ref_hog_idx)
-            )
+            raise DBConsistencyError("Cannot find HogIdx {}  in Ancestral synteny graph".format(ref_hog_idx))
         S = G.subgraph(neighbors)
     else:
         if isinstance(hog_tab, dict):
@@ -247,7 +239,7 @@ class Database(object):
 
     def __init__(self, db):
         if isinstance(db, str):
-            logger.info("opening {} for read-only".format(db))
+            logger.info("opening %s for read-only", db)
             self.db = tables.open_file(db, "r")
             self._close_fh = True
         elif isinstance(db, (tables.File, tables.file.File)):
@@ -260,23 +252,15 @@ class Database(object):
             lib_version = self.db.get_node_attr("/", "pyoma_version")
         except AttributeError:
             lib_version = "<=0.7.0"
-        logger.info(
-            "pyoma library version: {}; db written with {}".format(
-                version(), lib_version
-            )
-        )
+        logger.info("pyoma library version: {}; db written with {}".format(version(), lib_version))
 
         try:
             db_version = self.db.get_node_attr("/", "db_schema_version")
         except AttributeError:
             db_version = "1.0"
 
-        logger.info("database version: {}".format(db_version))
-        logger.info(
-            "release: {}; release_char in HOG-IDs: '{}'".format(
-                self.get_release_name(), self.release_char
-            )
-        )
+        logger.info("database version: %s", db_version)
+        logger.info("release: %s; release_char in HOG-IDs: '%s'", self.get_release_name(), self.release_char)
         if db_version != self.EXPECTED_DB_SCHEMA:
             exp_tup = self.EXPECTED_DB_SCHEMA.split(".")
             db_tup = db_version.split(".")
@@ -288,10 +272,9 @@ class Database(object):
                 )
             else:
                 logger.warning(
-                    "outdated database version, but only minor version change: "
-                    "{} != {}. Some functions might fail".format(
-                        db_version, self.EXPECTED_DB_SCHEMA
-                    )
+                    "outdated database version, but only minor version change: %s != %s. Some functions might fail",
+                    db_version,
+                    self.EXPECTED_DB_SCHEMA,
                 )
         self.db_schema_version = tuple(int(z) for z in db_version.split("."))
         self._on_close_notify = []
@@ -299,16 +282,12 @@ class Database(object):
         try:
             self.seq_search = SequenceSearch(self)
         except DBConsistencyError as e:
-            logger.exception(
-                "Cannot load SequenceSearch. Any future call to seq_search will fail!"
-            )
+            logger.exception("Cannot load SequenceSearch. Any future call to seq_search will fail!")
             self.seq_search = None
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
         genomes = [Genome(self, g) for g in self.db.root.Genome.read()]
-        self.tax = Taxonomy(
-            self.db.root.Taxonomy.read(), genomes={g.ncbi_taxon_id: g for g in genomes}
-        )
+        self.tax = Taxonomy(self.db.root.Taxonomy.read(), genomes={g.ncbi_taxon_id: g for g in genomes})
         try:
             self.desc_searcher = DescriptionSearcher(self)
         except SuffixIndexError:
@@ -327,14 +306,14 @@ class Database(object):
 
     def register_on_close(self, callback):
         self._on_close_notify.append(callback)
-        logger.debug("registered call to {} on close".format(callback))
+        logger.debug("registered call to %s on close", callback)
 
     def unregister_on_close(self, callback):
         try:
             self._on_close_notify.remove(callback)
-            logger.debug("un-register {} on close".format(callback))
+            logger.debug("un-register %s on close", callback)
         except ValueError:
-            logger.debug("could not un-register {}".format(callback))
+            logger.debug("could not un-register %s", callback)
 
     def close(self):
         for listener in self._on_close_notify:
@@ -385,9 +364,7 @@ class Database(object):
 
         :returns: GeneOntology object"""
         try:
-            fp = io.StringIO(
-                self.db.root.Ontologies.GO.read().tobytes().decode("utf-8")
-            )
+            fp = io.StringIO(self.db.root.Ontologies.GO.read().tobytes().decode("utf-8"))
         except tables.NoSuchNodeError:
             p = os.path.join(os.path.dirname(self.db.filename), "go-basic.obo")
             fp = open(p, "rt")
@@ -432,18 +409,10 @@ class Database(object):
             entry"""
         entry = self.db.root.Protein.Entries[entry_nr - 1]
         if entry["EntryNr"] != entry_nr:
-            logger.warning(
-                "EntryNr {} not at position {}. Using index instead".format(
-                    entry_nr, entry_nr - 1
-                )
-            )
-            entry = self.db.root.Protein.Entries.read_where(
-                "EntryNr == {:d}".format(entry_nr)
-            )
+            logger.warning("EntryNr {} not at position {}. Using index instead".format(entry_nr, entry_nr - 1))
+            entry = self.db.root.Protein.Entries.read_where("EntryNr == {:d}".format(entry_nr))
             if len(entry) != 1:
-                raise ValueError(
-                    "there are {} entries with entry_nr {}".format(len(entry), entry_nr)
-                )
+                raise ValueError("there are {} entries with entry_nr {}".format(len(entry), entry_nr))
             entry = entry[0]
         return entry
 
@@ -469,21 +438,11 @@ class Database(object):
                 prefix = ""
             rel = m.group("rel").decode() if m.group("rel") else ""
             if rel != self.release_char:
-                raise DBConsistencyError(
-                    "release_char does not match HOG-ids: {} vs {}".format(
-                        self.release_char, rel
-                    )
-                )
+                raise DBConsistencyError("release_char does not match HOG-ids: {} vs {}".format(self.release_char, rel))
             fmt = "{}{}{{:{}d}}".format(prefix, rel, "07" if is_padded else "")
-            self._re_fam = re.compile(
-                r"{}(?P<rel>[A-Z]+)?(?P<fam>\d+)".format(prefix).encode("ascii")
-            )
+            self._re_fam = re.compile(r"{}(?P<rel>[A-Z]+)?(?P<fam>\d+)".format(prefix).encode("ascii"))
             self.format_hogid = lambda fam: fmt.format(fam)
-            logger.info(
-                "setting HOG ID schema: re_fam: {}, hog_fmt: {}".format(
-                    self._re_fam, fmt
-                )
-            )
+            logger.info("setting HOG ID schema: re_fam: {}, hog_fmt: {}".format(self._re_fam, fmt))
             return
         raise DBConsistencyError("no protein in a hog")
 
@@ -491,9 +450,7 @@ class Database(object):
         """return all protein entries of a genome"""
         rng = self.id_mapper["OMA"].genome_range(genome)
         prot_tab = self.get_hdf5_handle().get_node("/Protein/Entries")
-        return read_table_where(
-            prot_tab, "(EntryNr >= {}) & (EntryNr <= {})".format(rng[0], rng[1])
-        )
+        return read_table_where(prot_tab, "(EntryNr >= {}) & (EntryNr <= {})".format(rng[0], rng[1]))
 
     def main_isoforms(self, genome):
         """returns the proteins that are the main isoforms of a genome.
@@ -519,9 +476,7 @@ class Database(object):
         try:
             first = next(it)
         except StopIteration:
-            return numpy.array(
-                [], dtype=self.get_hdf5_handle().get_node("/Protein/Entries").dtype
-            )
+            return numpy.array([], dtype=self.get_hdf5_handle().get_node("/Protein/Entries").dtype)
         return numpy.fromiter(
             map(lambda x: x.fetch_all_fields(), itertools.chain([first], it)),
             dtype=first.table.dtype,
@@ -588,28 +543,19 @@ class Database(object):
                 if len(k) == 1:
                     en = all_genes[k]
                 else:
-                    raise InvalidId(
-                        f"{center_entry} unknown for {gs['UniProtSpeciesCode']}"
-                    )
+                    raise InvalidId(f"{center_entry} unknown for {gs['UniProtSpeciesCode']}")
             else:
                 en = self.ensure_entry(self.id_resolver.resolve(center_entry))
-                if (
-                    en["AltSpliceVariant"] > 0
-                    and en["AltSpliceVariant"] != en["EntryNr"]
-                ):
+                if en["AltSpliceVariant"] > 0 and en["AltSpliceVariant"] != en["EntryNr"]:
                     en = self.ensure_entry(en["AltSpliceVariant"])
             try:
                 idx = numpy.where(all_genes["EntryNr"] == en["EntryNr"])[0][0]
                 ref = all_genes[idx]
             except IndexError:
                 identified_genome = gs["UniProtSpeciesCode"].decode()
-                raise InvalidId(
-                    f"Center gene {center_entry} is not a valid for genome {identified_genome}"
-                )
+                raise InvalidId(f"Center gene {center_entry} is not a valid for genome {identified_genome}")
             all_genes = all_genes[idx - window : idx + window + 1]
-            all_genes = all_genes[
-                numpy.where(all_genes["Chromosome"] == ref["Chromosome"])
-            ]
+            all_genes = all_genes[numpy.where(all_genes["Chromosome"] == ref["Chromosome"])]
         oma_ids = list(
             map(
                 lambda x: f"{gs['UniProtSpeciesCode'].decode()}{x - gs['EntryOff']:05d}",
@@ -640,11 +586,7 @@ class Database(object):
         return self._get_pw_tab(entry_nr, "VPairs")
 
     def _get_pw_tab(self, entry_nr, subtab):
-        genome = (
-            self.id_mapper["OMA"]
-            .genome_of_entry_nr(entry_nr)["UniProtSpeciesCode"]
-            .decode()
-        )
+        genome = self.id_mapper["OMA"].genome_of_entry_nr(entry_nr)["UniProtSpeciesCode"].decode()
         return self.db.get_node("/PairwiseRelation/{}/{}".format(genome, subtab))
 
     def nr_ortholog_relations(self, entry_nr):
@@ -686,20 +628,12 @@ class Database(object):
         pwtab = self._get_pw_tab(entry_nr, "within")
         homolog_typ_nr = pwtab.get_enum("RelType")["homeolog"]
         try:
-            cnt = count_elements(
-                pwtab.where(
-                    "(EntryNr1=={:d}) & (RelType == {:d})".format(
-                        entry_nr, homolog_typ_nr
-                    )
-                )
-            )
+            cnt = count_elements(pwtab.where("(EntryNr1=={:d}) & (RelType == {:d})".format(entry_nr, homolog_typ_nr)))
         except (TypeError, ValueError):
             cnt = 0
         return cnt
 
-    def _get_pw_data(
-        self, entry_nr, tab, target_range=None, typ_filter=None, extra_cols=None
-    ):
+    def _get_pw_data(self, entry_nr, tab, target_range=None, typ_filter=None, extra_cols=None):
         if isinstance(entry_nr, tuple):
             query = "(EntryNr1 >= {:d}) & (EntryNr1 <= {:d})".format(*entry_nr)
         else:
@@ -818,9 +752,7 @@ class Database(object):
             if "." in prefix and prefix[-1].isdigit():
                 return False
             # count number of genes in query genome that are co-orthologs (== having the prefix)
-            cnts = numpy.char.startswith(
-                hogids_of_genes_in_query_genome, prefix.encode("utf-8")
-            ).sum()
+            cnts = numpy.char.startswith(hogids_of_genes_in_query_genome, prefix.encode("utf-8")).sum()
             return cnts
 
         try:
@@ -831,8 +763,7 @@ class Database(object):
             hog_member = self.db.root.Protein.Entries[0:0]
         hogids_of_genes_in_query_genome = hog_member[
             numpy.where(
-                (hog_member["EntryNr"] >= genome_entry_range[0])
-                & (hog_member["EntryNr"] < genome_entry_range[1])
+                (hog_member["EntryNr"] >= genome_entry_range[0]) & (hog_member["EntryNr"] < genome_entry_range[1])
             )
         ]["OmaHOG"]
         query_genome_genes_cnt = numpy.array(
@@ -841,17 +772,14 @@ class Database(object):
         )
         mask = numpy.asarray(query_genome_genes_cnt, bool)
         target_genomes = [
-            self.id_mapper["OMA"].genome_of_entry_nr(o["EntryNr"])["NCBITaxonId"]
-            for o in hog_member[mask]
+            self.id_mapper["OMA"].genome_of_entry_nr(o["EntryNr"])["NCBITaxonId"] for o in hog_member[mask]
         ]
         targ_genome_genes_cnt = collections.Counter(target_genomes)
         induced_orthologs = numpy.lib.recfunctions.append_fields(
             hog_member[mask],
             names="RelType",
             data=[
-                "{}:{}".format(
-                    "m" if cnt_a > 1 else 1, "n" if targ_genome_genes_cnt[b] > 1 else 1
-                ).encode("utf-8")
+                "{}:{}".format("m" if cnt_a > 1 else 1, "n" if targ_genome_genes_cnt[b] > 1 else 1).encode("utf-8")
                 for cnt_a, b in zip(query_genome_genes_cnt[mask], target_genomes)
             ],
         )
@@ -869,9 +797,7 @@ class Database(object):
         entry = self.ensure_entry(entry)
         genome = self.id_mapper["OMA"].genome_of_entry_nr(entry["EntryNr"])
         lineage = self.tax.get_parent_taxa(genome["NCBITaxonId"])["Name"]
-        lineage = numpy.fromiter(
-            filter(lambda x: x in self.tax.all_hog_levels, lineage), dtype=lineage.dtype
-        )
+        lineage = numpy.fromiter(filter(lambda x: x in self.tax.all_hog_levels, lineage), dtype=lineage.dtype)
         lineage_sorter = numpy.argsort(lineage)
         try:
             fam = self.hog_family(entry)
@@ -897,9 +823,7 @@ class Database(object):
                 k = prefix.rfind(".")
                 hog_id = prefix[:k].encode("ascii")
                 cand_levels = levels[numpy.where(levels["ID"] == hog_id)]
-                sortidx = lineage.searchsorted(
-                    cand_levels["Level"], sorter=lineage_sorter
-                )
+                sortidx = lineage.searchsorted(cand_levels["Level"], sorter=lineage_sorter)
                 lin_idx = numpy.take(lineage_sorter, sortidx, mode="clip")
                 mask = lineage[lin_idx] == cand_levels["Level"]
                 # we take the first diverged lineage, meaning the duplication happened
@@ -920,9 +844,7 @@ class Database(object):
         )
         return paralogs
 
-    def get_hog_induced_orthologs_between_genome_pair(
-        self, g1, g2, return_cardinality=False, return_omagroup=False
-    ):
+    def get_hog_induced_orthologs_between_genome_pair(self, g1, g2, return_cardinality=False, return_omagroup=False):
         """Returns the HOG-induced pairwise orthologs between two genomes.
 
         The method returns a numpy structured array with EntryNr1, EntryNr2 and HogID columns.
@@ -946,30 +868,18 @@ class Database(object):
 
         def load_prot_dataframe(g):
             genome = g if isinstance(g, Genome) else Genome(self, g)
-            prots = pandas.DataFrame(
-                numpy.sort(
-                    self.main_isoforms(genome.uniprot_species_code), order="OmaHOG"
-                )
-            )
+            prots = pandas.DataFrame(numpy.sort(self.main_isoforms(genome.uniprot_species_code), order="OmaHOG"))
             col_keep = {"EntryNr", "OmaHOG", "OmaGroup", "CanonicalId"}
             prots.drop(columns=set(prots.columns) - col_keep, inplace=True)
-            prots["Fam"] = prots["OmaHOG"].apply(
-                lambda x: 0 if x == b"" else self.parse_hog_id(x)
-            )
-            prots.drop(
-                prots[prots.Fam == 0].index, inplace=True
-            )  # remove prots that don't belong to a hog
+            prots["Fam"] = prots["OmaHOG"].apply(lambda x: 0 if x == b"" else self.parse_hog_id(x))
+            prots.drop(prots[prots.Fam == 0].index, inplace=True)  # remove prots that don't belong to a hog
             return prots
 
         prots1 = load_prot_dataframe(g1)
         prots2 = load_prot_dataframe(g2)
-        joined_fam = prots1.join(
-            prots2.set_index("Fam"), on="Fam", how="inner", lsuffix="1", rsuffix="2"
-        )
+        joined_fam = prots1.join(prots2.set_index("Fam"), on="Fam", how="inner", lsuffix="1", rsuffix="2")
         joined_fam["HogID"] = joined_fam.apply(
-            lambda row: are_orthologous(
-                row["OmaHOG1"], row["OmaHOG2"], return_group=True
-            ),
+            lambda row: are_orthologous(row["OmaHOG1"], row["OmaHOG2"], return_group=True),
             axis=1,
         )
         orthologs = joined_fam[joined_fam["HogID"] != False].copy()
@@ -980,9 +890,7 @@ class Database(object):
             e2_cnts = orthologs["EntryNr2"].value_counts()
             orthologs.loc[:, "RelType"] = orthologs.apply(
                 lambda r: (
-                    ("1" if e2_cnts[r.EntryNr2] == 1 else "m")
-                    + ":"
-                    + ("1" if e1_cnts[r.EntryNr1] == 1 else "n")
+                    ("1" if e2_cnts[r.EntryNr2] == 1 else "m") + ":" + ("1" if e1_cnts[r.EntryNr1] == 1 else "n")
                 ).encode("ascii"),
                 axis=1,
             )
@@ -995,9 +903,7 @@ class Database(object):
             return_cols.append("OmaGroup")
         orthologs = orthologs[return_cols]
         typ = orthologs.dtypes
-        return numpy.array(
-            [tuple(x) for x in orthologs.values], dtype=list(zip(typ.index, typ))
-        )
+        return numpy.array([tuple(x) for x in orthologs.values], dtype=list(zip(typ.index, typ)))
 
     def neighbour_genes(self, entry_nr, window=1):
         """Returns neighbor genes around a query gene.
@@ -1092,19 +998,11 @@ class Database(object):
             levels = hoglevel_tab.read(0, 0, field=field)
         except tables.NoSuchNodeError:
             # fall back to index based search
-            levels = self.db.root.HogLevel.read_where(
-                "(Fam=={})".format(fam_nr), field=field
-            )
-        logger.debug(
-            "retrieving levels for family {:d} took {:.7f} sec".format(
-                fam_nr, time.time() - t0
-            )
-        )
+            levels = self.db.root.HogLevel.read_where("(Fam=={})".format(fam_nr), field=field)
+        logger.debug("retrieving levels for family {:d} took {:.7f} sec".format(fam_nr, time.time() - t0))
         return levels
 
-    def get_subhogs(
-        self, hog_id, level=None, include_subids=False, include_leaf_levels=True
-    ):
+    def get_subhogs(self, hog_id, level=None, include_subids=False, include_leaf_levels=True):
         """Get all the (sub)hogs for a given hog_id
 
         This method returns an generator of :class:`models.HOG` instances,
@@ -1146,29 +1044,19 @@ class Database(object):
                         pos
                         for i, pos in enumerate(idx)
                         if 0 <= pos < len(subtax.tax_table)
-                        and subtax.tax_table["NCBITaxonId"][pos]
-                        == subtax.tax_table["ParentTaxonId"][i]
+                        and subtax.tax_table["NCBITaxonId"][pos] == subtax.tax_table["ParentTaxonId"][i]
                     )
-                    internal_node_idx = numpy.fromiter(
-                        internal_node_idx, dtype="i4", count=len(internal_node_idx)
-                    )
+                    internal_node_idx = numpy.fromiter(internal_node_idx, dtype="i4", count=len(internal_node_idx))
                     subtax.tax_table = subtax.tax_table[internal_node_idx]
                 children = set(n["Name"] for n in subtax.tax_table)
-                children.remove(
-                    level.encode("utf-8") if isinstance(level, str) else level
-                )
+                children.remove(level.encode("utf-8") if isinstance(level, str) else level)
             except KeyError as e:
                 raise ValueError(f"invalid level: {level}") from e
         elif not include_leaf_levels:
             children = self.tax.all_hog_levels
 
         if include_subids:
-            condvars = {
-                v: k
-                for v, k in zip(
-                    ("hogid_low", "hogid_high"), self._hog_lex_range(hog_id)
-                )
-            }
+            condvars = {v: k for v, k in zip(("hogid_low", "hogid_high"), self._hog_lex_range(hog_id))}
             query = "(ID >= hogid_low) & (ID < hogid_high)"
         else:
             query = "ID == hogid"
@@ -1176,9 +1064,7 @@ class Database(object):
 
         for row in self.db.root.HogLevel.where(query, condvars=condvars):
             hog = row.fetch_all_fields()
-            if (
-                (level is None or level in ("LUCA", b"LUCA")) and include_leaf_levels
-            ) or hog["Level"] in children:
+            if ((level is None or level in ("LUCA", b"LUCA")) and include_leaf_levels) or hog["Level"] in children:
                 yield HOG(self, hog)
 
     def get_subhogids_at_level(self, fam_nr, level):
@@ -1250,12 +1136,8 @@ class Database(object):
         parent_pos = {b"LUCA": -1}
         if ref_hog["Level"] != b"LUCA":
             taxnode_of_level = self.tax.get_taxnode_from_name_or_taxid(ref_hog["Level"])
-            parent_taxnodes = self.tax.get_parent_taxa(
-                taxnode_of_level[0]["NCBITaxonId"]
-            )
-            parent_pos.update(
-                {lev: pos for pos, lev in enumerate(parent_taxnodes["Name"][::-1])}
-            )
+            parent_taxnodes = self.tax.get_parent_taxa(taxnode_of_level[0]["NCBITaxonId"])
+            parent_pos.update({lev: pos for pos, lev in enumerate(parent_taxnodes["Name"][::-1])})
         query = "(Fam == fam) & (ID <= hogid)"
         condvars = {"fam": ref_hog["Fam"], "hogid": hog_id}
         parent_hogs = [] * len(parent_pos)
@@ -1281,10 +1163,7 @@ class Database(object):
         hog_id_len = len(hog_range[0])
 
         def is_same_subhog(row):
-            return (
-                len(row["OmaHOG"]) == hog_id_len
-                or chr(row["OmaHOG"][hog_id_len]) == "."
-            )
+            return len(row["OmaHOG"]) == hog_id_len or chr(row["OmaHOG"][hog_id_len]) == "."
 
         for row in it:
             if is_same_subhog(row):
@@ -1327,9 +1206,7 @@ class Database(object):
             keep = numpy.array(
                 [
                     level.encode("ascii")
-                    in self.tax.get_parent_taxa(
-                        self.id_mapper["OMA"].genome_of_entry_nr(enr)["NCBITaxonId"]
-                    )["Name"]
+                    in self.tax.get_parent_taxa(self.id_mapper["OMA"].genome_of_entry_nr(enr)["NCBITaxonId"])["Name"]
                     for enr in members["EntryNr"]
                 ],
                 dtype=bool,
@@ -1504,13 +1381,9 @@ class Database(object):
         except DBConsistencyError:
             try:
                 taxid = self.taxid_from_level(level)
-                hog_data = self.db.get_node(
-                    "/Hogs_per_Level/tax{}".format(taxid)
-                ).read()
+                hog_data = self.db.get_node("/Hogs_per_Level/tax{}".format(taxid)).read()
             except tables.NoSuchNodeError:
-                logger.warning(
-                    "Cannot load AncestralGenome nor Hogs_per_Level. extracting from main table. SLOW!"
-                )
+                logger.warning("Cannot load AncestralGenome nor Hogs_per_Level. extracting from main table. SLOW!")
                 hog_data = self.db.get_node("/HogLevel").read_where("Level == level")
         if compare_with is None:
             return hog_data
@@ -1538,10 +1411,7 @@ class Database(object):
                 logger.warning("/RootHOG/MetaData is not ordered")
                 fam_data = metadata.read_where("FamNr == {:d}".format(fam))
             keyword = (
-                buffer[
-                    fam_data["KeywordOffset"] : fam_data["KeywordOffset"]
-                    + fam_data["KeywordLength"]
-                ]
+                buffer[fam_data["KeywordOffset"] : fam_data["KeywordOffset"] + fam_data["KeywordLength"]]
                 .tobytes()
                 .decode()
             )
@@ -1576,9 +1446,7 @@ class Database(object):
             )
         else:
             buf = self.db.root.OrthoXML.Buffer
-            rng = slice(
-                idx["HogBufferOffset"], idx["HogBufferOffset"] + idx["HogBufferLength"]
-            )
+            rng = slice(idx["HogBufferOffset"], idx["HogBufferOffset"] + idx["HogBufferLength"])
         return buf[rng].tobytes()
 
     def get_cached_family_json(self, fam) -> str:
@@ -1603,10 +1471,7 @@ class Database(object):
             logger.warning("/RootHOG/MetaData is not ordered")
             fam_data = metadata.read_where("FamNr == {:d}".format(fam))
         json_str = (
-            json_buffer[
-                fam_data["FamDataJsonOffset"] : fam_data["FamDataJsonOffset"]
-                + fam_data["FamDataJsonLength"]
-            ]
+            json_buffer[fam_data["FamDataJsonOffset"] : fam_data["FamDataJsonOffset"] + fam_data["FamDataJsonLength"]]
             .tobytes()
             .decode()
         )
@@ -1631,14 +1496,8 @@ class Database(object):
         try:
             return self.db.get_node("/AncestralGenomes/tax{}".format(taxid_of_level))
         except tables.NoSuchNodeError as e:
-            logger.exception(
-                "cannot find ancestral genome node for taxid:{} ({})".format(
-                    taxid_of_level, level
-                )
-            )
-            raise DBConsistencyError(
-                f"Ancestral genome node not found: {taxid_of_level}"
-            )
+            logger.exception("cannot find ancestral genome node for taxid:{} ({})".format(taxid_of_level, level))
+            raise DBConsistencyError(f"Ancestral genome node not found: {taxid_of_level}")
 
     def get_syntentic_hogs(self, level, hog_id, steps=2):
         import warnings
@@ -1676,13 +1535,8 @@ class Database(object):
             evidence = evidence_enum[evidence]
         except KeyError:
             raise ValueError(f"Invalid evidence value {evidence}")
-        edge_data = read_table_where(
-            ancestral_node.Synteny, "Evidence <= {}".format(evidence)
-        )
-        edges = (
-            (e[0], e[1], {"weight": int(e[2]), "evidence": evidence_enum(e[3])})
-            for e in edge_data
-        )
+        edge_data = read_table_where(ancestral_node.Synteny, "Evidence <= {}".format(evidence))
+        edges = ((e[0], e[1], {"weight": int(e[2]), "evidence": evidence_enum(e[3])}) for e in edge_data)
         if hog_id is not None:
             hog_row = self.get_hog(hog_id, tab=ancestral_node.Hogs, field="_NROW")
             hogs = ancestral_node.Hogs
@@ -1695,15 +1549,9 @@ class Database(object):
     def _get_syntenic_hogs_obsolete_data(self, hog_id, level, steps=2):
         taxid_of_level = self.taxid_from_level(level)
         try:
-            edge_data = self.db.get_node(
-                "/AncestralSynteny/tax{}".format(taxid_of_level)
-            ).read()
+            edge_data = self.db.get_node("/AncestralSynteny/tax{}".format(taxid_of_level)).read()
         except tables.NoSuchNodeError as e:
-            logger.exception(
-                "cannot find ancestral synteny data for taxid:{} ({})".format(
-                    taxid_of_level, level
-                )
-            )
+            logger.exception("cannot find ancestral synteny data for taxid:{} ({})".format(taxid_of_level, level))
             edge_data = []
         edges = ((e[0], e[1], {"weight": e[2], "evidence": "any"}) for e in edge_data)
 
@@ -1814,9 +1662,7 @@ class Database(object):
         # 8O With (or) From
         df["With"] = ""
         # 9R Aspect
-        df["Aspect"] = df["GO_ID"].apply(
-            lambda t: GOAspect.to_char(self.gene_ontology.term_by_id(t).aspect)
-        )
+        df["Aspect"] = df["GO_ID"].apply(lambda t: GOAspect.to_char(self.gene_ontology.term_by_id(t).aspect))
         # 10O DB Object Name
         df["DB_Object_Name"] = ""
         # 11O DB Object Synonym (|Synonym)
@@ -1871,23 +1717,17 @@ class Database(object):
             if group_id == b"n/a":
                 raise InvalidId("Invalid ID (n/a) for an OMA Group")
             if not self.seq_search.contains_only_valid_chars(group_id):
-                raise InvalidId(
-                    "Invalid ID: non-amino-accids characters in Fingerprint or sequence pattern"
-                )
+                raise InvalidId("Invalid ID: non-amino-accids characters in Fingerprint or sequence pattern")
             if len(group_id) == 7:
                 # most likely a fingerprint. let's check that first
                 group_meta_tab = self.db.get_node("/OmaGroups/MetaData")
                 try:
-                    e = next(
-                        group_meta_tab.where("(Fingerprint == og)", {"og": group_id})
-                    )
+                    e = next(group_meta_tab.where("(Fingerprint == og)", {"og": group_id}))
                     return int(e["GroupNr"])
                 except StopIteration:
                     pass
             # search in suffix array
-            entry_nrs = self.seq_search.exact_search(
-                group_id.decode(), only_full_length=False
-            )
+            entry_nrs = self.seq_search.exact_search(group_id.decode(), only_full_length=False)
             if len(entry_nrs) == 0:
                 raise InvalidId("No sequence contains search pattern")
             group_nrs = {self.entry_by_entry_nr(nr)["OmaGroup"] for nr in entry_nrs}
@@ -1895,20 +1735,10 @@ class Database(object):
             if len(group_nrs) == 1:
                 return int(group_nrs.pop())
             elif len(group_nrs) == 0:
-                raise InvalidId(
-                    "Sequence with pattern '{}' does not belong to any group".format(
-                        group_id.decode()
-                    )
-                )
+                raise InvalidId("Sequence with pattern '{}' does not belong to any group".format(group_id.decode()))
             else:
-                raise AmbiguousID(
-                    "sequence pattern matches several oma groups", candidates=group_nrs
-                )
-        raise InvalidId(
-            "Invalid type to determine OMA Group: {} (type: {})".format(
-                group_id, type(group_id)
-            )
-        )
+                raise AmbiguousID("sequence pattern matches several oma groups", candidates=group_nrs)
+        raise InvalidId("Invalid type to determine OMA Group: {} (type: {})".format(group_id, type(group_id)))
 
     def oma_group_metadata(self, group_nr):
         """get the metadata associated with an OMA Group
@@ -1919,9 +1749,7 @@ class Database(object):
 
         :param int group_nr: a numeric oma group id."""
         if not isinstance(group_nr, (int, numpy.integer)) or group_nr < 0:
-            raise InvalidId(
-                "Invalid group nr: {} (type: {})".format(group_nr, type(group_nr))
-            )
+            raise InvalidId("Invalid group nr: {} (type: {})".format(group_nr, type(group_nr)))
         meta_tab = self.db.get_node("/OmaGroups/MetaData")
         try:
             e = next(meta_tab.where("GroupNr == {:d}".format(group_nr)))
@@ -1935,11 +1763,7 @@ class Database(object):
             res = {
                 "fingerprint": e["Fingerprint"].decode(),
                 "group_nr": int(e["GroupNr"]),
-                "keywords": kw_buf[
-                    e["KeywordOffset"] : e["KeywordOffset"] + e["KeywordLength"]
-                ]
-                .tobytes()
-                .decode(),
+                "keywords": kw_buf[e["KeywordOffset"] : e["KeywordOffset"] + e["KeywordLength"]].tobytes().decode(),
                 "size": grp_size,
             }
             return res
@@ -1994,39 +1818,25 @@ class Database(object):
         :param entry: the entry or entry_nr for which the sequence is requested"""
         entry = self.ensure_entry(entry)
         seqArr = self.db.get_node("/Protein/SequenceBuffer")
-        seq = seqArr[
-            entry["SeqBufferOffset"] : entry["SeqBufferOffset"]
-            + entry["SeqBufferLength"]
-            - 1
-        ]
+        seq = seqArr[entry["SeqBufferOffset"] : entry["SeqBufferOffset"] + entry["SeqBufferLength"] - 1]
         return seq.tobytes()
 
     def get_cdna(self, entry):
         """get the protein sequence of a given entry as a string"""
         entry = self.ensure_entry(entry)
         seqArr = self.db.get_node("/Protein/CDNABuffer")
-        seq = seqArr[
-            entry["CDNABufferOffset"] : entry["CDNABufferOffset"]
-            + entry["CDNABufferLength"]
-            - 1
-        ]
+        seq = seqArr[entry["CDNABufferOffset"] : entry["CDNABufferOffset"] + entry["CDNABufferLength"] - 1]
         return seq.tobytes()
 
     def get_description(self, entry):
         entry = self.ensure_entry(entry)
         descArr = self.db.get_node("/Protein/DescriptionBuffer")
-        desc = descArr[
-            entry["DescriptionOffset"] : entry["DescriptionOffset"]
-            + entry["DescriptionLength"]
-        ]
+        desc = descArr[entry["DescriptionOffset"] : entry["DescriptionOffset"] + entry["DescriptionLength"]]
         return desc.tobytes()
 
     def get_ec_annotations(self, entry_nr):
         ec_tab = self.db.get_node("/Annotations/EC")
-        return [
-            row["ECacc"].decode()
-            for row in ec_tab.where("EntryNr == {}".format(entry_nr))
-        ]
+        return [row["ECacc"].decode() for row in ec_tab.where("EntryNr == {}".format(entry_nr))]
 
     def get_release_name(self):
         return str(self.db.get_node_attr("/", "oma_version"))
@@ -2040,19 +1850,13 @@ class Database(object):
         return release
 
     def get_exons(self, entry_nr):
-        genome = (
-            self.id_mapper["OMA"]
-            .genome_of_entry_nr(entry_nr)["UniProtSpeciesCode"]
-            .decode()
-        )
+        genome = self.id_mapper["OMA"].genome_of_entry_nr(entry_nr)["UniProtSpeciesCode"].decode()
         locus_tab = self.db.get_node("/Protein/Locus/{}".format(genome))
         return read_table_where(locus_tab, "EntryNr == {}".format(entry_nr))
 
     def get_domains(self, entry_nr):
         try:
-            return read_table_where(
-                self.db.root.Annotations.Domains, "EntryNr == {:d}".format(entry_nr)
-            )
+            return read_table_where(self.db.root.Annotations.Domains, "EntryNr == {:d}".format(entry_nr))
         except ValueError as e:
             raise InvalidId("require a numeric entry id, got {}".format(entry_nr))
 
@@ -2103,18 +1907,14 @@ class Database(object):
 
         # Now get similar families and order them by similarity
         sim_fams_df = pd.DataFrame(domprev_tab[list(sim_fams.keys())])
-        sim_fams_df["sim"] = list(
-            map(lambda i: sum((sim_fams[i] & fam_da).values()), sim_fams.keys())
-        )
+        sim_fams_df["sim"] = list(map(lambda i: sum((sim_fams[i] & fam_da).values()), sim_fams.keys()))
 
         # Sort by similarity & family size
         sim_fams_df.sort_values(["sim", "FamSize"], inplace=True, ascending=False)
         sim_fams_df.reset_index(drop=True, inplace=True)
 
         # Prevalence
-        sim_fams_df["Prev"] = 100.0 * (
-            sim_fams_df["PrevCount"] / sim_fams_df["FamSize"]
-        )
+        sim_fams_df["Prev"] = 100.0 * (sim_fams_df["PrevCount"] / sim_fams_df["FamSize"])
 
         return fam_row, sim_fams_df
 
@@ -2168,9 +1968,7 @@ class Database(object):
         query = "(ECacc == ec)"
         ectab = self.get_hdf5_handle().get_node("/Annotations/EC")
         return self._fetch_entry_nrs(
-            self._iter_rows_with_entrynr_filter(
-                ectab, query, condvars={"ec", ec}, entrynr_filter=entrynr_filter
-            ),
+            self._iter_rows_with_entrynr_filter(ectab, query, condvars={"ec", ec}, entrynr_filter=entrynr_filter),
             limit,
         )
 
@@ -2209,11 +2007,7 @@ class Database(object):
         :return: Entry numbers of proteins that contain the domain id.
         :rtype: set[int]"""
 
-        vars = {
-            "dom": domain_id.encode("utf-8")
-            if isinstance(domain_id, str)
-            else domain_id
-        }
+        vars = {"dom": domain_id.encode("utf-8") if isinstance(domain_id, str) else domain_id}
         query = "(DomainId == dom)"
         domtab = self.get_hdf5_handle().get_node("/Annotations/Domains")
         return self._fetch_entry_nrs(
@@ -2255,9 +2049,7 @@ class Database(object):
         :return: Entry numbers of proteins that contain the domain id.
         :rtype: set[int]
         """
-        if (isinstance(term, str) and term.startswith("GO:")) or (
-            isinstance(term, bytes) and term.startswith(b"GO:")
-        ):
+        if (isinstance(term, str) and term.startswith("GO:")) or (isinstance(term, bytes) and term.startswith(b"GO:")):
             term = term[3:]
 
         try:
@@ -2272,9 +2064,7 @@ class Database(object):
             query += " & (Evidence == ev)"
 
         return self._fetch_entry_nrs(
-            self._iter_rows_with_entrynr_filter(
-                gotab, query, condvars=vars, entrynr_filter=entrynr_filter
-            ),
+            self._iter_rows_with_entrynr_filter(gotab, query, condvars=vars, entrynr_filter=entrynr_filter),
             limit,
         )
 
@@ -2289,9 +2079,7 @@ class Database(object):
         :return number of annotations
         :rtype int
         """
-        if (isinstance(term, str) and term.startswith("GO:")) or (
-            isinstance(term, bytes) and term.startswith(b"GO:")
-        ):
+        if (isinstance(term, str) and term.startswith("GO:")) or (isinstance(term, bytes) and term.startswith(b"GO:")):
             term = term[3:]
 
         try:
@@ -2327,9 +2115,7 @@ class Database(object):
             if cond(row):
                 yield row
 
-    def get_gene_ontology_annotations(
-        self, entry_nr, stop=None, as_dataframe=False, as_gaf=False
-    ):
+    def get_gene_ontology_annotations(self, entry_nr, stop=None, as_dataframe=False, as_gaf=False):
         """Retrieve the gene ontology annotations for an entry or entry_range
 
         The method returns the gene ontology annotations stored in the database
@@ -2358,9 +2144,7 @@ class Database(object):
                 query = "EntryNr == {:d}".format(entry_nr)
             else:
                 if not isinstance(stop, (numpy.integer, int)) or stop < entry_nr:
-                    raise TypeError(
-                        "stop argument needs to be a entry number that is larger than 'entry_nr'"
-                    )
+                    raise TypeError("stop argument needs to be a entry number that is larger than 'entry_nr'")
                 query = "(EntryNr >= {:d}) & (EntryNr < {:d})".format(entry_nr, stop)
             annots = read_table_where(self.db.root.Annotations.GeneOntology, query)
 
@@ -2396,9 +2180,7 @@ class Database(object):
         # 8O With (or) From
         df["With"] = ""
         # 9R Aspect
-        df["Aspect"] = df["GO_ID"].apply(
-            lambda t: GOAspect.to_char(self.gene_ontology.term_by_id(t).aspect)
-        )
+        df["Aspect"] = df["GO_ID"].apply(lambda t: GOAspect.to_char(self.gene_ontology.term_by_id(t).aspect))
         # 10O DB Object Name
         df["DB_Object_Name"] = ""
         # 11O DB Object Synonym (|Synonym)
@@ -2407,9 +2189,7 @@ class Database(object):
         df["DB_Object_Type"] = "protein"
         # 13R Taxon (|taxon)
         df["Taxon_ID"] = df["EntryNr"].apply(
-            lambda e: "taxon:{:d}".format(
-                self.id_mapper["Oma"].genome_of_entry_nr(e)["NCBITaxonId"]
-            )
+            lambda e: "taxon:{:d}".format(self.id_mapper["Oma"].genome_of_entry_nr(e)["NCBITaxonId"])
         )
         # 14R Date
         df["Date"] = self.get_conversion_date().strftime("%Y%m%d")
@@ -2457,9 +2237,7 @@ class Database(object):
             desc="GO-loading {}".format(hog_id),
         ):
             curr_prot_entrynr = member["EntryNr"]
-            annos = self.get_gene_ontology_annotations(
-                entry_nr=curr_prot_entrynr, as_dataframe=False
-            )
+            annos = self.get_gene_ontology_annotations(entry_nr=curr_prot_entrynr, as_dataframe=False)
 
             if len(annos) == 0:
                 go_annots_not_fetched.append(curr_prot_entrynr)
@@ -2480,9 +2258,7 @@ class Database(object):
                 total=n * (n - 1) / 2,
                 desc="sim-matrix {}".format(hog_id),
             ):
-                score = minhash_signatures[idx_map[p1]].jaccard(
-                    minhash_signatures[idx_map[p2]]
-                )
+                score = minhash_signatures[idx_map[p1]].jaccard(minhash_signatures[idx_map[p2]])
                 dist_matrix[p1][p2] = 1 - score
                 dist_matrix[p2][p1] = 1 - score
 
@@ -2516,30 +2292,20 @@ class PerGenomeMetaData(object):
             raise UnknownSpecies("UniProtSpeciesCode '{}' not known".format(genome))
 
     def get_most_similar_species(self, limit=None, group_type="OMAGroup", reverse=True):
-        overlap_groups = self.h5.get_node(
-            "/Summary/shared_{}".format(group_type.lower())
-        )[self.genome_idx, :]
+        overlap_groups = self.h5.get_node("/Summary/shared_{}".format(group_type.lower()))[self.genome_idx, :]
         key = numpy.argsort(overlap_groups)
         if reverse:
             limit = limit if limit is None else -limit - 1
             s = slice(None, limit, -1)
         else:
             s = slice(0, limit, None)
-        return [
-            (self.genomes[k].decode(), int(overlap_groups[k]))
-            for k in key[s]
-            if k != self.genome_idx
-        ]
+        return [(self.genomes[k].decode(), int(overlap_groups[k])) for k in key[s] if k != self.genome_idx]
 
     def get_least_similar_species(self, **kwargs):
         return self.get_most_similar_species(reverse=False, **kwargs)
 
     def get_nr_genes_in_group(self, group_type="OMAGroup"):
-        return int(
-            self.h5.get_node("/Summary/prots_in_{}".format(group_type.lower()))[
-                self.genome_idx
-            ]
-        )
+        return int(self.h5.get_node("/Summary/prots_in_{}".format(group_type.lower()))[self.genome_idx])
 
 
 class SequenceSearch(object):
@@ -2575,16 +2341,14 @@ class SequenceSearch(object):
             if isinstance(self.kmer_lookup, tables.link.ExternalLink):
                 self.kmer_lookup = self.kmer_lookup()
         except (AttributeError, OSError) as e:
-            raise DBConsistencyError(
-                "Suffix index for protein sequences is not available: " + str(e)
-            )
+            raise DBConsistencyError("Suffix index for protein sequences is not available: " + str(e))
         self.seq_buff = self.db.root.Protein.SequenceBuffer
         self.n_entries = len(self.db.root.Protein.Entries)
 
         # Kmer lookup arrays / kmer setup
         self.k = self.kmer_lookup._f_getattr("k")
         self.encoder = KmerEncoder(self.k)
-        logger.info("KmerLookup of size k={} loaded".format(self.k))
+        logger.info("KmerLookup of size k=%s loaded", self.k)
         self.multienv_align = None
 
     def get_entry_length(self, ii):
@@ -2624,9 +2388,7 @@ class SequenceSearch(object):
         TODO: add functionality for biopython sequence / skbio sequence.
         """
         assert type(seq) == str
-        return "".join(filter(lambda c: c in self.PROTEIN_CHARS, seq.upper())).encode(
-            "ascii"
-        )
+        return "".join(filter(lambda c: c in self.PROTEIN_CHARS, seq.upper())).encode("ascii")
 
     def _tax_filter_range(self, en, rng):
         return rng[0] <= en <= rng[1]
@@ -2665,23 +2427,15 @@ class SequenceSearch(object):
         else:
             return "exact", m
 
-    def exact_search(
-        self, seq, only_full_length=True, is_sanitised=None, entrynr_range=None
-    ):
+    def exact_search(self, seq, only_full_length=True, is_sanitised=None, entrynr_range=None):
         """
         Performs an exact match search using the suffix array.
         """
         seq = seq if is_sanitised else self._sanitise_seq(seq)
-        filt = (
-            self._tax_filter_range
-            if isinstance(entrynr_range, tuple)
-            else self._tax_filter_set
-        )
+        filt = self._tax_filter_range if isinstance(entrynr_range, tuple) else self._tax_filter_set
         nn = len(seq)
         if nn > 0:
-            z = KeyWrapper(
-                self.seq_idx, key=lambda i: self.seq_buff[i : (i + nn)].tobytes()
-            )
+            z = KeyWrapper(self.seq_idx, key=lambda i: self.seq_buff[i : (i + nn)].tobytes())
             ii = bisect_left(z, seq, lo=self.n_entries)
 
             if ii and ii < len(self.seq_idx) and (z[ii] == seq):
@@ -2705,9 +2459,7 @@ class SequenceSearch(object):
         # Nothing found.
         return []
 
-    def approx_search_no_align(
-        self, seq, is_sanitised=False, coverage=0.0, entrynr_range=None
-    ):
+    def approx_search_no_align(self, seq, is_sanitised=False, coverage=0.0, entrynr_range=None):
         """Performs a quick ranking of the best matches based on kmer index.
         The method does not compute an alignment, but just reports the
         entry number with the fraction of kmer matching better than the set coverage
@@ -2723,11 +2475,7 @@ class SequenceSearch(object):
         :returns: A list of tuples with (entry_nr, fraction_of_matched_kmers)
         """
         seq = seq if is_sanitised else self._sanitise_seq(seq)
-        tax_filt = (
-            self._tax_filter_range
-            if isinstance(entrynr_range, tuple)
-            else self._tax_filter_set
-        )
+        tax_filt = self._tax_filter_range if isinstance(entrynr_range, tuple) else self._tax_filter_set
 
         # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
         c = collections.Counter()
@@ -2743,8 +2491,7 @@ class SequenceSearch(object):
         entries = [
             (enr, (cnts / z))
             for enr, cnts in c.items()
-            if cnts >= cut_off
-            and (entrynr_range is None or tax_filt(enr, entrynr_range))
+            if cnts >= cut_off and (entrynr_range is None or tax_filt(enr, entrynr_range))
         ]
         return entries
 
@@ -2784,9 +2531,7 @@ class SequenceSearch(object):
         n = n if n is not None else 50
         coverage = 0.0 if coverage is None else coverage
 
-        kmer_hits = self.approx_search_no_align(
-            seq, is_sanitised=True, coverage=coverage, entrynr_range=entrynr_range
-        )
+        kmer_hits = self.approx_search_no_align(seq, is_sanitised=True, coverage=coverage, entrynr_range=entrynr_range)
         c = sorted(kmer_hits, reverse=True, key=lambda x: x[1])
         if n > 0:
             c = c[:n]
@@ -2846,9 +2591,7 @@ class SequenceSearch(object):
         if compute_distance and self.multienv_align is None:
             # lazy loading of MultipleAlEnv datastructure
             envs = pyopa.load_default_environments()
-            self.multienv_align = pyopa.MutipleAlEnv(
-                envs["environments"], envs["log_pam1"]
-            )
+            self.multienv_align = pyopa.MutipleAlEnv(envs["environments"], envs["log_pam1"])
 
         aligned = []
         query = pyopa.Sequence(seq.decode("ascii"))
@@ -2895,22 +2638,16 @@ class OmaIdMapper(object):
 
     def genome_of_entry_nr(self, e_nr):
         """returns the genome code belonging to a given entry_nr"""
-        idx = self.genome_table["EntryOff"].searchsorted(
-            e_nr - 1, side="right", sorter=self._entry_off_keys
-        )
+        idx = self.genome_table["EntryOff"].searchsorted(e_nr - 1, side="right", sorter=self._entry_off_keys)
         return self.genome_table[self._entry_off_keys[idx - 1]]
 
     def map_entry_nr(self, entry_nr):
         genome = self.genome_of_entry_nr(entry_nr)
-        return "{0:s}{1:05d}".format(
-            genome["UniProtSpeciesCode"].decode(), entry_nr - genome["EntryOff"]
-        )
+        return "{0:s}{1:05d}".format(genome["UniProtSpeciesCode"].decode(), entry_nr - genome["EntryOff"])
 
     def genome_from_UniProtCode(self, code):
         code = code.encode("ascii")
-        idx = self.genome_table["UniProtSpeciesCode"].searchsorted(
-            code, sorter=self._genome_keys
-        )
+        idx = self.genome_table["UniProtSpeciesCode"].searchsorted(code, sorter=self._genome_keys)
         try:
             genome = self.genome_table[self._genome_keys[idx]]
         except IndexError:
@@ -2935,9 +2672,7 @@ class OmaIdMapper(object):
     def genome_from_taxid(self, taxid):
         try:
             taxid = int(taxid)
-            idx = self.genome_table["NCBITaxonId"].searchsorted(
-                taxid, sorter=self._taxid_keys
-            )
+            idx = self.genome_table["NCBITaxonId"].searchsorted(taxid, sorter=self._taxid_keys)
             genome = self.genome_table[self._taxid_keys[idx]]
         except (IndexError, ValueError):
             raise UnknownSpecies('TaxonId "{}" is unknown'.format(taxid))
@@ -3015,9 +2750,7 @@ class OmaIdMapper(object):
             root = self.genome_table[0]["UniProtSpeciesCode"]
         root_genome = self.genome_from_UniProtCode(root)
         lins = {
-            g["UniProtSpeciesCode"]: [
-                lev["Name"] for lev in self._db.tax.get_parent_taxa(g["NCBITaxonId"])
-            ][::-1]
+            g["UniProtSpeciesCode"]: [lev["Name"] for lev in self._db.tax.get_parent_taxa(g["NCBITaxonId"])][::-1]
             for g in self.genome_table
         }
         root_lin = lins[root_genome["UniProtSpeciesCode"]]
@@ -3132,25 +2865,14 @@ class IDResolver(object):
         res = set([x["EntryNr"] for x in xref_res])
         if len(res) == 0:
             # let's try to mach as substring using suffix array case insensitive
-            xref_res = self._db.id_mapper["XRef"].search_xref(
-                e_id, match_any_substring=True
-            )
+            xref_res = self._db.id_mapper["XRef"].search_xref(e_id, match_any_substring=True)
             res = set([x["EntryNr"] for x in xref_res])
             if len(res) == 0:
                 raise InvalidId(e_id)
         if len(res) > 1:
             # check whether its only different isoforms, then return canonical isoform
-            splice_variants = set(
-                [
-                    x["AltSpliceVariant"]
-                    for x in (self._db.entry_by_entry_nr(eNr) for eNr in res)
-                ]
-            )
-            logger.info(
-                "xref {} has {} entries, {} splice variants".format(
-                    e_id, len(res), len(splice_variants)
-                )
-            )
+            splice_variants = set([x["AltSpliceVariant"] for x in (self._db.entry_by_entry_nr(eNr) for eNr in res)])
+            logger.info("xref {} has {} entries, {} splice variants".format(e_id, len(res), len(splice_variants)))
             if len(splice_variants) > 1 or 0 in splice_variants:
                 raise AmbiguousID('Cross-ref "{}" is ambiguous'.format(e_id), res)
             else:
@@ -3189,9 +2911,7 @@ class IDResolver(object):
                 candidates[nr]["omaid"] = [query]
         except (InvalidOmaId, UnknownSpecies) as e:
             pass
-        id_res = self._db.id_mapper["XRef"].search_id(
-            query, limit=limit, entrynr_range=entrynr_range
-        )
+        id_res = self._db.id_mapper["XRef"].search_id(query, limit=limit, entrynr_range=entrynr_range)
         for nr, res_dict in id_res.items():
             candidates[nr].update(res_dict)
         if len(id_res) < 5 and self._db.desc_searcher is not None:
@@ -3200,13 +2920,8 @@ class IDResolver(object):
                 desc_res.sort()
                 for row_nr in desc_res[:limit]:
                     nr = row_nr + 1
-                    if (
-                        entrynr_range is None
-                        or entrynr_range[0] <= nr <= entrynr_range[1]
-                    ):
-                        candidates[nr]["Description"] = [
-                            self._db.get_description(nr).decode()
-                        ]
+                    if entrynr_range is None or entrynr_range[0] <= nr <= entrynr_range[1]:
+                        candidates[nr]["Description"] = [self._db.get_description(nr).decode()]
             except SuffixIndexError as e:
                 logger.warning(e)
                 logger.warning("No Descriptions searched")
@@ -3238,20 +2953,10 @@ class Taxonomy(object):
             with open(os.environ["DARWIN_BROWSERDATA_PATH"] + "/TaxLevels.drw") as f:
                 taxStr = f.read()
             tax_json = json.loads(("[" + taxStr[14:-3] + "]").replace("'", '"'))
-            self.all_hog_levels = frozenset(
-                [
-                    t.encode("ascii")
-                    for t in tax_json
-                    if forbidden_chars.search(t) is None
-                ]
-            )
+            self.all_hog_levels = frozenset([t.encode("ascii") for t in tax_json if forbidden_chars.search(t) is None])
         except (IOError, KeyError):
             self.all_hog_levels = frozenset(
-                [
-                    l
-                    for l in self.tax_table["Name"]
-                    if forbidden_chars.search(l.decode()) is None
-                ]
+                [l for l in self.tax_table["Name"] if forbidden_chars.search(l.decode()) is None]
             )
 
     def _table_idx_from_numeric(self, tids):
@@ -3264,15 +2969,9 @@ class Taxonomy(object):
 
     def _get_root_taxon(self):
         i1 = self.tax_table["ParentTaxonId"].searchsorted(0, sorter=self.parent_key)
-        i2 = self.tax_table["ParentTaxonId"].searchsorted(
-            0, sorter=self.parent_key, side="right"
-        )
+        i2 = self.tax_table["ParentTaxonId"].searchsorted(0, sorter=self.parent_key, side="right")
         if i2 - i1 == 0:
-            raise DBConsistencyError(
-                "Not a single root in Taxonomy: {}".format(
-                    self.tax_table[self.parent_key[i1]]
-                )
-            )
+            raise DBConsistencyError("Not a single root in Taxonomy: {}".format(self.tax_table[self.parent_key[i1]]))
         elif i2 - i1 == 1:
             res = self.tax_table[self.parent_key[i1]]
         else:
@@ -3281,9 +2980,7 @@ class Taxonomy(object):
 
     def _add_luca_if_needed(self):
         i1 = self.tax_table["ParentTaxonId"].searchsorted(0, sorter=self.parent_key)
-        i2 = self.tax_table["ParentTaxonId"].searchsorted(
-            0, sorter=self.parent_key, side="right"
-        )
+        i2 = self.tax_table["ParentTaxonId"].searchsorted(0, sorter=self.parent_key, side="right")
         if i2 - i1 > 1:
             self.tax_table = numpy.append(
                 self.tax_table,
@@ -3299,10 +2996,7 @@ class Taxonomy(object):
     def _direct_children_taxa(self, tid):
         i = self.tax_table["ParentTaxonId"].searchsorted(tid, sorter=self.parent_key)
         idx = []
-        while (
-            i < len(self.parent_key)
-            and self.tax_table[self.parent_key[i]]["ParentTaxonId"] == tid
-        ):
+        while i < len(self.parent_key) and self.tax_table[self.parent_key[i]]["ParentTaxonId"] == tid:
             idx.append(self.parent_key[i])
             i += 1
         return self.tax_table.take(idx)
@@ -3334,9 +3028,7 @@ class Taxonomy(object):
             parent = tmp
             count += 1
             if count > 100:
-                raise InvalidTaxonId(
-                    "{0:d} exceeds max depth of 100. Infinite recursion?".format(query)
-                )
+                raise InvalidTaxonId("{0:d} exceeds max depth of 100. Infinite recursion?".format(query))
         return self.tax_table.take(idx)
 
     def _get_taxids_from_any(self, it, skip_missing=True):
@@ -3426,19 +3118,15 @@ class Taxonomy(object):
             additional_levels = set([])
             for cur_tax in taxids_to_keep:
                 try:
-                    additional_levels.update(
-                        set(self.get_parent_taxa(cur_tax)["NCBITaxonId"])
-                    )
+                    additional_levels.update(set(self.get_parent_taxa(cur_tax)["NCBITaxonId"]))
                 except KeyError:
-                    logger.info("{} seems not to exist in Taxonomy".format(cur_tax))
+                    logger.info("%s seems not to exist in Taxonomy", cur_tax)
                     pass
             # add and remove duplicates
             all_levels = numpy.append(taxids_to_keep, list(additional_levels))
             taxids_to_keep = numpy.unique(all_levels)
 
-        idxs = numpy.searchsorted(
-            self.tax_table["NCBITaxonId"], taxids_to_keep, sorter=self.taxid_key
-        )
+        idxs = numpy.searchsorted(self.tax_table["NCBITaxonId"], taxids_to_keep, sorter=self.taxid_key)
         idxs = numpy.clip(idxs, 0, len(self.taxid_key) - 1)
         subtaxdata = self.tax_table[self.taxid_key[idxs]]
         if not numpy.alltrue(subtaxdata["NCBITaxonId"] == taxids_to_keep):
@@ -3465,17 +3153,11 @@ class Taxonomy(object):
             nr_children = collections.defaultdict(int)
             for p in subtaxdata["ParentTaxonId"]:
                 nr_children[p] += 1
-            rem = [
-                p
-                for (p, cnt) in nr_children.items()
-                if cnt == 1 and p != 0 and p not in self.genomes
-            ]
+            rem = [p for (p, cnt) in nr_children.items() if cnt == 1 and p != 0 and p not in self.genomes]
             if len(rem) > 0:
                 idx = taxids_to_keep.searchsorted(rem)
                 return self.get_induced_taxonomy(numpy.delete(taxids_to_keep, idx))
-        return Taxonomy(
-            subtaxdata, genomes=self.genomes, _valid_levels=self.all_hog_levels
-        )
+        return Taxonomy(subtaxdata, genomes=self.genomes, _valid_levels=self.all_hog_levels)
 
     def newick(self):
         """Get a Newick representation of the Taxonomy
@@ -3502,9 +3184,7 @@ class Taxonomy(object):
                         newick_enc(
                             "{:s} (disambiguate {:s})".format(
                                 node["Name"].decode(),
-                                self.genomes[
-                                    int(node["NCBITaxonId"])
-                                ].uniprot_species_code,
+                                self.genomes[int(node["NCBITaxonId"])].uniprot_species_code,
                             )
                         )
                     )
@@ -3569,13 +3249,9 @@ class Taxonomy(object):
                 cp_id = et.SubElement(cp_tax, "id", provider="uniprot")
                 cp_id.text = str(node["NCBITaxonId"])
                 cp_code = et.SubElement(cp_tax, "code")
-                cp_code.text = self.genomes[
-                    int(node["NCBITaxonId"])
-                ].uniprot_species_code
+                cp_code.text = self.genomes[int(node["NCBITaxonId"])].uniprot_species_code
                 cp_sci = et.SubElement(cp_tax, "scientific_name")
-                cp_sci.text = "{:s} (disambiguate {:s})".format(
-                    node["Name"].decode(), cp_code.text
-                )
+                cp_sci.text = "{:s} (disambiguate {:s})".format(node["Name"].decode(), cp_code.text)
                 children.append(cp_n)
 
             if len(children) == 0:
@@ -3629,20 +3305,14 @@ class BestIdPerEntryOnlyMixin:
         df = pd.DataFrame(arr)
         order = self.canonical_source_order()
         df["ord"] = df["XRefSource"].apply(lambda x: order.index(self.xrefEnum(x)))
-        df = df.sort_values(by=["EntryNr", "ord"]).drop_duplicates(
-            subset="EntryNr", keep="first"
-        )
-        return df.drop(columns="ord").to_records(
-            index=False, column_dtypes=dict(arr.dtype.descr)
-        )
+        df = df.sort_values(by=["EntryNr", "ord"]).drop_duplicates(subset="EntryNr", keep="first")
+        return df.drop(columns="ord").to_records(index=False, column_dtypes=dict(arr.dtype.descr))
 
 
 class DescriptionSearcher(object):
     def __init__(self, db):
         self.entry_tab = db.get_hdf5_handle().get_node("/Protein/Entries")
-        self.desc_index = SuffixSearcher.from_tablecolumn(
-            self.entry_tab, "DescriptionOffset"
-        )
+        self.desc_index = SuffixSearcher.from_tablecolumn(self.entry_tab, "DescriptionOffset")
 
     @timethis(logging.DEBUG)
     def search_term(self, term, limit=None):
@@ -3665,30 +3335,22 @@ class FastMapper(object):
             entrynr_range = self.db.id_mapper["OMA"].genome_range(target_species)
 
         for rec in records:
-            logger.debug("projecting function to {}".format(rec))
+            logger.debug("projecting function to %s", rec)
             if len(rec) < 25:
-                logger.warning("Skipping short sequence (len={} AA)".format(len(rec)))
+                logger.warning("Skipping short sequence (len=%s AA)", len(rec))
                 continue
             t0 = time.time()
             r = self.db.seq_search.search(str(rec.seq), entrynr_range=entrynr_range)
-            logger.info(
-                "sequence matching of {} ({} AA) took {:.3f}sec".format(
-                    rec.id, len(rec), time.time() - t0
-                )
-            )
+            logger.info("sequence matching of %s (%d AA) took %fsec", rec.id, len(rec), time.time() - t0)
             if r is not None:
                 logger.debug(str(r))
                 go_df = None
                 if r[0] == "exact":
                     tdfs1 = []
                     for enum in r[1]:
-                        df = self.db.get_gene_ontology_annotations(
-                            enum, as_dataframe=True
-                        )
+                        df = self.db.get_gene_ontology_annotations(enum, as_dataframe=True)
                         if df is not None:
-                            df["With"] = "Exact:{}".format(
-                                self.db.id_mapper["Oma"].map_entry_nr(enum)
-                            )
+                            df["With"] = "Exact:{}".format(self.db.id_mapper["Oma"].map_entry_nr(enum))
                             tdfs1.append(df)
                     if len(tdfs1) > 0:
                         go_df = pd.concat(tdfs1, ignore_index=True)
@@ -3702,15 +3364,9 @@ class FastMapper(object):
                         if score < 70 or score < 0.8 * max_score:
                             break
 
-                        go_df = self.db.get_gene_ontology_annotations(
-                            enr, as_dataframe=True
-                        )
+                        go_df = self.db.get_gene_ontology_annotations(enr, as_dataframe=True)
                         cnt = len(go_df) if go_df is not None else 0
-                        logger.debug(
-                            "match: enr: {}, score:{}, go_anno: {}".format(
-                                enr, score, cnt
-                            )
-                        )
+                        logger.debug("match: enr: {}, score:{}, go_anno: {}".format(enr, score, cnt))
 
                         if go_df is not None:
                             go_df["With"] = "Approx:{}:{}".format(
@@ -3728,11 +3384,7 @@ class FastMapper(object):
                     go_df["Taxon_ID"] = "taxon:-1"
                     len_with_dupl = len(go_df)
                     go_df.drop_duplicates(inplace=True)
-                    logger.debug(
-                        "cleaning duplicates: from {} to {} annotations".format(
-                            len_with_dupl, len(go_df)
-                        )
-                    )
+                    logger.debug("cleaning duplicates: from {} to {} annotations".format(len_with_dupl, len(go_df)))
                     for row in go_df.to_dict("records"):
                         yield row
 
@@ -3756,9 +3408,7 @@ class FastMapper(object):
             GOA.writerec(anno, file, GOA.GAF20FIELDS)
 
 
-HogMapperTuple = collections.namedtuple(
-    "HogMapperTuple", "query, closest_entry_nr, target, distance, score"
-)
+HogMapperTuple = collections.namedtuple("HogMapperTuple", "query, closest_entry_nr, target, distance, score")
 
 
 class ClosestSeqMapper(object):
@@ -3779,10 +3429,8 @@ class ClosestSeqMapper(object):
             entrynr_range = self.db.id_mapper["OMA"].genome_range(target_species)
 
         for rec in seqrecords:
-            logger.debug("projecting {} to closest sequence".format(rec))
-            r = self.db.seq_search.search(
-                str(rec.seq), compute_distance=True, entrynr_range=entrynr_range
-            )
+            logger.debug("projecting %s to closest sequence", rec)
+            r = self.db.seq_search.search(str(rec.seq), compute_distance=True, entrynr_range=entrynr_range)
             if r is not None:
                 if r[0] == "exact":
                     # r[1] contains list of entry nr with exact sequence match (full length)
@@ -3797,13 +3445,8 @@ class ClosestSeqMapper(object):
                     # Take best matches, up to score>80 & score_i > .5*score_max
                     score_max = candidate_matches[0][1]["score"]
                     for enr, match_res in candidate_matches:
-                        if (
-                            match_res["score"] < 80
-                            or match_res["score"] < 0.5 * score_max
-                        ):
+                        if match_res["score"] < 80 or match_res["score"] < 0.5 * score_max:
                             break
                         p = self._get_main_protein_from_entrynr(enr)
                         # score, distance, distvar = pyopa.MutipleAlEnv
-                        yield HogMapperTuple(
-                            rec.id, enr, p, match_res["distance"], match_res["score"]
-                        )
+                        yield HogMapperTuple(rec.id, enr, p, match_res["distance"], match_res["score"])

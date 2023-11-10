@@ -17,25 +17,17 @@ class HomoeologExtractor(HomeologsConfidenceCalculator):
     def add_more_protein_features(self, df):
         entry_tab = self.h5_handle.root.Protein.Entries
         entries = pandas.DataFrame(
-            entry_tab.read_where(
-                "(EntryNr >= {}) & (EntryNr <= {})".format(
-                    self.genome_range[0], self.genome_range[1]
-                )
-            )
+            entry_tab.read_where("(EntryNr >= {}) & (EntryNr <= {})".format(self.genome_range[0], self.genome_range[1]))
         )
         entries = entries[["EntryNr", "Chromosome", "SubGenome"]]
         for c in ("Chromosome", "SubGenome"):
             entries[c] = entries[c].str.decode("utf-8")
         entries = entries.assign(
-            OmaID=entries["EntryNr"].apply(
-                lambda x: "{:s}{:05d}".format(self.genome, x - self.genome_range[0] + 1)
-            )
+            OmaID=entries["EntryNr"].apply(lambda x: "{:s}{:05d}".format(self.genome, x - self.genome_range[0] + 1))
         )
 
         new_df = pandas.merge(
-            pandas.merge(
-                df, entries, how="left", left_on="EntryNr1", right_on="EntryNr"
-            ),
+            pandas.merge(df, entries, how="left", left_on="EntryNr1", right_on="EntryNr"),
             entries,
             how="left",
             left_on="EntryNr2",
@@ -67,9 +59,7 @@ if __name__ == "__main__":
     import argparse
     import sys
 
-    parser = argparse.ArgumentParser(
-        description="Dump Homoeolog Information from an hdf5 file"
-    )
+    parser = argparse.ArgumentParser(description="Dump Homoeolog Information from an hdf5 file")
     parser.add_argument(
         "--genome",
         "-g",
@@ -104,10 +94,7 @@ if __name__ == "__main__":
 
     if conf.genome is None:
         with tables.open_file(conf.db) as h5:
-            genomes = [
-                x["UniProtSpeciesCode"].decode()
-                for x in h5.root.Genome.read_where("IsPolyploid==True")
-            ]
+            genomes = [x["UniProtSpeciesCode"].decode() for x in h5.root.Genome.read_where("IsPolyploid==True")]
     else:
         genomes = [conf.genome]
 

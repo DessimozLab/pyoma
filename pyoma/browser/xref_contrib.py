@@ -70,15 +70,9 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         self.tmp_h5 = outfile + ".tmp"
 
     def setup(self):
-        self.xref_h5 = tables.open_file(
-            self.tmp_h5, "w", filters=tables.Filters(6, complib="blosc")
-        )
-        xref_dtype = numpy.dtype(
-            [("XRefId", "S50"), ("EntryNr", "i4"), ("XRefRow", "i4")]
-        )
-        grp = self.xref_h5.create_group(
-            "/", "XRefIndex", title="auxiliary lookup tables with deduplicated xrefs"
-        )
+        self.xref_h5 = tables.open_file(self.tmp_h5, "w", filters=tables.Filters(6, complib="blosc"))
+        xref_dtype = numpy.dtype([("XRefId", "S50"), ("EntryNr", "i4"), ("XRefRow", "i4")])
+        grp = self.xref_h5.create_group("/", "XRefIndex", title="auxiliary lookup tables with deduplicated xrefs")
         self.xref_idx = self.xref_h5.create_table(
             grp,
             "XRefs",
@@ -93,9 +87,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         data = self.xref_idx.read()
         data.sort(order=["XRefId", "EntryNr"])
         self.xref_h5.close()
-        self.xref_h5 = tables.open_file(
-            self.outfile, "w", filters=tables.Filters(6, complib="blosc")
-        )
+        self.xref_h5 = tables.open_file(self.outfile, "w", filters=tables.Filters(6, complib="blosc"))
         xref_idx = self.xref_h5.create_table(
             "/XRefIndex", "XRefs", obj=data, expectedrows=len(data), createparents=True
         )
@@ -105,13 +97,9 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
     def _store_names(self, dic, node, skip_short=0):
         keys = sorted(dic.keys())
         max_key_len = max(len(z) for z in keys)
-        dtyp_key = numpy.dtype(
-            [("XRefId", "S{}".format(max_key_len)), ("Offset", "i4"), ("Length", "i4")]
-        )
+        dtyp_key = numpy.dtype([("XRefId", "S{}".format(max_key_len)), ("Offset", "i4"), ("Length", "i4")])
         dtyp_lookup = numpy.dtype([("EntryNr", "i4"), ("XRefRow", "i4")])
-        tab_key = self.xref_h5.create_table(
-            "/XRefIndex", node, description=dtyp_key, expectedrows=len(keys)
-        )
+        tab_key = self.xref_h5.create_table("/XRefIndex", node, description=dtyp_key, expectedrows=len(keys))
         tab_lookup = self.xref_h5.create_table(
             "/XRefIndex",
             node + "_lookup",
@@ -121,7 +109,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         off, skipped = 0, 0
         for k in keys:
             if len(dic[k]) < skip_short:
-                logger.debug("skipping {} from index".format(k))
+                logger.debug("skipping %s from index", k)
                 skipped += 1
                 continue
             tab_lookup.append(sorted(dic[k]))
@@ -132,11 +120,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         if len(tab_lookup) != off:
             raise Exception("Lookup table length does not match key table offsets")
         tab_key.colinstances["XRefId"].create_csindex()
-        logger.info(
-            "stored {} index with {} elements. skipped {} keys".format(
-                node, len(tab_key), skipped
-            )
-        )
+        logger.info("stored {} index with {} elements. skipped {} keys".format(node, len(tab_key), skipped))
 
     def _add_to_buffer(self, e):
         self._buffer.append(e)
@@ -230,9 +214,7 @@ class XRefReducer(BaseProfileBuilderProcess):
             numpy.hstack(
                 list(
                     map(
-                        lambda s: self.xref_tab[
-                            self.xref_eof[s.start] : self.xref_eof[s.stop]
-                        ],
+                        lambda s: self.xref_tab[self.xref_eof[s.start] : self.xref_eof[s.stop]],
                         gene.entrynr_slices(),
                     )
                 )
@@ -250,10 +232,7 @@ class XRefReducer(BaseProfileBuilderProcess):
 
     def _load_xrefs_with_where_cond(self, gene):
         query = " | ".join(
-            [
-                "((EntryNr >= {}) & (EntryNr < {}))".format(s.start, s.stop)
-                for s in gene.entrynr_slices()
-            ]
+            ["((EntryNr >= {}) & (EntryNr < {}))".format(s.start, s.stop) for s in gene.entrynr_slices()]
         )
         dtype = [("xref_row", "i8")] + self.xref_tab.dtype.descr
         buf = io.BytesIO()
@@ -274,9 +253,7 @@ class XRefReducer(BaseProfileBuilderProcess):
         xrefs["XRefId"] = xrefs["XRefId"].apply(bytes.lower).apply(rem_vers)
 
         # sort such that first element per xrefid is the one we want to keep in the index
-        sorted_xrefs = xrefs.sort_values(
-            ["Verification", "is_main", "XRefSource"], ascending=[True, False, True]
-        )
+        sorted_xrefs = xrefs.sort_values(["Verification", "is_main", "XRefSource"], ascending=[True, False, True])
         res = sorted_xrefs.groupby("XRefId").first().reset_index()
         return res
 

@@ -141,6 +141,7 @@ class HogIDSearch(BaseSearch):
         hogs = []
         if match is not None:
             level = None
+            logger.debug("analyse token %s: %s", self.term, match.groupdict())
             if match.group("taxid") is not None:
                 try:
                     n = self.db.tax.get_taxnode_from_name_or_taxid(match.group("taxid"))
@@ -148,16 +149,15 @@ class HogIDSearch(BaseSearch):
                 except (InvalidTaxonId, KeyError):
                     pass
             new_hogs = {}
-            if match.group("rel") != self.db.release_char and match.group("prefix"):
-                new_hogs = self._map_forward_outdated_hogid(match.group("id"))
+            if match.group("rel") != self.db.release_char:
+                old_hogid = ("" if match.group("prefix") else "HOG:") + match.group("id")
+                new_hogs = self._map_forward_outdated_hogid(old_hogid)
                 self.outdated_query_hog = True
                 ids = new_hogs.keys()
             else:
                 ids = (
                     ("" if match.group("prefix") else "HOG:") + match.group("id"),
-                    "HOG:{}{:07d}".format(
-                        self.db.release_char, int(match.group("fam"))
-                    ),
+                    "HOG:{}{:07d}".format(self.db.release_char, int(match.group("fam"))),
                 )
             if self._level is not None:
                 # we have a taxon filter, search for subhogs/superhogs of ids
@@ -185,11 +185,7 @@ class HogIDSearch(BaseSearch):
         if not self._get_protein_entries:
             return None
         return list(
-            itertools.chain.from_iterable(
-                hog.members
-                for hog in self.get_matched_hogs()
-                if hog.level == self._level
-            )
+            itertools.chain.from_iterable(hog.members for hog in self.get_matched_hogs() if hog.level == self._level)
         )
 
     def search_groups(self):
@@ -290,26 +286,14 @@ class TaxSearch(BaseSearch):
                 tax = [(int(genome["NCBITaxonId"]), 1.0)]
             except UnknownSpecies:
                 # fuzzy match of all extant genomes in OMA
-                genomes, genome_approx_scores = self.db.id_mapper[
-                    "OMA"
-                ].approx_search_genomes(self.term, scores=True)
-                logger.debug("{} matches approximately to {}", self.term, genomes)
+                genomes, genome_approx_scores = self.db.id_mapper["OMA"].approx_search_genomes(self.term, scores=True)
+                logger.debug("%s matches approximately to %s", self.term, genomes)
                 # fuzzy match of all taxonomic names in OMA.
                 approx_matches = self.db.tax.approx_search(self.term)
-                logger.debug(
-                    "'{}' matches approximately to {}".format(self.term, approx_matches)
-                )
-                tax_nodes = self.db.tax.get_taxnode_from_name_or_taxid(
-                    [z[1] for z in approx_matches]
-                )
-                tax = [
-                    (int(z["NCBITaxonId"]), approx_match[0])
-                    for z, approx_match in zip(tax_nodes, approx_matches)
-                ]
-                tax.extend(
-                    (g.ncbi_taxon_id, score)
-                    for g, score in zip(genomes, genome_approx_scores)
-                )
+                logger.debug("'%s' matches approximately to %s", self.term, approx_matches)
+                tax_nodes = self.db.tax.get_taxnode_from_name_or_taxid([z[1] for z in approx_matches])
+                tax = [(int(z["NCBITaxonId"]), approx_match[0]) for z, approx_match in zip(tax_nodes, approx_matches)]
+                tax.extend((g.ncbi_taxon_id, score) for g, score in zip(genomes, genome_approx_scores))
         return tax
 
     def search_entries(self):
@@ -384,7 +368,7 @@ class SequenceSearch(BaseSearch):
             return self._matched_seqs
 
         if len(self.seq) < 5:
-            logger.debug("too short sequence motif to search: {}".format(self.seq))
+            logger.debug("too short sequence motif to search: %s", self.seq)
             raise ValueError("too short sequence motif")
         if self.strategy not in ("exact", "approx", "mixed"):
             raise ValueError("Invalid search strategy parameter")
@@ -430,9 +414,7 @@ class SequenceSearch(BaseSearch):
         return list(self.get_matched_seqs().values())
 
     def search_groups(self):
-        grps = collections.Counter(
-            p.oma_group for p in self.get_matched_seqs().values() if p.oma_group != 0
-        )
+        grps = collections.Counter(p.oma_group for p in self.get_matched_seqs().values() if p.oma_group != 0)
         return [models.OmaGroup(self.db, grp) for grp, cnt in grps.most_common(10)]
 
     def count_entries(self):
@@ -483,11 +465,7 @@ class XRefSearch(BaseSearch):
                     rng = self.entry_filter
                 else:
                     if len(self.entry_filter) == 0:
-                        logger.info(
-                            "short-circuit XRefSearch as entry_filter is empty: {}".format(
-                                self.entry_filter
-                            )
-                        )
+                        logger.info("short-circuit XRefSearch as entry_filter is empty: %s", self.entry_filter)
                         self._matched_entries = {}
                         return self._matched_entries
                     rng = (min(self.entry_filter), max(self.entry_filter))
@@ -498,14 +476,10 @@ class XRefSearch(BaseSearch):
                     self.term, limit=self.max_matches, entrynr_range=rng
                 )
             except TooUnspecificQuery:
-                logger.exception(
-                    f"XRefSearch with term {self.term} and entry_range {rng}"
-                )
+                logger.exception("XRefSearch with term %s and entry_range %s", self.term, rng)
                 self._matched_entries = {}
             if filt is not None:
-                self._matched_entries = {
-                    enr: v for enr, v in self._matched_entries.items() if filt(enr)
-                }
+                self._matched_entries = {enr: v for enr, v in self._matched_entries.items() if filt(enr)}
         return self._matched_entries
 
     def search_entries(self):

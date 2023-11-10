@@ -36,9 +36,7 @@ class LSHBuilderBase(object):
         self.leaf_index = leaf_index(self.tree)
         self.tree_weights = generate_treeweights(self.tree, self.taxa_index)
         self.numperm = numperm
-        self.wmg = WeightedMinHashGenerator(
-            3 * len(self.taxa_index), sample_size=numperm, seed=1
-        )
+        self.wmg = WeightedMinHashGenerator(3 * len(self.taxa_index), sample_size=numperm, seed=1)
 
 
 class BaseProfileBuilderProcess(mp.Process):
@@ -67,11 +65,7 @@ class BaseProfileBuilderProcess(mp.Process):
         pass
 
     def _handle_signal(self, signum, frame):
-        print(
-            "Stopping worker (pid: {}; name: {}): received signal {}".format(
-                self.pid, self.name, signum
-            )
-        )
+        print("Stopping worker (pid: {}; name: {}): received signal {}".format(self.pid, self.name, signum))
         self.quit_req = True
 
     def run(self):
@@ -90,9 +84,7 @@ class BaseProfileBuilderProcess(mp.Process):
                 nr_empty_cnt += 1
                 if nr_empty_cnt > 10:
                     logger.info(
-                        "input queue seems to be empty ({}x), but expecting still some chunks".format(
-                            nr_empty_cnt
-                        )
+                        "input queue seems to be empty ({}x), but expecting still some chunks".format(nr_empty_cnt)
                     )
                 self.control_queue.put((self.proc_id, "NO WORK"))
                 continue
@@ -101,9 +93,9 @@ class BaseProfileBuilderProcess(mp.Process):
                 logger.info("received sentinel from previous pipeline step")
                 with self.outstanding_dones.get_lock():
                     self.outstanding_dones.value -= 1
-                logger.info("outstanding_dones: {}".format(self.outstanding_dones))
+                logger.info("outstanding_dones: %s", self.outstanding_dones)
                 self.control_queue.put((self.proc_id, "DONE"))
-                logger.debug(f"sent DONE info to control queue ({self.proc_id})")
+                logger.debug("sent DONE info to control queue (%s)", self.proc_id)
             else:
                 result = self.handle_input(item)
                 if result is not None:
@@ -122,9 +114,7 @@ class BaseProfileBuilderProcess(mp.Process):
 
 class SourceProcess(BaseProfileBuilderProcess):
     def __init__(self, out_queue, **kwargs):
-        super().__init__(
-            in_queue=None, out_queue=out_queue, nr_workers_pre_step=None, **kwargs
-        )
+        super().__init__(in_queue=None, out_queue=out_queue, nr_workers_pre_step=None, **kwargs)
 
     def _put_in_queue_with_status(self, input):
         while True:
@@ -137,11 +127,7 @@ class SourceProcess(BaseProfileBuilderProcess):
                     qsize = self.out_queue.qsize()
                 except NotImplementedError:
                     pass
-                logger.info(
-                    "Queue full. (approx size: {}) Cannot put item {} into output queue".format(
-                        qsize, input
-                    )
-                )
+                logger.info("Queue full. (approx size: {}) Cannot put item {} into output queue".format(qsize, input))
             self.control_queue.put((self.proc_id, "ALIVE"))
 
     def run(self):
@@ -169,9 +155,7 @@ class ProfileBuilder(BaseProfileBuilderProcess):
         from ..db import Database
 
         self.builder = LSHBuilderBase(db=Database(self.db_path))
-        self.ham_pipeline = functools.partial(
-            get_ham_treemap_from_row, tree=self.builder.tree_newick
-        )
+        self.ham_pipeline = functools.partial(get_ham_treemap_from_row, tree=self.builder.tree_newick)
         self.hash_pipeline = functools.partial(
             row2hash,
             taxa_index=self.builder.taxa_index,
@@ -187,9 +171,7 @@ class ProfileBuilder(BaseProfileBuilderProcess):
     def handle_input(self, df):
         print("handling df: {}".format(df))
         df["tree"] = df[["Fam", "ortho"]].apply(self.ham_pipeline, axis=1)
-        df[["hash", "rows", "species"]] = df[["Fam", "tree"]].apply(
-            self.hash_pipeline, axis=1
-        )
+        df[["hash", "rows", "species"]] = df[["Fam", "tree"]].apply(self.hash_pipeline, axis=1)
         return df[["Fam", "hash", "species"]]
 
 
@@ -255,9 +237,7 @@ class Collector(BaseProfileBuilderProcess):
         #     root = "/HOGProfile/{}".format(self.builder.tree.name)
         print("storing results in {}:{}".format(self.tmp_file, root))
 
-        self.hashes_matrix, self.species_matrix, self.forest_arr = self._init_tmp_h5(
-            root
-        )
+        self.hashes_matrix, self.species_matrix, self.forest_arr = self._init_tmp_h5(root)
         print("Collector process initialized")
 
     def handle_input(self, df: pd.DataFrame):
@@ -271,9 +251,7 @@ class Collector(BaseProfileBuilderProcess):
                 self.species_matrix[fam, :] = df["species"][fam]
                 self.count += 1
             if time.time() - self.save_start > 200:
-                print(
-                    "Saving current results: {}".format(time.time() - self.global_time)
-                )
+                print("Saving current results: {}".format(time.time() - self.global_time))
                 self.forest.index()
                 print(
                     "Checking consistency of search index. Fam {} --> {}".format(
@@ -297,9 +275,7 @@ class Collector(BaseProfileBuilderProcess):
 
 
 class HogGenerator(SourceProcess):
-    def __init__(
-        self, db_path, max_hogsize=None, min_hogsize=100, chunk_size=100, **kwargs
-    ):
+    def __init__(self, db_path, max_hogsize=None, min_hogsize=100, chunk_size=100, **kwargs):
         super().__init__(**kwargs)
         self.db_path = db_path
         self.max_hogsize = max_hogsize
@@ -312,7 +288,7 @@ class HogGenerator(SourceProcess):
         db = Database(self.db_path)
         nr_groups = db.get_nr_toplevel_hogs()
         chunk = {}
-        logger.debug("nr of toplevel hogs: {}".format(nr_groups))
+        logger.debug("nr of toplevel hogs: %d", nr_groups)
         for fam in range(1, nr_groups + 1):
             try:
                 orthoxml = db.get_orthoxml(fam).decode()
@@ -348,9 +324,7 @@ def rootlogger_configurer(queue):
 def logger_listener(log_queue):
     root = logging.getLogger()
     console_handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        "%(asctime)s %(processName)-10s %(name)s %(levelname)-8s %(message)s"
-    )
+    formatter = logging.Formatter("%(asctime)s %(processName)-10s %(name)s %(levelname)-8s %(message)s")
     console_handler.setFormatter(formatter)
     root.addHandler(console_handler)
     root.setLevel(logging.DEBUG)
@@ -360,9 +334,7 @@ def logger_listener(log_queue):
 
 
 class PipelineControllerThread(threading.Thread):
-    def __init__(
-        self, control_queue, log_queue, processes, time_until_kill=1800, **kwargs
-    ):
+    def __init__(self, control_queue, log_queue, processes, time_until_kill=1800, **kwargs):
         super().__init__(**kwargs)
         self.control_queue = control_queue
         self.log_queue = log_queue
@@ -383,17 +355,20 @@ class PipelineControllerThread(threading.Thread):
         for proc_id, proc_info in self.processes.items():
             last_seen, proc = proc_info[0], proc_info[1]
             if last_seen == 0:
-                logger.info(f"process {proc.name}[{proc.proc_id}] not yet started?")
+                logger.info("process %s[%s] not yet started?", proc.name, proc.proc_id)
             elif time.time() - last_seen > self.time_until_kill:
                 logger.warning(
-                    f"process {proc.name}[{proc.proc_id}] seems to be dead. No alive signal since {time.time()-last_seen}sec."
+                    "process %s[%s] seems to be dead. No alive signal since %fsec.",
+                    proc.name,
+                    proc.proc_id,
+                    time.time() - last_seen,
                 )
                 proc.terminate()
                 proc.out_queue.put(None)
                 to_rem.append(proc_id)
         for proc_id in to_rem:
             self.processes.pop(proc_id)
-        logger.info(f"killed {len(to_rem)} orphan processes")
+        logger.info("killed %d orphan processes", len(to_rem))
 
     def run(self):
         logger.info("starting controler thread")
@@ -448,9 +423,7 @@ class Pipeline(object):
             stage = self.stages[i]
             stage.outstanding_dones = mp.Value("d", self.stages[i - 1].nr_procs)
             stage.in_queue = mp.Queue(maxsize=10 * mp.cpu_count())
-            stage.out_queue = (
-                self.stages[i + 1].in_queue if i < len(self.stages) - 1 else mp.Queue()
-            )
+            stage.out_queue = self.stages[i + 1].in_queue if i < len(self.stages) - 1 else mp.Queue()
             for k in range(stage.nr_procs):
                 p = stage.process(
                     in_queue=stage.in_queue,
@@ -475,9 +448,7 @@ class Pipeline(object):
             )
             procs.append(p)
             p.start()
-        control_thread = PipelineControllerThread(
-            control_queue=control_queue, log_queue=log_queue, processes=procs
-        )
+        control_thread = PipelineControllerThread(control_queue=control_queue, log_queue=log_queue, processes=procs)
         control_thread.start()
         print("all processes started")
         try:

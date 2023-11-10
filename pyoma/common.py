@@ -39,7 +39,7 @@ def auto_open(fn, *args, **kwargs):
     if os.path.isfile(fn) and os.stat(fn).st_size > 0:
         with open(fn, "rb") as fp:
             fs = fp.read(max([len(x) for x in fmagic]))
-        for (magic, _open) in fmagic.items():
+        for magic, _open in fmagic.items():
             if fs.startswith(magic):
                 return _open(fn, *args, **kwargs)
     else:

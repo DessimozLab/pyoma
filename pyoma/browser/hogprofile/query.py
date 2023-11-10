@@ -15,9 +15,7 @@ class Profiler(object):
         self.hashes = root_level_data.hashes
         self.species_profile = root_level_data.species_profile
         self.species_tree = root_level_data.species_tree[0]
-        self.num_perm = db.get_hdf5_handle().get_node_attr(
-            "/HOGProfile/ALL", "num_perm"
-        )
+        self.num_perm = db.get_hdf5_handle().get_node_attr("/HOGProfile/ALL", "num_perm")
         self.species_names = self._build_tree_range_lookup()
         self.tax_range_index = self._select_key_levels_and_ranges()
 
@@ -54,9 +52,7 @@ class Profiler(object):
                     if child.range[1] > max_range:
                         max_range = child.range[1]
                     size += child.size
-                node.add_features(
-                    range=(min_range, max_range), size=size, sciname=sciname
-                )
+                node.add_features(range=(min_range, max_range), size=size, sciname=sciname)
 
         # annotate speciestree with range features
         idx_map(self.species_tree)
@@ -69,9 +65,7 @@ class Profiler(object):
 
         indexes = {}
         for size in (50, 200):
-            indexes[size] = {
-                n.sciname: n.range for n in nodes_of_size(self.species_tree, size)
-            }
+            indexes[size] = {n.sciname: n.range for n in nodes_of_size(self.species_tree, size)}
         indexes["root"] = {n.sciname: n.range for n in self.species_tree.children}
         return indexes
 

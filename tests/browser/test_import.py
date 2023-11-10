@@ -48,10 +48,7 @@ class ImportDummyBase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmpdir = tempfile.mkdtemp()
-        cls.old_env = {
-            (z, os.getenv(z, None))
-            for z in ("DARWIN_NETWORK_SCRATCH_PATH", "DARWIN_BROWSERDATA_PATH")
-        }
+        cls.old_env = {(z, os.getenv(z, None)) for z in ("DARWIN_NETWORK_SCRATCH_PATH", "DARWIN_BROWSERDATA_PATH")}
         os.environ["DARWIN_NETWORK_SCRATCH_PATH"] = cls.tmpdir
         os.environ["DARWIN_BROWSERDATA_PATH"] = cls.tmpdir
 
@@ -96,9 +93,7 @@ class ImportIntegrationBase(ImportDummyBase):
                 break
         if not test_data_available:
             raise unittest.SkipTest("data not available")
-        os.environ["DARWIN_BROWSERDATA_PATH"] = os.path.join(
-            folder, "Test.Jul2014", "data"
-        )
+        os.environ["DARWIN_BROWSERDATA_PATH"] = os.path.join(folder, "Test.Jul2014", "data")
 
 
 class GenomeDirectImportTest(ImportIntegrationBase):
@@ -107,9 +102,7 @@ class GenomeDirectImportTest(ImportIntegrationBase):
         gstab = self.darwin_exporter.h5.get_node("/Genome")
         self.assertEqual(len(gstab), len(data["GS"]), "unexpected number of genomes")
         for genome in data["GS"]:
-            gs = gstab.read_where(
-                "UniProtSpeciesCode == code", genome[1].encode("utf-8")
-            )
+            gs = gstab.read_where("UniProtSpeciesCode == code", genome[1].encode("utf-8"))
             for key in (
                 (2, "TotEntries"),
                 (3, "TotAA"),
@@ -122,16 +115,12 @@ class GenomeDirectImportTest(ImportIntegrationBase):
                 self.assertEqual(
                     gs[key[1]],
                     expected,
-                    "data doesn't match for {}: {} vs {}".format(
-                        key[0], gs[key[1]], expected
-                    ),
+                    "data doesn't match for {}: {} vs {}".format(key[0], gs[key[1]], expected),
                 )
         taxtab = self.darwin_exporter.h5.get_node("/Taxonomy")
         all_taxlevels = taxtab[:]
         self.assertFalse(
-            numpy.where(all_taxlevels["NCBITaxonId"] == all_taxlevels["ParentTaxonId"])[
-                0
-            ].any(),
+            numpy.where(all_taxlevels["NCBITaxonId"] == all_taxlevels["ParentTaxonId"])[0].any(),
             "must not have taxlevel pointing to itself",
         )
 
@@ -167,9 +156,7 @@ class ProteinImportViaJson(ImportIntegrationBase):
                 e["EntryNr"],
                 "entries are not ordered: {} - {}".format(i, e["EntryNr"]),
             )
-            seq = sequence_tab[
-                e["SeqBufferOffset"] : e["SeqBufferOffset"] + e["SeqBufferLength"] - 1
-            ].tostring()
+            seq = sequence_tab[e["SeqBufferOffset"] : e["SeqBufferOffset"] + e["SeqBufferLength"] - 1].tostring()
             self.assertEqual(
                 md5(seq).hexdigest(),
                 e["MD5ProteinHash"].decode(),
@@ -180,9 +167,7 @@ class ProteinImportViaJson(ImportIntegrationBase):
         version = self.darwin_exporter.get_version()
         self.assertIn("Test", version)
         self.darwin_exporter.add_version()
-        self.assertEqual(
-            version, self.darwin_exporter.h5.get_node_attr("/", "oma_version")
-        )
+        self.assertEqual(version, self.darwin_exporter.h5.get_node_attr("/", "oma_version"))
 
     def test_add_orthologs_from_darwin(self):
         pass
@@ -192,9 +177,7 @@ class OrthologyTypeTester(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.mkdtemp()
         self.exp = DarwinExporter(os.path.join(self._tmpdir, "test.h5"))
-        self.pw = self.exp.h5.create_table(
-            "/", "VPairs", tablefmt.PairwiseRelationTable
-        )
+        self.pw = self.exp.h5.create_table("/", "VPairs", tablefmt.PairwiseRelationTable)
 
     def test_convert_to_numpytable(self):
         rels = [[1, 5], (2, 6)]
@@ -259,9 +242,7 @@ class TSVOrthologyFileTester(unittest.TestCase):
         self.assertTrue((numpy.array((101, 105, 105)) == res["EntryNr2"]).all())
         self.assertTrue((numpy.array((0, 2, 2)) == res["RelType"]).all())
         self.assertTrue(((res["Distance"] > 0) & (res["Distance"] < 22)).all())
-        self.assertTrue(
-            ((res["AlignmentOverlap"] > 0.9) & (res["AlignmentOverlap"] <= 1)).all()
-        )
+        self.assertTrue(((res["AlignmentOverlap"] > 0.9) & (res["AlignmentOverlap"] <= 1)).all())
 
     def test_empty_file(self):
         self.put_data_in_file([])
@@ -280,9 +261,7 @@ class H5HelpersTests(ImportDummyBase):
         self.darwin_exporter.h5.create_table("/", "Example", obj=data)
 
     def test_create_table_if_needed_without_existing_table(self):
-        self.darwin_exporter.create_table_if_needed(
-            "/", "XRef2", description=self.get_table_data().dtype
-        )
+        self.darwin_exporter.create_table_if_needed("/", "XRef2", description=self.get_table_data().dtype)
         self.assertEqual(0, len(self.darwin_exporter.h5.get_node("/XRef2")))
 
     def test_create_table_if_needed_not_needed(self):
@@ -292,9 +271,7 @@ class H5HelpersTests(ImportDummyBase):
     def test_create_table_if_needed_replace_data(self):
         data = self.get_table_data()
         data["X"] *= 2
-        self.darwin_exporter.create_table_if_needed(
-            "/", "Example", obj=data, drop_data=True
-        )
+        self.darwin_exporter.create_table_if_needed("/", "Example", obj=data, drop_data=True)
         res = self.darwin_exporter.h5.get_node("/Example").read()
         numpy.testing.assert_equal(res, data)
 
@@ -302,9 +279,7 @@ class H5HelpersTests(ImportDummyBase):
         data = self.get_table_data()
         data["X"] *= 2
         expected = numpy.hstack((self.get_table_data(), data))
-        self.darwin_exporter.create_table_if_needed(
-            "/", "Example", obj=data, dump_data=False
-        )
+        self.darwin_exporter.create_table_if_needed("/", "Example", obj=data, dump_data=False)
         res = self.darwin_exporter.h5.get_node("/Example").read()
         numpy.testing.assert_equal(res, expected)
 
@@ -313,9 +288,7 @@ class HogConverterTest(unittest.TestCase):
     orthoxml_file = os.path.join(os.path.dirname(__file__), "hog-example.orthoXML")
 
     def setUp(self):
-        self.h5 = tables.open_file(
-            "test", "w", driver="H5FD_CORE", driver_core_backing_store=0
-        )
+        self.h5 = tables.open_file("test", "w", driver="H5FD_CORE", driver_core_backing_store=0)
         self.h5.create_table(
             "/",
             "Entries",
@@ -330,19 +303,13 @@ class HogConverterTest(unittest.TestCase):
         conv = HogConverter(self.h5.root.Entries)
         levels = conv.convert_file(self.orthoxml_file)
         self.assertEqual(9, len(levels), "levels is broken: {}".format(levels))
-        self.assertEqual(
-            len(tables.dtype_from_descr(tablefmt.HOGsTable)), len(levels[0])
-        )
+        self.assertEqual(len(tables.dtype_from_descr(tablefmt.HOGsTable)), len(levels[0]))
         mammalia = next((x for x in levels if x[2] == "Mammalia"), None)
-        self.assertAlmostEqual(
-            1, mammalia[3], msg="CompletenessScore not what is expected"
-        )
+        self.assertAlmostEqual(1, mammalia[3], msg="CompletenessScore not what is expected")
         self.assertEqual(1, mammalia[4], "ImpliedLosses was not read from input xml")
         rodents = [x for x in levels if x[2] == "Rodents"]
         self.assertEqual(2, len(rodents), "expect 2 subhogs at level of Rodents")
-        self.assertEqual(
-            [1, 0.5], [z[3] for z in rodents], "CompletenessScore does not match"
-        )
+        self.assertEqual([1, 0.5], [z[3] for z in rodents], "CompletenessScore does not match")
 
     def test_set_release_char(self):
         conv = HogConverter(self.h5.root.Entries, release_char="B")

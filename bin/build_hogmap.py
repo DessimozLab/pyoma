@@ -5,9 +5,7 @@ import pyoma.browser.hogidmap
 logger = logging.getLogger("build-hog-map")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="build database to find related hogs in new version"
-    )
+    parser = argparse.ArgumentParser(description="build database to find related hogs in new version")
     parser.add_argument("-v", action="count", default=0)
     subparser = parser.add_subparsers(required=True)
 
@@ -17,9 +15,7 @@ if __name__ == "__main__":
         required=True,
         help="Path to database for which the LSH of HOGs should be build",
     )
-    parser_lsh.add_argument(
-        "--out", required=True, help="Path where the lsh should be written to"
-    )
+    parser_lsh.add_argument("--out", required=True, help="Path where the lsh should be written to")
     parser_lsh.add_argument(
         "--nr-procs",
         type=int,
@@ -27,12 +23,8 @@ if __name__ == "__main__":
     )
     parser_lsh.set_defaults(stage="build_lsh")
     parser_map = subparser.add_parser("map")
-    parser_map.add_argument(
-        "--target", required=True, help="Path to the LSH database of the target release"
-    )
-    parser_map.add_argument(
-        "--old", nargs="+", help="Path to the LSH databases of the old releases."
-    )
+    parser_map.add_argument("--target", required=True, help="Path to the LSH database of the target release")
+    parser_map.add_argument("--old", nargs="+", help="Path to the LSH databases of the old releases.")
     parser_map.add_argument(
         "--out",
         required=True,
@@ -45,9 +37,7 @@ if __name__ == "__main__":
     logger.info(conf)
 
     if conf.stage == "build_lsh":
-        pyoma.browser.hogidmap.compute_minhashes_for_db(
-            conf.db, conf.out, nr_procs=conf.nr_procs
-        )
+        pyoma.browser.hogidmap.compute_minhashes_for_db(conf.db, conf.out, nr_procs=conf.nr_procs)
     elif conf.stage == "map":
         pyoma.browser.hogidmap.compare_versions(conf.out, conf.target, *conf.old)
 

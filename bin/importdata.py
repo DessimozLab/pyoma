@@ -17,8 +17,7 @@ def main(args):
     parser.add_argument(
         "-r",
         "--release",
-        help="path to release. If not set, DARWIN_BROWSERDATA_PATH "
-        "from the environment is used.",
+        help="path to release. If not set, DARWIN_BROWSERDATA_PATH " "from the environment is used.",
     )
     parser.add_argument(
         "out",
@@ -31,8 +30,7 @@ def main(args):
         "-s",
         "--standalone",
         action="store_true",
-        help="a flag which needs to be set if you intend to import "
-        "the results from an OmaStandalone run.",
+        help="a flag which needs to be set if you intend to import " "the results from an OmaStandalone run.",
     )
     parser.add_argument(
         "-d",

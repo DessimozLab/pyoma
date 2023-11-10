@@ -97,7 +97,10 @@ class CompareLevelSpecialCases(unittest.TestCase):
             dtype=[("Fam", "i4"), ("ID", "S255"), ("Level", "S255")],
         )
         child = numpy.array(
-            [(1, b"HOG:0000001.1a", b"Child"), (1, b"HOG:0000001.1c.4b", b"Child"),],
+            [
+                (1, b"HOG:0000001.1a", b"Child"),
+                (1, b"HOG:0000001.1c.4b", b"Child"),
+            ],
             dtype=[("Fam", "i4"), ("ID", "S255"), ("Level", "S255")],
         )
         exp_res = [

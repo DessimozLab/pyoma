@@ -33,9 +33,7 @@ class NCBILinkOutXML(object):
 
     def _add_doctype(self):
         self.tree.docinfo.public_id = "-//NLM//DTD LinkOut 1.0//EN"
-        self.tree.docinfo.system_url = (
-            "https://www.ncbi.nlm.nih.gov/projects/linkout/doc/LinkOut.dtd"
-        )
+        self.tree.docinfo.system_url = "https://www.ncbi.nlm.nih.gov/projects/linkout/doc/LinkOut.dtd"
 
     def text_elemement(self, tag, text):
         el = etree.Element(tag)
@@ -43,11 +41,7 @@ class NCBILinkOutXML(object):
         return el
 
     def write(self, fh):
-        fh.write(
-            etree.tostring(
-                self.tree, pretty_print=True, xml_declaration=True, encoding="utf-8"
-            )
-        )
+        fh.write(etree.tostring(self.tree, pretty_print=True, xml_declaration=True, encoding="utf-8"))
 
 
 class Provider(NCBILinkOutXML):
@@ -186,12 +180,8 @@ class AncestralTaxonomyResource(TaxonomyResource):
 
 
 class LinkoutBuffer(object):
-    def __init__(
-        self, resource, outdir="/tmp", bulk_add=True, max_file_size=20 * 2**20
-    ):
-        self.max_records = math.floor(
-            (max_file_size - resource.DISKSIZE_HEADER) / resource.DISKSIZE_PER_LINK
-        )
+    def __init__(self, resource, outdir="/tmp", bulk_add=True, max_file_size=20 * 2**20):
+        self.max_records = math.floor((max_file_size - resource.DISKSIZE_HEADER) / resource.DISKSIZE_PER_LINK)
         self.cur_nr = 0
         self.buf = []
         self.bulk_add = bulk_add
@@ -215,9 +205,7 @@ class LinkoutBuffer(object):
         else:
             for obj in self.buf:
                 res.add_link(obj)
-        fn = os.path.join(
-            self.outdir, "{}_{:02d}.xml".format(res.base_name, self.cur_nr)
-        )
+        fn = os.path.join(self.outdir, "{}_{:02d}.xml".format(res.base_name, self.cur_nr))
         with open(fn, "wb") as fh:
             res.write(fh)
         self.cur_nr += 1
@@ -229,10 +217,8 @@ class GenesPriorizationHandler(object):
     NCBI linkout caps at 10%"""
 
     def __init__(self, max_linkouts=None, db=None, **kwargs):
-        self.max_links = (
-            int(max_linkouts) if max_linkouts else 20357436 // 10
-        )  # obtained in Jan2018
-        logger.info("Limiting Genes to {} links max".format(self.max_links))
+        self.max_links = int(max_linkouts) if max_linkouts else 20357436 // 10  # obtained in Jan2018
+        logger.info("Limiting Genes to %d links max", self.max_links)
         self.genes_buffer = LinkoutBuffer(GenesResource, **kwargs)
         self.genes = []
         self.db = db
@@ -293,7 +279,7 @@ class GenesPriorizationHandler(object):
         c = collections.defaultdict(int)
         for acc, target in self.genes[self.max_links :]:
             c[target[0:5]] += 1
-        logger.info("Skipping genes link in the following species: {}".format(c))
+        logger.info("Skipping genes link in the following species: %s", c)
 
 
 def prepare_linkout_files(outdir="/tmp", infile="../pyomabrowser/OmaServer.h5"):

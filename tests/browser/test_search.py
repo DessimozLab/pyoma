@@ -86,9 +86,7 @@ class ECSearchTest(TestWithDbInstance):
 class DomainSearchTest(TestWithDbInstance):
     def test_domain_search_called_with_good_query(self):
         query = b"2.30.29.30"
-        with patch.object(
-            self.db.db.get_node("/Annotations/Domains"), "where"
-        ) as mocked:
+        with patch.object(self.db.db.get_node("/Annotations/Domains"), "where") as mocked:
             mocked.return_value = [{"EntryNr": 19}]
             s = DomainSearch(self.db, query)
             s.set_entry_nr_filter({5, 511, 19})
@@ -104,9 +102,7 @@ class TaxSearchTest(TestWithDbInstance):
         for query in ("Ascomycota", 4890, "Ascomicotta", "4890"):
             with self.subTest("existing internal node", query=query):
                 s = TaxSearch(self.db, query)
-                self.assertIn(
-                    4890, [z.ncbi_taxon_id for z in s.search_ancestral_genomes()]
-                )
+                self.assertIn(4890, [z.ncbi_taxon_id for z in s.search_ancestral_genomes()])
                 self.assertIn(559292, [z.ncbi_taxon_id for z in s.search_species()])
 
     def test_existing_extant_node(self):
@@ -201,9 +197,7 @@ class XRefSearchTest(TestWithDbInstance):
                 t2 = time.time()
                 self.assertEqual(20, len(res_limit))
                 self.assertGreater(len(res_ref), len(res_limit))
-                self.assertGreater(
-                    t1 - t0 + 2e-3, t2 - t1, "limited search took longer"
-                )
+                self.assertGreater(t1 - t0 + 2e-3, t2 - t1, "limited search took longer")
 
     def test_inexisting_term(self):
         for query in ("lksjfewlsd", "Kgop524fslkAA2fnb"):
@@ -223,9 +217,7 @@ class HogIDSearchTest(TestWithDbInstance):
         for query in ("HOG:0000002_4890", "HOG:0000165.1a_4890"):
             with self.subTest(query=query):
                 s = HogIDSearch(self.db, query)
-                self.assertIn(
-                    query.split("_")[0], [h.hog_id for h in s.search_groups()]
-                )
+                self.assertIn(query.split("_")[0], [h.hog_id for h in s.search_groups()])
                 self.assertFalse(s.outdated_query_hog)
 
     def test_inexact_hogid_with_level(self):
@@ -289,8 +281,7 @@ class CombineTest(TestWithDbInstance):
         res = SearchResult() & s1 & s2
         self.assertTrue(
             any(
-                x.hog_id.startswith("HOG:0000165.1a")
-                and x.level == "Saccharomycetaceae"
+                x.hog_id.startswith("HOG:0000165.1a") and x.level == "Saccharomycetaceae"
                 for x in res.groups.values()
                 if isinstance(x, HOG)
             ),

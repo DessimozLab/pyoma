@@ -65,8 +65,6 @@ class AmbiguousID(Exception):
 
 class TooUnspecificQuery(PyOmaException):
     def __init__(self, query, hits):
-        super().__init__(
-            "Too unspecific query '{}' results in {} hits".format(query, hits)
-        )
+        super().__init__("Too unspecific query '{}' results in {} hits".format(query, hits))
         self.query = query
         self.hits = hits

@@ -211,9 +211,7 @@ class OntologyParser(AbstractParser):
                 # no factory for this stanza type. ignore
                 pass
             else:
-                if (not "is_obsolete" in stanza) or (
-                    not "true" in stanza["is_obsolete"]
-                ):
+                if (not "is_obsolete" in stanza) or (not "true" in stanza["is_obsolete"]):
                     res = factory(stanza)
         return res
 
@@ -251,21 +249,13 @@ class GeneOntology(object):
         self._compute_min_depths()
 
     def _compute_min_depths(self):
-        root_terms = [
-            t
-            for t in self.terms.values()
-            if not any((len(getattr(t, rel, [])) > 0 for rel in self.up_rels))
-        ]
+        root_terms = [t for t in self.terms.values() if not any((len(getattr(t, rel, [])) > 0 for rel in self.up_rels))]
         bfg_queue = deque(((t, 0) for t in root_terms))
         while len(bfg_queue) > 0:
             term, depth = bfg_queue.popleft()
             if depth < term.min_depth:
                 term.min_depth = depth
-                bfg_queue.extend(
-                    (child, depth + 1)
-                    for rel in self.down_rels
-                    for child in getattr(term, rel, [])
-                )
+                bfg_queue.extend((child, depth + 1) for rel in self.down_rels for child in getattr(term, rel, []))
 
     def ensure_term(self, term):
         """returns the term object associated with term. if term is already
@@ -344,9 +334,7 @@ class FreqAwareGeneOntology(GeneOntology):
             try:
                 self._update_counts(self.term_by_id(anno["TermNr"]))
             except ValueError:
-                logging.info(
-                    "invalid annotation term_id in freq estim:" + str(anno["TermNr"])
-                )
+                logging.info("invalid annotation term_id in freq estim:" + str(anno["TermNr"]))
 
     def _update_counts(self, term):
         for cur_term in self.get_superterms_incl_queryterm(term):
@@ -396,10 +384,7 @@ class FreqAwareGeneOntology(GeneOntology):
             sim = (
                 2
                 * math.log(self.get_term_frequency(lca))
-                / (
-                    math.log(self.get_term_frequency(term1))
-                    + math.log(self.get_term_frequency(term2))
-                )
+                / (math.log(self.get_term_frequency(term1)) + math.log(self.get_term_frequency(term2)))
             )
             return sim
         except DifferentAspectError:
@@ -413,10 +398,7 @@ class FreqAwareGeneOntology(GeneOntology):
         p_lca = self.get_term_frequency(lca)
         sim = (1 - p_lca) * (
             (2 * numpy.log2(p_lca))
-            / (
-                numpy.log2(self.get_term_frequency(term1))
-                + numpy.log2(self.get_term_frequency(term2))
-            )
+            / (numpy.log2(self.get_term_frequency(term1)) + numpy.log2(self.get_term_frequency(term2)))
         )
         return sim
 
@@ -456,11 +438,7 @@ class AnnotationFilter(object):
 
     @classmethod
     def is_trusted_electronic(cls, a):
-        return (
-            a.evidence == "IEA"
-            and a.db_ref in cls.TRUST_IEA_REFS
-            and not cls.is_negated(a)
-        )
+        return a.evidence == "IEA" and a.db_ref in cls.TRUST_IEA_REFS and not cls.is_negated(a)
 
     @classmethod
     def is_exp_or_trusted_electronic(cls, a):
@@ -516,9 +494,7 @@ class AnnotationParser(object):
         """Iterates over the annotations in the file yielding objects
         constructed by the factory argument passed to the constructor
         of this class for each annotation."""
-        csv_reader = csv.reader(
-            (l for l in self.fp if not l.startswith("!")), delimiter="\t"
-        )
+        csv_reader = csv.reader((l for l in self.fp if not l.startswith("!")), delimiter="\t")
         for row in csv_reader:
             yield self.factory(row)
         if self._needs_close:

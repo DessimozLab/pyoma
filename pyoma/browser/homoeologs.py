@@ -17,13 +17,9 @@ logger = logging.getLogger(__name__)
 
 def define_universe(df):
     # New Antecedent/Consequent objects hold universe variables and membership functions
-    distance = ctrl.Antecedent(
-        np.arange(0, df["Distance"].max() + 0.01, 0.01), "distance"
-    )
+    distance = ctrl.Antecedent(np.arange(0, df["Distance"].max() + 0.01, 0.01), "distance")
     synteny = ctrl.Antecedent(np.arange(0, 1.01, 0.01), "synteny_score")
-    total_nb_hom = ctrl.Antecedent(
-        np.arange(2, df["TotalCopyNr"].max() + 1, 1), "total_nb_homoeologs"
-    )
+    total_nb_hom = ctrl.Antecedent(np.arange(2, df["TotalCopyNr"].max() + 1, 1), "total_nb_homoeologs")
     conf = ctrl.Consequent(np.arange(0, 101, 1), "conf")
     return distance, synteny, total_nb_hom, conf
 
@@ -32,9 +28,7 @@ def create_fuzzy_rules(distance, synteny, total_nb_hom, conf):
     """Takes the antecedent and consequent objects as input"""
 
     # very low confidence
-    rule1 = ctrl.Rule(
-        synteny["low"] & distance["high"] & total_nb_hom["high"], conf["very_low"]
-    )
+    rule1 = ctrl.Rule(synteny["low"] & distance["high"] & total_nb_hom["high"], conf["very_low"])
 
     # low confidence
     rule2 = ctrl.Rule(
@@ -77,9 +71,7 @@ def create_fuzzy_rules(distance, synteny, total_nb_hom, conf):
     )
 
     # very high confidence
-    rule5 = ctrl.Rule(
-        synteny["high"] & distance["low"] & total_nb_hom["low"], conf["very_high"]
-    )
+    rule5 = ctrl.Rule(synteny["high"] & distance["low"] & total_nb_hom["low"], conf["very_high"])
     return [rule1, rule2, rule3, rule4, rule5]
 
 
@@ -87,13 +79,9 @@ def get_distance_mf(df, distance):
     # here, the first numnber is the universe, second number the central point, third the standard deviation
     distance["low"] = gaussmf(distance.universe, 0, (df["Distance"].max() / 10))
 
-    distance["med"] = gaussmf(
-        distance.universe, (df["Distance"].max() / 4), (df["Distance"].max() / 10)
-    )
+    distance["med"] = gaussmf(distance.universe, (df["Distance"].max() / 4), (df["Distance"].max() / 10))
 
-    distance["high"] = gaussmf(
-        distance.universe, df["Distance"].max(), (df["Distance"].max() / 2.5)
-    )
+    distance["high"] = gaussmf(distance.universe, df["Distance"].max(), (df["Distance"].max() / 2.5))
     return distance
 
 
@@ -109,13 +97,9 @@ def get_total_nb_hom_mf(df, total_nb_hom):
     copy_nr_median = df["TotalCopyNr"].median()
     total_nb_hom["low"] = gaussmf(total_nb_hom.universe, copy_nr_median, copy_nr_median)
 
-    total_nb_hom["med"] = gaussmf(
-        total_nb_hom.universe, 4 * copy_nr_median, 1.5 * copy_nr_median
-    )
+    total_nb_hom["med"] = gaussmf(total_nb_hom.universe, 4 * copy_nr_median, 1.5 * copy_nr_median)
 
-    total_nb_hom["high"] = gaussmf(
-        total_nb_hom.universe, df["TotalCopyNr"].max(), df["TotalCopyNr"].max() / 2.5
-    )
+    total_nb_hom["high"] = gaussmf(total_nb_hom.universe, df["TotalCopyNr"].max(), df["TotalCopyNr"].max() / 2.5)
     return total_nb_hom
 
 
@@ -149,13 +133,9 @@ class HomeologsConfidenceCalculator(object):
         elif isinstance(h5_handle, (str, bytes)):
             self.h5_handle = tables.open_file(h5_handle, "r")
         else:
-            raise TypeError(
-                "expected h5_handle to be either h5-file handle or a path to file"
-            )
+            raise TypeError("expected h5_handle to be either h5-file handle or a path to file")
 
-        genome_row = next(
-            self.h5_handle.root.Genome.where("UniProtSpeciesCode == genome")
-        )
+        genome_row = next(self.h5_handle.root.Genome.where("UniProtSpeciesCode == genome"))
         self.genome_range = (
             int(genome_row["EntryOff"]) + 1,
             int(genome_row["EntryOff"] + genome_row["TotEntries"]),
@@ -166,8 +146,7 @@ class HomeologsConfidenceCalculator(object):
             )
         )
         self.genome_df = genome_df[
-            (genome_df["AltSpliceVariant"] == 0)
-            | (genome_df["AltSpliceVariant"] == genome_df["EntryNr"])
+            (genome_df["AltSpliceVariant"] == 0) | (genome_df["AltSpliceVariant"] == genome_df["EntryNr"])
         ]
         self.genome_df.reset_index(inplace=True)
         self.relations_df = self._load_pairwise_relations()
@@ -176,14 +155,9 @@ class HomeologsConfidenceCalculator(object):
         """load the homoeologous relations of the cannonical splice variants only
         The method returns a pandas dataframe with the relations."""
         df = pandas.DataFrame(
-            self.h5_handle.get_node(
-                "/PairwiseRelation/{}/within".format(self.genome)
-            ).read_where("RelType == 5")
+            self.h5_handle.get_node("/PairwiseRelation/{}/within".format(self.genome)).read_where("RelType == 5")
         )
-        df = df[
-            df["EntryNr1"].isin(self.genome_df["EntryNr"])
-            & df["EntryNr2"].isin(self.genome_df["EntryNr"])
-        ]
+        df = df[df["EntryNr1"].isin(self.genome_df["EntryNr"]) & df["EntryNr2"].isin(self.genome_df["EntryNr"])]
         return df[self.fields_to_load]
 
     def _count_homeologs_per_entry(self, df):
@@ -191,9 +165,7 @@ class HomeologsConfidenceCalculator(object):
 
     def _augment_dataframe_with_all_features(self, df):
         counts = self._count_homeologs_per_entry(df)
-        df["TotalCopyNr"] = df.apply(
-            lambda x: counts[x["EntryNr1"]] + counts[x["EntryNr2"]], axis=1
-        )
+        df["TotalCopyNr"] = df.apply(lambda x: counts[x["EntryNr1"]] + counts[x["EntryNr2"]], axis=1)
         df.loc[df.SyntenyConservationLocal < 0, "SyntenyConservationLocal"] = 0
         return df
 
@@ -226,12 +198,8 @@ class HomeologsConfidenceCalculator(object):
         df["fuzzy_confidence"] = df.apply(defuzzify, axis=1)
 
         # scale the confidence between minimum value and 100
-        min_max_scaler = sklearn.preprocessing.MinMaxScaler(
-            feature_range=(df["fuzzy_confidence"].min(), 100)
-        )
-        df["fuzzy_confidence_scaled"] = min_max_scaler.fit_transform(
-            df["fuzzy_confidence"].values.reshape(-1, 1)
-        )
+        min_max_scaler = sklearn.preprocessing.MinMaxScaler(feature_range=(df["fuzzy_confidence"].min(), 100))
+        df["fuzzy_confidence_scaled"] = min_max_scaler.fit_transform(df["fuzzy_confidence"].values.reshape(-1, 1))
         return df
 
     def augment_ids(self, df, keep=None):
@@ -251,26 +219,18 @@ class HomeologsConfidenceCalculator(object):
         if keep is None or keep == "first":
             xrefs_one_ref = xrefs.drop_duplicates(subset="EntryNr", keep="first")
         elif keep == "agg":
-            xrefs_one_ref = (
-                xrefs.groupby("EntryNr")["XRefId"]
-                .agg(lambda x: "; ".join(x.values))
-                .to_frame()
-            )
+            xrefs_one_ref = xrefs.groupby("EntryNr")["XRefId"].agg(lambda x: "; ".join(x.values)).to_frame()
         else:
             raise ValueError('argument "keep" must be either "first" or "agg"')
         new_df = pandas.merge(
-            pandas.merge(
-                df, xrefs_one_ref, how="left", left_on="EntryNr1", right_on="EntryNr"
-            ),
+            pandas.merge(df, xrefs_one_ref, how="left", left_on="EntryNr1", right_on="EntryNr"),
             xrefs_one_ref,
             how="left",
             left_on="EntryNr2",
             right_on="EntryNr",
         )
         new_df.drop(columns=["EntryNr_x", "EntryNr_y"], inplace=True, errors="ignore")
-        new_df.rename(
-            columns={"XRefId_x": "SourceID1", "XRefId_y": "SourceID2"}, inplace=True
-        )
+        new_df.rename(columns={"XRefId_x": "SourceID1", "XRefId_y": "SourceID2"}, inplace=True)
         return new_df
 
 
@@ -305,12 +265,8 @@ class MakeHomoeologDataFrame:
         elif isinstance(h5_handle, (str, bytes)):
             self.h5_handle = tables.open_file(h5_handle, "r")
         else:
-            raise TypeError(
-                "expected h5_handle to be either h5-file handle or a path to file"
-            )
-        self.genome_row = next(
-            self.h5_handle.root.Genome.where("UniProtSpeciesCode == genome")
-        )
+            raise TypeError("expected h5_handle to be either h5-file handle or a path to file")
+        self.genome_row = next(self.h5_handle.root.Genome.where("UniProtSpeciesCode == genome"))
         self.genome_range = (
             int(self.genome_row["EntryOff"]) + 1,
             int(self.genome_row["EntryOff"] + self.genome_row["TotEntries"]),
@@ -342,8 +298,7 @@ class MakeHomoeologDataFrame:
             )
         )
         entries_df = entries_df[
-            (entries_df["AltSpliceVariant"] == 0)
-            | (entries_df["AltSpliceVariant"] == entries_df["EntryNr"])
+            (entries_df["AltSpliceVariant"] == 0) | (entries_df["AltSpliceVariant"] == entries_df["EntryNr"])
         ]
 
         return entries_df
@@ -351,9 +306,7 @@ class MakeHomoeologDataFrame:
     def get_homoeolog_pairs_df(self, genome):
         # Create a dataframe containing only the homoeologs
         df = pandas.DataFrame(
-            self.h5_handle.get_node(
-                "/PairwiseRelation/{}/within".format(self.genome)
-            ).read_where("RelType == 5")
+            self.h5_handle.get_node("/PairwiseRelation/{}/within".format(self.genome)).read_where("RelType == 5")
         )
         return df
 
@@ -366,9 +319,7 @@ class MakeHomoeologDataFrame:
             left_on=["EntryNr1"],
             right_on=["EntryNr"],
         )
-        df = pandas.merge(
-            df, entries_df, how="left", left_on=["EntryNr2"], right_on=["EntryNr"]
-        )
+        df = pandas.merge(df, entries_df, how="left", left_on=["EntryNr2"], right_on=["EntryNr"])
         return df
 
     def decode_df(self, df):
@@ -430,19 +381,14 @@ class MakeHomoeologDataFrame:
 
     def add_copynr(self, df):
         counts = collections.Counter(df["EntryNr1"])
-        df["TotalCopyNr"] = df.apply(
-            lambda x: counts[x["EntryNr1"]] + counts[x["EntryNr2"]], axis=1
-        )
+        df["TotalCopyNr"] = df.apply(lambda x: counts[x["EntryNr1"]] + counts[x["EntryNr2"]], axis=1)
         return df
 
     def get_final_homoeolog_df(self):
         entries_df = self.get_entries_df()
         hom_df = self.get_homoeolog_pairs_df(self.genome)
         # remove ASVs
-        df = hom_df[
-            hom_df["EntryNr1"].isin(entries_df["EntryNr"])
-            & hom_df["EntryNr2"].isin(entries_df["EntryNr"])
-        ]
+        df = hom_df[hom_df["EntryNr1"].isin(entries_df["EntryNr"]) & hom_df["EntryNr2"].isin(entries_df["EntryNr"])]
         # add number of duplications
         homObj = HomeologsConfidenceCalculator(self.h5_handle, self.genome)
         df = self.add_copynr(df)
@@ -464,18 +410,13 @@ if __name__ == "__main__":
     import argparse
 
     # Get arguments from command line
-    parser = argparse.ArgumentParser(
-        description="Computes homoeology confidence score using fuzzy logic"
-    )
+    parser = argparse.ArgumentParser(description="Computes homoeology confidence score using fuzzy logic")
     grp = parser.add_mutually_exclusive_group(required=True)
     grp.add_argument("--h5", help="name of hdf5 file, full path")
-    grp.add_argument(
-        "--csv", help="tab-separated file with input data as alternative to hdf5 file"
-    )
+    grp.add_argument("--csv", help="tab-separated file with input data as alternative to hdf5 file")
     parser.add_argument(
         "--genome",
-        help="5 letter code of polyploid genome to analyze. "
-        "Must be specified if used with --h5 option.",
+        help="5 letter code of polyploid genome to analyze. " "Must be specified if used with --h5 option.",
     )
     parser.add_argument(
         "--outfile",
@@ -489,9 +430,7 @@ if __name__ == "__main__":
     if args.h5 is not None and args.genome is None:
         import sys
 
-        sys.stderr.write(
-            "genomes argument required if using with an hdf5 file as input"
-        )
+        sys.stderr.write("genomes argument required if using with an hdf5 file as input")
         sys.exit(1)
 
     if args.h5:

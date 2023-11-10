@@ -30,27 +30,19 @@ def identity_w_gaps_ignored(al1, al2):
 def search_rec(db, rec):
     g = db.id_mapper["OMA"].genome_from_taxid(int(rec.annotations["ncbi_taxid"][0]))
     rng = g["EntryOff"] + 1, g["EntryOff"] + g["TotEntries"]
-    match = db.seq_search.approx_search(
-        str(rec.seq), compute_distance=True, entrynr_range=rng
-    )
+    match = db.seq_search.approx_search(str(rec.seq), compute_distance=True, entrynr_range=rng)
     if not match:
         return None
 
     best, stats = match[0]
-    if (
-        stats["score"] > 1000
-        and identity_w_gaps_ignored(stats["alignment"][0][0], stats["alignment"][1][0])
-        > 0.8
-    ):
+    if stats["score"] > 1000 and identity_w_gaps_ignored(stats["alignment"][0][0], stats["alignment"][1][0]) > 0.8:
         logger.info(
             "map {}({}) to {}: score: {}, ident: {}, kmer: {}".format(
                 rec.name,
                 rec.id,
                 best,
                 stats["score"],
-                identity_w_gaps_ignored(
-                    stats["alignment"][0][0], stats["alignment"][1][0]
-                ),
+                identity_w_gaps_ignored(stats["alignment"][0][0], stats["alignment"][1][0]),
                 stats["kmer_coverage"],
             )
         )
@@ -59,10 +51,7 @@ def search_rec(db, rec):
 
 def map_missing(db, missing, nr_procs=1):
     tab_ext = []
-    src_enum, verif_enum = (
-        db.get_hdf5_handle().get_node('/XRef').get_enum(k)
-        for k in ("XRefSource", "Verification")
-    )
+    src_enum, verif_enum = (db.get_hdf5_handle().get_node("/XRef").get_enum(k) for k in ("XRefSource", "Verification"))
     pInf = detect_hpc_jobarray(nr_procs)
     for rec in missing:
         if not pInf.is_my_job(rec.id):
@@ -100,9 +89,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="mapping a swissprot data file")
     parser.add_argument("--db", required=True, help="hdf5-db path")
-    parser.add_argument(
-        "--seqs", required=True, help="path to a file with sequences to be mapped"
-    )
+    parser.add_argument("--seqs", required=True, help="path to a file with sequences to be mapped")
     parser.add_argument("--format", default="swiss", help="format of seqs file")
     parser.add_argument("--nr-procs", "-n", default=1, type=int)
     conf = parser.parse_args()

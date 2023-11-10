@@ -33,38 +33,21 @@ class GenomeFilter(object):
             try:
                 t = db.tax.get_subtaxonomy_rooted_at(node)
                 extent_ncbi = t.get_taxid_of_extent_genomes()
-                extent_genomes = [
-                    models.Genome(db, db.id_mapper["OMA"].genome_from_taxid(z))
-                    for z in extent_ncbi
-                ]
+                extent_genomes = [models.Genome(db, db.id_mapper["OMA"].genome_from_taxid(z)) for z in extent_ncbi]
             except ValueError:
-                extent_genomes = [
-                    models.Genome(db, db.id_mapper["OMA"].genome_from_UniProtCode(node))
-                ]
+                extent_genomes = [models.Genome(db, db.id_mapper["OMA"].genome_from_UniProtCode(node))]
                 extent_ncbi = [g.ncbi_taxon_id for g in extent_genomes]
-            logger.info(
-                "{} maps to {}".format(
-                    node, [g.uniprot_species_code for g in extent_genomes]
-                )
-            )
+            logger.info("{} maps to {}".format(node, [g.uniprot_species_code for g in extent_genomes]))
             genomes = genomes.union(set(extent_ncbi))
         self.genomes = sorted(
-            [
-                models.Genome(db, db.id_mapper["OMA"].genome_from_taxid(z))
-                for z in genomes
-            ],
+            [models.Genome(db, db.id_mapper["OMA"].genome_from_taxid(z)) for z in genomes],
             key=operator.attrgetter("entry_nr_offset"),
         )
         self.offsets = numpy.array(
-            [
-                (x.entry_nr_offset, x.nr_entries + x.entry_nr_offset)
-                for x in self.genomes
-            ],
+            [(x.entry_nr_offset, x.nr_entries + x.entry_nr_offset) for x in self.genomes],
             dtype=[("begin", "i4"), ("end", "i4")],
         )
-        logger.info(
-            "Filter with {} species created: {}".format(len(self.genomes), self.genomes)
-        )
+        logger.info("Filter with {} species created: {}".format(len(self.genomes), self.genomes))
 
     def filter_entry_nr(self, entry_nr):
         """filter a numpy array of entry_nrs or a single entry_nr whether
@@ -74,9 +57,7 @@ class GenomeFilter(object):
             numpy array of same size as input entry_nr with boolean values
         """
         idx = numpy.searchsorted(self.offsets["begin"], entry_nr - 1, side="right")
-        return (self.offsets[idx - 1]["begin"] < entry_nr) & (
-            entry_nr <= self.offsets[idx - 1]["end"]
-        )
+        return (self.offsets[idx - 1]["begin"] < entry_nr) & (entry_nr <= self.offsets[idx - 1]["end"])
 
     def filter_entry_pair(self, entry_nr1, entry_nr2):
         return self.filter_entry_nr(entry_nr1) & self.filter_entry_nr(entry_nr2)
@@ -108,9 +89,7 @@ class PairsExtractor(object):
 
     def process(self, outfh):
         cols, labs = self._get_columns_and_labels()
-        csv_writer = ColumnRenameDictWriter(
-            outfh, cols, labs, extrasaction="ignore", delimiter="\t"
-        )
+        csv_writer = ColumnRenameDictWriter(outfh, cols, labs, extrasaction="ignore", delimiter="\t")
         csv_writer.writeheader()
         for g1, g2 in itertools.combinations(self.filter.genomes, 2):
             for rel in self.extract_pairwise_relations(g1, g2):
@@ -124,9 +103,7 @@ class PairsExtractor(object):
                 "{}-{}.tsv".format(g1.uniprot_species_code, g2.uniprot_species_code),
             )
             with open(fn, "w") as fout:
-                csv_writer = ColumnRenameDictWriter(
-                    fout, cols, labs, extrasaction="ignore", delimiter="\t"
-                )
+                csv_writer = ColumnRenameDictWriter(fout, cols, labs, extrasaction="ignore", delimiter="\t")
                 csv_writer.writeheader()
                 for rel in self.extract_pairwise_relations(g1, g2):
                     csv_writer.writerow(rel)
@@ -149,9 +126,7 @@ class PairsExtractor(object):
 
     def get_or_load_xrefs_df(self, g, source):
         if not (g.uniprot_species_code, source) in self._xrefs_cache:
-            self._xrefs_cache[(g.uniprot_species_code, source)] = self._load_xrefs(
-                g, source
-            )
+            self._xrefs_cache[(g.uniprot_species_code, source)] = self._load_xrefs(g, source)
         return self._xrefs_cache[(g.uniprot_species_code, source)]
 
     def augment_with_ids(self, df, g1, g2, source, label):
@@ -170,27 +145,19 @@ class PairsExtractor(object):
         return df
 
     def extract_pairwise_relations(self, g1, g2):
-        tab = self.db.db.get_node(
-            "/PairwiseRelation/{}/VPairs".format(g1.uniprot_species_code)
-        )
+        tab = self.db.db.get_node("/PairwiseRelation/{}/VPairs".format(g1.uniprot_species_code))
         df = pandas.DataFrame(
             tab.read_where(
-                "(EntryNr2 > {}) & (EntryNr2 <= {})".format(
-                    g2.entry_nr_offset, g2.entry_nr_offset + g2.nr_entries
-                )
+                "(EntryNr2 > {}) & (EntryNr2 <= {})".format(g2.entry_nr_offset, g2.entry_nr_offset + g2.nr_entries)
             )
         )
         enum = tab.get_enum("RelType")
         df["OrthologyType"] = df["RelType"].apply(lambda x: enum(x))
         df["Protein1"] = df["EntryNr1"].apply(
-            lambda enr: "{}{:05d}".format(
-                g1.uniprot_species_code, enr - g1.entry_nr_offset
-            )
+            lambda enr: "{}{:05d}".format(g1.uniprot_species_code, enr - g1.entry_nr_offset)
         )
         df["Protein2"] = df["EntryNr2"].apply(
-            lambda enr: "{}{:05d}".format(
-                g2.uniprot_species_code, enr - g2.entry_nr_offset
-            )
+            lambda enr: "{}{:05d}".format(g2.uniprot_species_code, enr - g2.entry_nr_offset)
         )
         if self._augment_ids:
             df = self.augment_with_ids(df, g1, g2, "SourceAC", "ProteinAC")
@@ -201,12 +168,8 @@ class PairsExtractor(object):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Export Pairwise Orthologs in TSV format suitable for GeneVestigator"
-    )
-    parser.add_argument(
-        "--out", "-o", default="-", help="Path to output file. Defaults to stdout"
-    )
+    parser = argparse.ArgumentParser(description="Export Pairwise Orthologs in TSV format suitable for GeneVestigator")
+    parser.add_argument("--out", "-o", default="-", help="Path to output file. Defaults to stdout")
     parser.add_argument(
         "--per-pair",
         action="store_true",
@@ -224,8 +187,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "taxon",
         nargs="+",
-        help="Taxon names of species/clades to be included. "
-        "Can be scientific name or ncbi taxon id.",
+        help="Taxon names of species/clades to be included. " "Can be scientific name or ncbi taxon id.",
     )
     parser.add_argument(
         "-v",
@@ -241,9 +203,7 @@ if __name__ == "__main__":
     extractor = PairsExtractor(db, genome_filter, conf.augment)
     if conf.per_pair:
         if not os.path.isdir(conf.out):
-            raise ValueError(
-                "--out parameter must point to an existing directory for per-pair output"
-            )
+            raise ValueError("--out parameter must point to an existing directory for per-pair output")
         extractor.process_per_pair(conf.out)
     else:
         if conf.out == "-":

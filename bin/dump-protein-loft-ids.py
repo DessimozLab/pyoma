@@ -9,10 +9,7 @@ import pandas as pd
 def get_assignments(db):
     df = pd.DataFrame(
         numpy.fromiter(
-            (
-                (row["EntryNr"], row["OmaHOG"].decode())
-                for row in db.get_hdf5_handle().root.Protein.Entries
-            ),
+            ((row["EntryNr"], row["OmaHOG"].decode()) for row in db.get_hdf5_handle().root.Protein.Entries),
             dtype=[("EntryNr", "i4"), ("OmaHOG", "S255")],
         )
     )
@@ -23,16 +20,16 @@ def get_assignments(db):
 
 
 def load_xref(db, idtype):
-    xref_tab = db.get_hdf5_handle().get_node('/XRef')
-    enum = xref_tab.get_enum('XRefSource')
+    xref_tab = db.get_hdf5_handle().get_node("/XRef")
+    enum = xref_tab.get_enum("XRefSource")
     sources = [enum[z] for z in idtype]
-    cond = " | ".join(['(XRefSource == {})'.format(z) for z in sources])
+    cond = " | ".join(["(XRefSource == {})".format(z) for z in sources])
     df = pd.DataFrame(
         numpy.fromiter(
-            ((row['EntryNr'], row['XRefSource'], row['XRefId'].decode())
-             for row in xref_tab.where(cond)
-            ),
-            dtype=[('EntryNr','i4'),('Source','i1'),('XRefId', 'S100')]))
+            ((row["EntryNr"], row["XRefSource"], row["XRefId"].decode()) for row in xref_tab.where(cond)),
+            dtype=[("EntryNr", "i4"), ("Source", "i1"), ("XRefId", "S100")],
+        )
+    )
     df["Source"] = df["Source"].apply(lambda s: enum(s))
     df["XRefId"] = df["XRefId"].apply(bytes.decode)
     wide = df.pivot_table(index="EntryNr", columns="Source", values="XRefId", aggfunc=lambda s: " _|_ ".join(s))
@@ -47,18 +44,15 @@ if __name__ == "__main__":
     parser.add_argument("--out", required=True, help="path to output file")
     parser.add_argument("db", help="Path to input hdf5 file")
     parser.add_argument("--idtype", default=[], nargs="*", help="list of idtypes to include in the output")
-    parser.add_argument(
-        "--format", choices=("tsv", "darwin"), default="tsv", help="outout format"
-    )
+    parser.add_argument("--format", choices=("tsv", "darwin"), default="tsv", help="outout format")
     conf = parser.parse_args()
 
     db = pyoma.browser.db.Database(conf.db)
     df = get_assignments(db)
-    df = df.set_index('EntryNr')[["OmaID", "OmaHOG"]]
+    df = df.set_index("EntryNr")[["OmaID", "OmaHOG"]]
     if len(conf.idtype) > 0:
         xrefs = load_xref(db, conf.idtype)
         df = df.join(xrefs.set_index("EntryNr"), on="EntryNr")
-
 
     if conf.format == "tsv":
         df.to_csv(
@@ -66,7 +60,7 @@ if __name__ == "__main__":
             index=False,
             compression="infer",
             sep="\t",
-            #columns=["OmaID", "OmaHOG"],
+            # columns=["OmaID", "OmaHOG"],
         )
 
     if conf.format == "darwin":

@@ -124,16 +124,10 @@ class OrthoXMLSplitter(object):
 
         if single_hog_files:
             if hogs_to_extract is None:
-                raise RuntimeError(
-                    "useless to extract all hogs into single output file"
-                )
+                raise RuntimeError("useless to extract all hogs into single output file")
             if basename is None or not isinstance(basename, (str, bytes)):
                 raise ValueError("basename needs to be specified: {}".format(basename))
-            ogs = [
-                og
-                for og in self._iter_toplevel_groups()
-                if int(og.get("id")) in hogs_to_extract
-            ]
+            ogs = [og for og in self._iter_toplevel_groups() if int(og.get("id")) in hogs_to_extract]
             fn = os.path.join(self.cache_dir, basename)
             logger.info("extracting %d hogs into %s", len(ogs), fn)
             self.create_new_orthoxml(fn, ogs)
@@ -163,10 +157,7 @@ class OrthoXMLSplitter(object):
             new output file."""
         # Get element to store
         for og_node in OGs:
-            gene_ids = [
-                gene_ref_elem.get("id")
-                for gene_ref_elem in self.iter_generefs_in_og(og_node)
-            ]
+            gene_ids = [gene_ref_elem.get("id") for gene_ref_elem in self.iter_generefs_in_og(og_node)]
         gene_els = self.get_gene_via_generef(gene_ids)
 
         # Get all information to store
@@ -220,6 +211,4 @@ class OrthoXMLSplitter(object):
             groupsxml.append(og_et)
 
         tree = etree.ElementTree(etree_2_dump)
-        tree.write(
-            fn, xml_declaration=True, encoding="utf-8", method="xml", pretty_print=True
-        )
+        tree.write(fn, xml_declaration=True, encoding="utf-8", method="xml", pretty_print=True)

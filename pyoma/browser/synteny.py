@@ -19,13 +19,9 @@ class SyntenyScorer(object):
         elif isinstance(h5_handle, (str, bytes)):
             self.h5_handle = tables.open_file(h5_handle, "r")
         else:
-            raise TypeError(
-                "expected h5_handle to be either h5-file handle or a path to file"
-            )
+            raise TypeError("expected h5_handle to be either h5-file handle or a path to file")
 
-        genome_row = next(
-            self.h5_handle.root.Genome.where("UniProtSpeciesCode == genome")
-        )
+        genome_row = next(self.h5_handle.root.Genome.where("UniProtSpeciesCode == genome"))
         self.genome_range = (
             int(genome_row["EntryOff"]) + 1,
             int(genome_row["EntryOff"] + genome_row["TotEntries"]),
@@ -36,34 +32,25 @@ class SyntenyScorer(object):
             )
         )
         self.genome_df = genome_df[
-            (genome_df["AltSpliceVariant"] == 0)
-            | (genome_df["AltSpliceVariant"] == genome_df["EntryNr"])
+            (genome_df["AltSpliceVariant"] == 0) | (genome_df["AltSpliceVariant"] == genome_df["EntryNr"])
         ]
         self.genome_df.reset_index(inplace=True)
         self.relations_df = self._load_pairwise_relations()
 
     def _load_pairwise_relations(self):
         df = pandas.DataFrame(
-            self.h5_handle.get_node(
-                "/PairwiseRelation/{}/within".format(self.genome)
-            ).read_where("RelType == 5")
+            self.h5_handle.get_node("/PairwiseRelation/{}/within".format(self.genome)).read_where("RelType == 5")
         )
         return df[["EntryNr1", "EntryNr2", "SyntenyConservationLocal"]]
 
     def get_neighbor_genes(self, query):
         q = self.genome_df[self.genome_df["EntryNr"] == query]
         if len(q) == 0:
-            logger.error(
-                "querying neighbor genes for non-primary variant (EntryNr: {})".format(
-                    query
-                )
-            )
+            logger.error("querying neighbor genes for non-primary variant (EntryNr: {})".format(query))
             return []
         query_chr = q["Chromosome"]
         neighbor = self.genome_df[
-            max(0, q.index.item() - self.windowsize // 2) : q.index.item()
-            + self.windowsize // 2
-            + 1
+            max(0, q.index.item() - self.windowsize // 2) : q.index.item() + self.windowsize // 2 + 1
         ]
         return neighbor[neighbor["Chromosome"] == query_chr.item()]
 
@@ -71,9 +58,7 @@ class SyntenyScorer(object):
         neigh1 = self.get_neighbor_genes(entry1)
         neigh2 = self.get_neighbor_genes(entry2)
         if len(neigh1) <= 1 or len(neigh2) <= 1:
-            raise TooSmallChromosome(
-                "too few genes on chromosome: {}, {}".format(len(neigh1), len(neigh2))
-            )
+            raise TooSmallChromosome("too few genes on chromosome: {}, {}".format(len(neigh1), len(neigh2)))
 
         rels_among_windows = self.relations_df[
             (self.relations_df["EntryNr1"] >= neigh1.iloc[0]["EntryNr"])
@@ -99,17 +84,11 @@ class SyntenyScorer(object):
 
     def compute_scores(self):
         res = []
-        for idx, rel in tqdm(
-            self.relations_df.iterrows(), total=len(self.relations_df)
-        ):
+        for idx, rel in tqdm(self.relations_df.iterrows(), total=len(self.relations_df)):
             try:
                 res.append(self.score_of_pair(rel["EntryNr1"], rel["EntryNr2"]))
             except TooSmallChromosome as e:
-                logging.info(
-                    "Skipping {}/{}: {}".format(
-                        int(rel["EntryNr1"]), int(rel["EntryNr2"]), e
-                    )
-                )
+                logging.info("Skipping {}/{}: {}".format(int(rel["EntryNr1"]), int(rel["EntryNr2"]), e))
                 pass
         return pandas.DataFrame(res)
 

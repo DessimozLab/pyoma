@@ -45,9 +45,7 @@ class ProteinEntryTests(TestDbBase):
         if sys.version_info[0] >= 3 and sys.version_info[1] > 2:
             self.assertRegex("{!r}".format(protein_entry), r"<ProteinEntry\(12,.*\)")
         else:
-            self.assertRegexpMatches(
-                "{!r}".format(protein_entry), r"<ProteinEntry\(12,.*\)"
-            )
+            self.assertRegexpMatches("{!r}".format(protein_entry), r"<ProteinEntry\(12,.*\)")
 
     def test_len_of_entry(self):
         protein_entry = models.ProteinEntry.from_entry_nr(self.db, 12)

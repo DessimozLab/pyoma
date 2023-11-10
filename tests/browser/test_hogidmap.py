@@ -50,9 +50,7 @@ class HogIdMapTester(unittest.TestCase):
         lshq = hogidmap.LSHBuilder(self.hogmapfn, "r")
         for hogid, hashes in hash_fam_40:
             best = sorted(lshq.query(hogid, hashes), key=lambda x: -x[2])[0]
-            self.assertEqual(
-                best[0], best[1], "wrong mapping for {}: {}".format(hogid, best[1])
-            )
+            self.assertEqual(best[0], best[1], "wrong mapping for {}: {}".format(hogid, best[1]))
 
     def test_stop_and_continue_building_db_works(self):
         hash_fam_40 = list(self.yield_hog_hashes_for_family_range(stop=40))
@@ -66,9 +64,7 @@ class HogIdMapTester(unittest.TestCase):
 
         for hogid, hashes in hash_fam_40:
             best = sorted(lsh.query(hogid, hashes), key=lambda x: -x[2])[0]
-            self.assertEqual(
-                best[0], best[1], "wrong mapping for {}: {}".format(hogid, best[1])
-            )
+            self.assertEqual(best[0], best[1], "wrong mapping for {}: {}".format(hogid, best[1]))
 
     def test_inexisting_hog_has_no_match(self):
         lsh = hogidmap.LSHBuilder(self.hogmapfn, "w")
@@ -84,17 +80,11 @@ class HogIdMapTester(unittest.TestCase):
         query_sub_fam = "HOG:0000474.1d.2f"
         all_member_of_subfam = self.db.member_of_hog_id(query_sub_fam)
         nr_matching = math.ceil(len(all_member_of_subfam) * 0.85)
-        logging.warning(
-            "building samples of {} ids from pool of {}".format(
-                nr_matching, len(all_member_of_subfam)
-            )
-        )
+        logging.warning("building samples of {} ids from pool of {}".format(nr_matching, len(all_member_of_subfam)))
 
         no_match = 0
         for it in range(10):
-            query_members = numpy.random.choice(
-                all_member_of_subfam, nr_matching, replace=False
-            )
+            query_members = numpy.random.choice(all_member_of_subfam, nr_matching, replace=False)
             minhash = hogidmap.MinHash256()
             for memb in query_members:
                 minhash.update(memb["CanonicalId"])

@@ -68,9 +68,7 @@ class XRefSearchHelper:
 
         self.xref_tab = h5.get_node("/XRef")
         try:
-            self.fulltext_index = SuffixSearcher.from_tablecolumn(
-                self.xref_tab, "XRefId"
-            )
+            self.fulltext_index = SuffixSearcher.from_tablecolumn(self.xref_tab, "XRefId")
         except SuffixIndexError:
             # compability mode
             idx_node = h5.get_node("/XRef_Index")
@@ -86,9 +84,7 @@ class XRefSearchHelper:
             return m.group("base")
         return query
 
-    def _query_prefix(
-        self, query: bytes, entrynr_range=None, exact_match=False
-    ) -> Tuple[str, Mapping]:
+    def _query_prefix(self, query: bytes, entrynr_range=None, exact_match=False) -> Tuple[str, Mapping]:
         condvals = {}
         if exact_match:
             stmt = "(XRefId == query)"
@@ -99,21 +95,15 @@ class XRefSearchHelper:
             stmt = "(XRefId >= low) & (XRefId < high)"
         if entrynr_range is not None:
             stmt += "& (EntryNr >= enr_min) & (EntryNr < enr_max)"
-            condvals.update(
-                {k: v for k, v in zip(("enr_min", "enr_max"), entrynr_range)}
-            )
+            condvals.update({k: v for k, v in zip(("enr_min", "enr_max"), entrynr_range)})
         return stmt, condvals
 
     def _prefix_reduced_search(self, query, entrynr_range, limit=None, exact=False):
         query = self._version_free_query(query).lower().encode("utf-8")
         if query in self.gene_name_lookup:
             return self.gene_name_lookup.get_matching_xref_row_nrs(query, entrynr_range)
-        red_tab_it = self.reduced_xref_tab.where(
-            *self._query_prefix(query, entrynr_range, exact)
-        )
-        xref_rows = numpy.fromiter(
-            itertools.islice((row["XRefRow"] for row in red_tab_it), limit), dtype="i4"
-        )
+        red_tab_it = self.reduced_xref_tab.where(*self._query_prefix(query, entrynr_range, exact))
+        xref_rows = numpy.fromiter(itertools.islice((row["XRefRow"] for row in red_tab_it), limit), dtype="i4")
         return xref_rows
 
     def _prefix_reducecd_count(self, query, entrynr_range=None):
@@ -122,9 +112,7 @@ class XRefSearchHelper:
         query = self._version_free_query(query).lower().encode("utf-8")
         cnts = self.gene_name_lookup.count(query)
         if cnts == 0:
-            cnts = count_elements(
-                self.reduced_xref_tab.where(*self._query_prefix(query, entrynr_range))
-            )
+            cnts = count_elements(self.reduced_xref_tab.where(*self._query_prefix(query, entrynr_range)))
         return cnts
 
     def _suffix_search(self, query, limit=None, unspecific_exception=50000):
@@ -149,20 +137,14 @@ class XRefSearchHelper:
     def _search_suffix_with_constrains(self, query, entrynr_range, limit):
         args = {}
         if limit is not None:
-            unspecific_threshold = (
-                max(1000, 10 * limit) if entrynr_range is not None else 50000
-            )
+            unspecific_threshold = max(1000, 10 * limit) if entrynr_range is not None else 50000
             args = {"limit": limit, "unspecific_exception": unspecific_threshold}
         xref_rows = self._suffix_search(query, **args)
         xref_rows.sort()
         if entrynr_range is not None and self._xref_entry_offset is not None:
             row_low = self._xref_entry_offset[entrynr_range[0]]
             row_high = self._xref_entry_offset[entrynr_range[1] + 1]
-            xref_rows = xref_rows[
-                numpy.where(
-                    numpy.logical_and(xref_rows >= row_low, xref_rows < row_high)
-                )
-            ]
+            xref_rows = xref_rows[numpy.where(numpy.logical_and(xref_rows >= row_low, xref_rows < row_high))]
         return xref_rows
 
     def _search_direct(self, query, mode, entrynr_range, limit):
@@ -171,9 +153,7 @@ class XRefSearchHelper:
         if mode in ("prefix", "suffix_if_no_prefix", "exact"):
             print(self.xref_tab)
             print(self.xref_tab.nrows)
-            it = self.xref_tab.where(
-                *self._query_prefix(query, entrynr_range, exact_match=exact)
-            )
+            it = self.xref_tab.where(*self._query_prefix(query, entrynr_range, exact_match=exact))
             xrefs = numpy.fromiter(
                 (row.fetch_all_fields() for row in itertools.islice(it, limit)),
                 dtype=self.xref_tab.dtype,
@@ -225,9 +205,7 @@ class XrefIdMapper(object):
         self._max_verif_for_mapping_entrynrs = 1000  # allow all verification values
         self.search_helper = XRefSearchHelper(db.get_hdf5_handle())
         try:
-            self._xref_entry_offset = db.get_hdf5_handle().get_node(
-                "/XRef_EntryNr_offset"
-            )
+            self._xref_entry_offset = db.get_hdf5_handle().get_node("/XRef_EntryNr_offset")
         except tables.NoSuchNodeError:
             self._xref_entry_offset = None
 
@@ -263,9 +241,7 @@ class XrefIdMapper(object):
             )
         else:
             it = self.xref_tab.where(
-                "(EntryNr=={:d}) & (Verification <= {:d})".format(
-                    entry_nr, self._max_verif_for_mapping_entrynrs
-                )
+                "(EntryNr=={:d}) & (Verification <= {:d})".format(entry_nr, self._max_verif_for_mapping_entrynrs)
             )
         return it
 
@@ -312,15 +288,9 @@ class XrefIdMapper(object):
             source_condition = self._combine_query_values("XRefSource", self.idtype)
         if self._max_verif_for_mapping_entrynrs < max(x[1] for x in self.verif_enum):
             chunk_size -= 1
-            verif_condition = "(Verification <= {:d})".format(
-                self._max_verif_for_mapping_entrynrs
-            )
+            verif_condition = "(Verification <= {:d})".format(self._max_verif_for_mapping_entrynrs)
         for start in range(0, len(entry_nrs), chunk_size):
-            condition_list = [
-                self._combine_query_values(
-                    "EntryNr", entry_nrs[start : start + chunk_size]
-                )
-            ]
+            condition_list = [self._combine_query_values("EntryNr", entry_nrs[start : start + chunk_size])]
             if source_condition:
                 condition_list.append(source_condition)
             if verif_condition:
@@ -346,9 +316,7 @@ class XrefIdMapper(object):
             source_condition = self._combine_query_values("XRefSource", self.idtype)
             conditions.append(source_condition)
         if self._max_verif_for_mapping_entrynrs < max(x[1] for x in self.verif_enum):
-            verif_condition = "(Verification <= {:d})".format(
-                self._max_verif_for_mapping_entrynrs
-            )
+            verif_condition = "(Verification <= {:d})".format(self._max_verif_for_mapping_entrynrs)
             conditions.append(verif_condition)
         query = " & ".join(conditions)
         it = self.xref_tab.where(query)
@@ -407,12 +375,8 @@ class XrefIdMapper(object):
             term = query
 
         result = collections.defaultdict(dict)
-        for xref in self.search_helper.search(
-            term, entrynr_range=entrynr_range, limit=limit
-        ):
-            if entrynr_range is not None and not (
-                entrynr_range[0] <= xref["EntryNr"] <= entrynr_range[1]
-            ):
+        for xref in self.search_helper.search(term, entrynr_range=entrynr_range, limit=limit):
+            if entrynr_range is not None and not (entrynr_range[0] <= xref["EntryNr"] <= entrynr_range[1]):
                 continue
             if not source_filter or xref["XRefSource"] == source_filter:
                 source = self.xrefEnum(xref["XRefSource"])
@@ -470,9 +434,7 @@ class XRefNoApproximateIdMapper(XrefIdMapper):
 class UniProtIdMapper(XrefIdMapper):
     def __init__(self, db):
         super(UniProtIdMapper, self).__init__(db)
-        self.idtype = frozenset(
-            [self.xrefEnum[z] for z in ["UniProtKB/SwissProt", "UniProtKB/TrEMBL"]]
-        )
+        self.idtype = frozenset([self.xrefEnum[z] for z in ["UniProtKB/SwissProt", "UniProtKB/TrEMBL"]])
 
 
 class LinkoutIdMapper(XrefIdMapper):

@@ -48,15 +48,11 @@ class RelationsOfEntryTest(unittest.TestCase):
 
     def test_iterator(self):
         spairs = pyoma.inference.db.StablePairsOfEntry(self.indata)
-        self.assertEqual(
-            [x["EntryNr2"] for x in spairs], [1, 5], "Unexpected members in SPairs"
-        )
+        self.assertEqual([x["EntryNr2"] for x in spairs], [1, 5], "Unexpected members in SPairs")
 
     def test_matches(self):
         vpairs = pyoma.inference.db.VPairsOfEntry(self.indata)
-        self.assertEqual(
-            1, len(vpairs.relations()), "Unexpected number of VPs returned"
-        )
+        self.assertEqual(1, len(vpairs.relations()), "Unexpected number of VPs returned")
 
 
 class GenomePairTest(unittest.TestCase):
@@ -66,17 +62,13 @@ class GenomePairTest(unittest.TestCase):
         self.genome_pair = pyoma.inference.db.GenomePair(matches, itab)
 
     def test_get_entry(self):
-        prot1_matches = [
-            (m["EntryNr1"], m["EntryNr2"]) for m in self.genome_pair[1]["ALL"]
-        ]
+        prot1_matches = [(m["EntryNr1"], m["EntryNr2"]) for m in self.genome_pair[1]["ALL"]]
         self.assertEqual(
             [(1, 1), (1, 5), (1, 6)],
             prot1_matches,
             "unexpected matches with ALL selector",
         )
-        prot2_matches = [
-            (m["EntryNr1"], m["EntryNr2"]) for m in self.genome_pair[2]["SP"]
-        ]
+        prot2_matches = [(m["EntryNr1"], m["EntryNr2"]) for m in self.genome_pair[2]["SP"]]
         self.assertEqual([(2, 4)], prot2_matches, "unexpected matches with SP selector")
         self.assertEqual(
             0,
@@ -92,9 +84,7 @@ class GenomePairTest(unittest.TestCase):
         self.assertEqual([1, 5, 6], prot2_after, "change of VP should set BM flag")
 
     def test_fail_if_not_member(self):
-        self.assertRaises(
-            ValueError, self.genome_pair[2]["BM"].set_relations, [4, 6, 8]
-        )
+        self.assertRaises(ValueError, self.genome_pair[2]["BM"].set_relations, [4, 6, 8])
 
     def test_iterators_in_sync(self):
         # create iterator before any changes on data

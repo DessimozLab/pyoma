@@ -37,9 +37,7 @@ def go_annotations(db, species=None, evidence=None, reference=None, idtype=None)
         xrefs.drop(columns=["XRefSource", "Verification"], inplace=True)
         xrefs["XRefId"] = xrefs["XRefId"].str.decode("utf-8")
         xrefs["OmaID"] = xrefs["EntryNr"].apply(db.id_mapper["Oma"].map_entry_nr)
-        new_df = go_df.merge(
-            xrefs, how="left", left_on="DB_Object_ID", right_on="OmaID"
-        )
+        new_df = go_df.merge(xrefs, how="left", left_on="DB_Object_ID", right_on="OmaID")
         new_df.drop(columns=["DB_Object_ID"], inplace=True)
         new_df[idtype] = new_df["XRefId"]
         new_df.rename(columns={"XRefId": "DB_Object_ID"}, inplace=True)
@@ -53,9 +51,7 @@ if __name__ == "__main__":
     import argparse
     import sys
 
-    parser = argparse.ArgumentParser(
-        description="Dump GO Annotations from an hdf5 file"
-    )
+    parser = argparse.ArgumentParser(description="Dump GO Annotations from an hdf5 file")
     parser.add_argument(
         "--genome",
         "-g",
@@ -85,9 +81,7 @@ if __name__ == "__main__":
     conf.ref = "OMA_Fun:001" if conf.only_oma else None
 
     db = pyoma.browser.db.Database(conf.db)
-    annotations = go_annotations(
-        db, species=conf.genome, reference=conf.ref, idtype=conf.xref_type
-    )
+    annotations = go_annotations(db, species=conf.genome, reference=conf.ref, idtype=conf.xref_type)
 
     cols = ["OmaID", "GO_ID", "Evidence", "DB:Reference"]
     if conf.xref_type is not None:

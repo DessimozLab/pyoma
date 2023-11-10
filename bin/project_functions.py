@@ -13,11 +13,7 @@ logger = logging.getLogger("mapper")
 
 
 def handler(signum, frame):
-    logger.info(
-        "signal handler called with signal {}. Raise a KeybordInterupt Exception".format(
-            signum
-        )
-    )
+    logger.info("signal handler called with signal {}. Raise a KeybordInterupt Exception".format(signum))
     raise KeyboardInterrupt("time is up")
 
 
@@ -40,9 +36,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("-n", "--nr_proc", type=int, help="Nr of processes to use")
     parser.add_argument("-p", "--procnr", type=int, help="This process nr")
-    parser.add_argument(
-        "-v", action="count", default=0, help="Increase verbosity to INFO/DEBUG"
-    )
+    parser.add_argument("-v", action="count", default=0, help="Increase verbosity to INFO/DEBUG")
     parser.add_argument(
         "-t",
         "--target",
@@ -80,7 +74,7 @@ if __name__ == "__main__":
                     mapper.write_annotations(fout, myjobs, target_species=conf.target)
 
                 except KeyboardInterrupt as e:
-                    logger.info("received KeyboardInterrupt: %s",e)
+                    logger.info("received KeyboardInterrupt: %s", e)
                     logger.info("writing checkpoint")
                     with open(outfn + ".ckpt", "w") as ckpt:
                         ckpt.write(last_id)

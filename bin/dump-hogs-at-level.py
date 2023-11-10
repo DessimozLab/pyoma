@@ -17,11 +17,7 @@ def load_xref(db, idtype=None):
         raise TypeError("db must be a hdf5 oma database")
 
     xref_tab = db.db.get_node("/XRef")
-    xrefs = pandas.DataFrame(
-        xref_tab.read_where(
-            "(XRefSource == {})".format(xref_tab.get_enum("XRefSource")[idtype])
-        )
-    )
+    xrefs = pandas.DataFrame(xref_tab.read_where("(XRefSource == {})".format(xref_tab.get_enum("XRefSource")[idtype])))
     xrefs.drop(columns=["XRefSource", "Verification"], inplace=True)
     xrefs["XRefId"] = xrefs["XRefId"].str.decode("utf-8")
     xrefs.rename(columns={"XRefId": idtype}, inplace=True)
@@ -90,9 +86,7 @@ if __name__ == "__main__":
         type=int,
         help="This process nr. If not passed explictly, it tries to figure out from jobarray info",
     )
-    parser.add_argument(
-        "-v", action="count", default=0, help="Increase verbosity to INFO/DEBUG"
-    )
+    parser.add_argument("-v", action="count", default=0, help="Increase verbosity to INFO/DEBUG")
     parser.add_argument("db", help="Path to the hdf5 database file")
     parser.add_argument("level", help="Level at which to produce the groups")
     conf = parser.parse_args()
@@ -107,6 +101,4 @@ if __name__ == "__main__":
     db = pyoma.browser.db.Database(conf.db)
     families = filter(lambda x: pInf.is_my_job(x), range(db.get_nr_toplevel_hogs()))
     with open(outfn, "w") as fh_out:
-        extract_hogs_at_level(
-            db, conf.level, families, fh_out, xref_types=conf.xref_type
-        )
+        extract_hogs_at_level(db, conf.level, families, fh_out, xref_types=conf.xref_type)

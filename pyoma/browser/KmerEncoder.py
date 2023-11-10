@@ -47,9 +47,7 @@ class KmerEncoder(object):
                 i -= 1
             return self._prot.tostring()
         else:
-            raise ValueError(
-                "{} Larger than largest kmer of size {}".format(seq, self.k)
-            )
+            raise ValueError("{} Larger than largest kmer of size {}".format(seq, self.k))
 
     def decode(self, seq):
         """

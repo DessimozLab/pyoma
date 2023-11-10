@@ -10,15 +10,11 @@ class TestWithBigOmaDB(TestWithDbInstance):
 
     @classmethod
     def setUpClass(cls):
-        with mock.patch.dict(
-            os.environ, {"PYOMA_DB_PATH": "/Volumes/TOSHIBA EXT/browser"}
-        ):
+        with mock.patch.dict(os.environ, {"PYOMA_DB_PATH": "/Volumes/TOSHIBA EXT/browser"}):
             try:
                 super().setUpClass()
             except IOError:
-                raise SkipTest(
-                    "Big database '{}' is not available".format(cls.db_file_name)
-                )
+                raise SkipTest("Big database '{}' is not available".format(cls.db_file_name))
 
 
 class XRefSearchTest(TestWithBigOmaDB):

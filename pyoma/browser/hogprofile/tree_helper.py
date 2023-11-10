@@ -21,9 +21,7 @@ def get_newick_tree_from_tax_db(tax):
 
     def get_duplicates(node):
         c = collections.Counter(x["id"] for x in traverse(node))
-        return list(
-            item[0] for item in itertools.takewhile(lambda x: x[1] > 1, c.most_common())
-        )
+        return list(item[0] for item in itertools.takewhile(lambda x: x[1] > 1, c.most_common()))
 
     def rename_internal_duplicates(node, duplicates):
         for n in traverse(node):

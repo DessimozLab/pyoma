@@ -53,9 +53,7 @@ class SanitySession(object):
         """get the number of genes in each oma group and returns a dictionary/Counter
         object that key: oma group id, value: number of genes in this oma group
         """
-        omagroups = Counter(
-            (x["OmaGroup"] for x in self.entries_table.where("OmaGroup!=0"))
-        )
+        omagroups = Counter((x["OmaGroup"] for x in self.entries_table.where("OmaGroup!=0")))
         return omagroups
 
     def get_all_lvls(self):
@@ -100,14 +98,7 @@ class SanitySession(object):
         """get the number of hogs for a list of taxa levels"""
         result = ""
         for taxa in self.all_lvls:
-            result += (
-                str(taxa.decode("utf-8"))
-                + "\t"
-                + self.release
-                + "\t"
-                + str(self.all_hog_lvls.get(taxa))
-                + "\n"
-            )
+            result += str(taxa.decode("utf-8")) + "\t" + self.release + "\t" + str(self.all_hog_lvls.get(taxa)) + "\n"
             result = re.sub(r"None", "", result)
         return result
 
@@ -119,16 +110,12 @@ class SanitySession(object):
         sorter = genomes.argsort(order=("EntryOff"))
 
         def map_to_species(entry_nrs):
-            idx = genomes["EntryOff"].searchsorted(
-                entry_nrs - 1, side="right", sorter=sorter
-            )
+            idx = genomes["EntryOff"].searchsorted(entry_nrs - 1, side="right", sorter=sorter)
             return genomes[idx - 1]["UniProtSpeciesCode"]
 
         cnts = Counter()
         chunksize = xreftab.chunkshape[0]
-        for start in tqdm(
-            range(0, len(xreftab), chunksize), desc="processing xref-chunks"
-        ):
+        for start in tqdm(range(0, len(xreftab), chunksize), desc="processing xref-chunks"):
             chunk = xreftab.read(start, start + chunksize)
             orgs = map_to_species(chunk["EntryNr"])
             for org, xref_instance in zip(orgs, chunk):

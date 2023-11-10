@@ -75,12 +75,8 @@ class XRefParsingTest(unittest.TestCase):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get("XRefSource").enum
         verif = pyoma.tablefmt.XRefTable.columns.get("Verification").enum
-        self.assertIn(
-            (2, enum["Swiss Model"], b"P21122", verif.unchecked), self.importer.xrefs
-        )
-        self.assertIn(
-            (2, enum["Swiss Model"], b"Q24S32", verif.unchecked), self.importer.xrefs
-        )
+        self.assertIn((2, enum["Swiss Model"], b"P21122", verif.unchecked), self.importer.xrefs)
+        self.assertIn((2, enum["Swiss Model"], b"Q24S32", verif.unchecked), self.importer.xrefs)
 
     def test_regex_of_ensembl_ids(self, mock_up):
         for case in ("ENSG00000162687", "ENSMUSP00000162687"):
@@ -97,20 +93,14 @@ class XRefParsingTest(unittest.TestCase):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get("XRefSource").enum
         verif = pyoma.tablefmt.XRefTable.columns.get("Verification").enum
-        self.assertIn(
-            (4, enum.EnsemblGenomes, b"CBG23988", verif.exact), self.importer.xrefs
-        )
+        self.assertIn((4, enum.EnsemblGenomes, b"CBG23988", verif.exact), self.importer.xrefs)
 
     def test_uniprot_ids(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get("XRefSource").enum
         verif = pyoma.tablefmt.XRefTable.columns.get("Verification").enum
-        self.assertIn(
-            (3, enum["UniProtKB/TrEMBL"], b"L8ECQ9", verif.exact), self.importer.xrefs
-        )
-        self.assertIn(
-            (3, enum["UniProtKB/TrEMBL"], b"Q6CI62", verif.exact), self.importer.xrefs
-        )
+        self.assertIn((3, enum["UniProtKB/TrEMBL"], b"L8ECQ9", verif.exact), self.importer.xrefs)
+        self.assertIn((3, enum["UniProtKB/TrEMBL"], b"Q6CI62", verif.exact), self.importer.xrefs)
         mock_up.assert_called_with(self.up_extra_adder, "K7JG62", 5)
 
     def test_go(self, mock_up):
@@ -146,22 +136,12 @@ class XRefParsingTest(unittest.TestCase):
         self.db_parser.parse_entrytags(self.data)
         enum = pyoma.tablefmt.XRefTable.columns.get("XRefSource").enum
         verif = pyoma.tablefmt.XRefTable.columns.get("Verification").enum
-        self.assertIn(
-            (3, enum["FlyBase"], b"FBgn0218776", verif.unchecked), self.importer.xrefs
-        )
-        self.assertIn(
-            (3, enum["FlyBase"], b"FBtr0247427", verif.unchecked), self.importer.xrefs
-        )
-        self.assertIn(
-            (3, enum["SourceAC"], b"FBtr0247427", verif.exact), self.importer.xrefs
-        )
-        self.assertIn(
-            (2, enum["SourceID"], b"BLABLA22", verif.exact), self.importer.xrefs
-        )
+        self.assertIn((3, enum["FlyBase"], b"FBgn0218776", verif.unchecked), self.importer.xrefs)
+        self.assertIn((3, enum["FlyBase"], b"FBtr0247427", verif.unchecked), self.importer.xrefs)
+        self.assertIn((3, enum["SourceAC"], b"FBtr0247427", verif.exact), self.importer.xrefs)
+        self.assertIn((2, enum["SourceID"], b"BLABLA22", verif.exact), self.importer.xrefs)
         self.assertIn((2, enum["SourceID"], b"BLA22", verif.exact), self.importer.xrefs)
-        self.assertIn(
-            (1, enum["SourceID"], b"ENSG00000204640", verif.exact), self.importer.xrefs
-        )
+        self.assertIn((1, enum["SourceID"], b"ENSG00000204640", verif.exact), self.importer.xrefs)
         self.assertIn(
             (1, enum["Ensembl Gene"], b"ENSG00000204640", verif.exact),
             self.importer.xrefs,
@@ -178,9 +158,7 @@ class XRefParsingTest(unittest.TestCase):
     def test_descriptions_passed_to_description_manager(self, mock_up):
         self.db_parser.parse_entrytags(self.data)
         self.assertEqual(len(self.desc_manager.add_description.call_args_list), 2)
-        self.assertEqual(
-            (3, "β-hemoglobin"), self.desc_manager.add_description.call_args[0]
-        )
+        self.assertEqual((3, "β-hemoglobin"), self.desc_manager.add_description.call_args[0])
 
     def test_remove_duplicated_xrefs(self, mock_up):
         ref = (1, 10, "test_id", "unchecked")
@@ -206,13 +184,9 @@ class XRefParsingTest(unittest.TestCase):
 
 class DescriptionManagerTest(unittest.TestCase):
     def setUp(self):
-        h5file = tables.open_file(
-            "test.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0
-        )
+        h5file = tables.open_file("test.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0)
         nr_rows = 3
-        data = numpy.zeros(
-            nr_rows, dtype=tables.dtype_from_descr(pyoma.tablefmt.ProteinTable)
-        )
+        data = numpy.zeros(nr_rows, dtype=tables.dtype_from_descr(pyoma.tablefmt.ProteinTable))
         data["EntryNr"] = numpy.arange(1, nr_rows + 1)
         h5file.create_table("/", "Entries", pyoma.tablefmt.ProteinTable, obj=data)
         self.h5 = h5file
@@ -257,9 +231,7 @@ class TestGeneOntologyManager(pyoma.GeneOntologyManager):
 
 class GeneOntologyManagerTest(unittest.TestCase):
     def setUp(self):
-        self.h5file = tables.open_file(
-            "test.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0
-        )
+        self.h5file = tables.open_file("test.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0)
 
     def tearDown(self):
         self.h5file.close()
@@ -295,12 +267,8 @@ class GeneOntologyManagerTest(unittest.TestCase):
 
         if sys.version_info >= (3, 4):
             with self.assertLogs("pyoma", level="WARNING") as log:
-                res = self.store_and_retrieve_data(
-                    1, "GO:0003822@[[IEA,{OMA_Fun:001}]]"
-                )
-                self.assertIn(
-                    "invalid GO term for entry 1: GO:0003822", ";".join(log.output)
-                )
+                res = self.store_and_retrieve_data(1, "GO:0003822@[[IEA,{OMA_Fun:001}]]")
+                self.assertIn("invalid GO term for entry 1: GO:0003822", ";".join(log.output))
         else:
             res = self.store_and_retrieve_data(1, "GO:0003822@[[IEA,{OMA_Fun:001}]]")
         self.assertEqual(0, len(res))

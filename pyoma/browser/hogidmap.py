@@ -52,10 +52,7 @@ class HogHasher(object):
 class LSHBuilder(object):
     def __init__(self, hash_file, mode="r", threshold=0.7):
         if mode not in ("r", "a", "w"):
-            raise ValueError(
-                "invalid mode string ``%s``. Allowed modes are: "
-                "'r', 'a' and 'w'" % mode
-            )
+            raise ValueError("invalid mode string ``%s``. Allowed modes are: " "'r', 'a' and 'w'" % mode)
         if mode == "r":
             if not os.path.exists(hash_file):
                 raise IOError('file "{}" does not exist'.format(hash_file))
@@ -79,9 +76,7 @@ class LSHBuilder(object):
 
     def init_hash_table_file(self, hash_file):
         h5 = self._open_hdf5(hash_file, mode="w")
-        h5.create_earray(
-            "/", "hashes", atom=tables.Int64Atom(), shape=(0, 256), expectedrows=1e6
-        )
+        h5.create_earray("/", "hashes", atom=tables.Int64Atom(), shape=(0, 256), expectedrows=1e6)
         h5.create_earray(
             "/",
             "hogids",
@@ -118,9 +113,7 @@ class LSHBuilder(object):
     def compute_lsh(self):
         lsh = MinHashLSH(threshold=self.threshold, num_perm=256)
         hog2row = {}
-        for row, (hogid, hashvals) in enumerate(
-            itertools.zip_longest(self.hogids, self.hashes)
-        ):
+        for row, (hogid, hashvals) in enumerate(itertools.zip_longest(self.hogids, self.hashes)):
             hog2row[hogid] = row
             lsh.insert(hogid, LeanMinHash256(hashvalues=hashvals))
         self.lsh = lsh
@@ -186,9 +179,7 @@ class Collector(BaseProfileBuilderProcess):
         self.lsh_builder = LSHBuilder(self.output_path, mode="a")
 
     def handle_input(self, hashes):
-        logger.info(
-            "build lsh for {} hashes ({})".format(len(hashes), next(iter(hashes)))
-        )
+        logger.info("build lsh for {} hashes ({})".format(len(hashes), next(iter(hashes))))
         self.lsh_builder.add_minhashes(hashes.items())
 
     def finalize(self):
@@ -226,9 +217,7 @@ def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
     fams_to_process = generator_of_unprocessed_fams(db_path, output_path)
     while True:
         pipeline = Pipeline()
-        pipeline.add_stage(
-            Stage(FamGenerator, nr_procs=1, fam_generator=fams_to_process)
-        )
+        pipeline.add_stage(Stage(FamGenerator, nr_procs=1, fam_generator=fams_to_process))
         pipeline.add_stage(Stage(HashWorker, nr_procs=nr_procs, db_path=db_path))
         pipeline.add_stage(Stage(Collector, nr_procs=1, output_path=output_path))
         print("setup pipeline, about to start it.")
@@ -252,9 +241,7 @@ def compare_versions(output_file, target_path, *old_path):
         tab = h5_map.create_table(
             "/",
             "hogmap",
-            description=numpy.dtype(
-                [("Old", "S255"), ("New", "S255"), ("Jaccard", "f4")]
-            ),
+            description=numpy.dtype([("Old", "S255"), ("New", "S255"), ("Jaccard", "f4")]),
         )
         dubious = h5_map.create_earray(
             "/",
@@ -265,9 +252,7 @@ def compare_versions(output_file, target_path, *old_path):
         )
         for old in old_path:
             old = LSHBuilder(old, mode="r")
-            for old_id, old_hashvals in tqdm(
-                itertools.zip_longest(old.hogids, old.hashes), total=len(old.hogids)
-            ):
+            for old_id, old_hashvals in tqdm(itertools.zip_longest(old.hogids, old.hashes), total=len(old.hogids)):
                 minhash = LeanMinHash256(hashvalues=old_hashvals)
                 candidates = sorted(lsh.query(old_id, minhash), key=lambda x: -x[2])
                 logger.debug("old_id: %s: candidates: %s", old_id, candidates)

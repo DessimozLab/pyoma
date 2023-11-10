@@ -227,10 +227,7 @@ class ProteinEntry(object):
 
     @property
     def is_main_isoform(self):
-        return bool(
-            self._entry["AltSpliceVariant"] == 0
-            or self._entry["AltSpliceVariant"] == self._entry["EntryNr"]
-        )
+        return bool(self._entry["AltSpliceVariant"] == 0 or self._entry["AltSpliceVariant"] == self._entry["EntryNr"])
 
     @LazyProperty
     def alternative_isoforms(self):
@@ -375,9 +372,7 @@ class Genome(object):
     @LazyProperty
     def kingdom(self):
         # TODO: store directly in db
-        return self._db.tax.get_parent_taxa(self._genome["NCBITaxonId"])[-1][
-            "Name"
-        ].decode()
+        return self._db.tax.get_parent_taxa(self._genome["NCBITaxonId"])[-1]["Name"].decode()
 
     @property
     def is_polyploid(self):
@@ -387,19 +382,14 @@ class Genome(object):
     @LazyProperty
     def lineage(self):
         """returns the lineage of the genome."""
-        return [
-            lev["Name"].decode()
-            for lev in self._db.tax.get_parent_taxa(self._genome["NCBITaxonId"])
-        ]
+        return [lev["Name"].decode() for lev in self._db.tax.get_parent_taxa(self._genome["NCBITaxonId"])]
 
     @LazyProperty
     def chromosomes(self):
         chrs = collections.defaultdict(list)
         entry_tab = self._db.get_hdf5_handle().get_node("/Protein/Entries")
         for row in entry_tab.where(
-            "(EntryNr > {}) & (EntryNr <= {})".format(
-                self.entry_nr_offset, self.entry_nr_offset + self.nr_entries
-            )
+            "(EntryNr > {}) & (EntryNr <= {})".format(self.entry_nr_offset, self.entry_nr_offset + self.nr_entries)
         ):
             chrs[row["Chromosome"].decode()].append(row["EntryNr"])
         return chrs
@@ -425,15 +415,11 @@ class Genome(object):
             "chr": chr,
         }
         tab = self._db.get_hdf5_handle().get_node("/Protein/Entries")
-        chr_len = int(
-            max((row["LocusEnd"] for row in tab.where(query, condvars=condvars)))
-        )
+        chr_len = int(max((row["LocusEnd"] for row in tab.where(query, condvars=condvars))))
         return chr_len
 
     def __repr__(self):
-        return "<{}({}, {})>".format(
-            self.__class__.__name__, self.uniprot_species_code, self.ncbi_taxon_id
-        )
+        return "<{}({}, {})>".format(self.__class__.__name__, self.uniprot_species_code, self.ncbi_taxon_id)
 
     def __len__(self):
         return self.nr_entries
@@ -460,26 +446,16 @@ class AncestralGenome(object):
     @LazyProperty
     def _genome(self):
         if isinstance(self._stored_genome, (int, str, numpy.integer)):
-            if (
-                isinstance(self._stored_genome, (int, numpy.integer))
-                and self._stored_genome == 0
-            ) or (
-                isinstance(self._stored_genome, str)
-                and self._stored_genome.lower() == "luca"
+            if (isinstance(self._stored_genome, (int, numpy.integer)) and self._stored_genome == 0) or (
+                isinstance(self._stored_genome, str) and self._stored_genome.lower() == "luca"
             ):
-                data = numpy.array(
-                    [(0, -1, b"LUCA")], dtype=self.db.tax.tax_table.dtype
-                )[0]
+                data = numpy.array([(0, -1, b"LUCA")], dtype=self.db.tax.tax_table.dtype)[0]
             else:
                 try:
-                    data = self.db.tax.get_taxnode_from_name_or_taxid(
-                        self._stored_genome
-                    )[0]
+                    data = self.db.tax.get_taxnode_from_name_or_taxid(self._stored_genome)[0]
                 except (InvalidTaxonId, KeyError) as e:
                     raise UnknownSpecies(
-                        "No ancestral genome for {} exists in the database".format(
-                            self._stored_genome
-                        )
+                        "No ancestral genome for {} exists in the database".format(self._stored_genome)
                     )
         else:
             data = self._stored_genome
@@ -515,10 +491,7 @@ class AncestralGenome(object):
     def extant_genomes(self):
         """the list of :class:`Genome` models instances representing all
         the extant genomes originating from this ancestral genome"""
-        return [
-            Genome(self.db, taxid)
-            for taxid in self.subtaxonomy.get_taxid_of_extent_genomes()
-        ]
+        return [Genome(self.db, taxid) for taxid in self.subtaxonomy.get_taxid_of_extent_genomes()]
 
     @property
     def kingdom(self):
@@ -527,10 +500,7 @@ class AncestralGenome(object):
     @LazyProperty
     def lineage(self):
         """returns the lineage of the ancestral genome."""
-        return [
-            lev["Name"].decode()
-            for lev in self.db.tax.get_parent_taxa(self.ncbi_taxon_id)
-        ]
+        return [lev["Name"].decode() for lev in self.db.tax.get_parent_taxa(self.ncbi_taxon_id)]
 
     @LazyProperty
     def nr_genes(self):
@@ -552,9 +522,7 @@ class OmaGroup(object):
         if isinstance(self._stored_group, dict) and "group_nr" in self._stored_group:
             return self._stored_group
         else:
-            return self._db.oma_group_metadata(
-                self._db.resolve_oma_group(self._stored_group)
-            )
+            return self._db.oma_group_metadata(self._db.resolve_oma_group(self._stored_group))
 
     @property
     def group_nbr(self):
@@ -578,10 +546,7 @@ class OmaGroup(object):
     @LazyProperty
     def members(self):
         """returns a list of member proteins as :class:`ProteinEntry` objects"""
-        return [
-            ProteinEntry(self._db, pe)
-            for pe in self._db.oma_group_members(self.group_nbr)
-        ]
+        return [ProteinEntry(self._db, pe) for pe in self._db.oma_group_members(self.group_nbr)]
 
     @property
     def nr_member_genes(self):
@@ -596,9 +561,7 @@ class OmaGroup(object):
         return self.nr_member_genes
 
     def __repr__(self):
-        return "<{}({}, {})>".format(
-            self.__class__.__name__, self.group_nbr, self.fingerprint
-        )
+        return "<{}({}, {})>".format(self.__class__.__name__, self.group_nbr, self.fingerprint)
 
 
 class HOG(object):
@@ -632,9 +595,7 @@ class HOG(object):
     def _hog(self):
         if isinstance(self._stored_hog, (int, numpy.integer)):
             # load hog at root
-            return self._db.get_hog(
-                self._db.format_hogid(self._stored_hog), level=self._stored_level
-            )
+            return self._db.get_hog(self._db.format_hogid(self._stored_hog), level=self._stored_level)
         elif isinstance(self._stored_hog, (str, bytes)):
             # load hog using ID
             return self._db.get_hog(self._stored_hog, self._stored_level)
@@ -689,10 +650,7 @@ class HOG(object):
     def members(self):
         """returns a list of :class:`pyoma.browser.models.ProteinEntry` instances with all
         the proteins / genes belonging to this HOG."""
-        return [
-            ProteinEntry(self._db, pe)
-            for pe in self._db.member_of_hog_id(self.hog_id, level=self.level)
-        ]
+        return [ProteinEntry(self._db, pe) for pe in self._db.member_of_hog_id(self.hog_id, level=self.level)]
 
     @LazyProperty
     def parent_hogs(self):
@@ -728,24 +686,18 @@ class PairwiseRelation(object):
     @LazyProperty
     def rel_type(self):
         if not isinstance(self._relation["RelType"], str):
-            type_map = self._db._get_pw_tab(
-                self._relation["EntryNr1"], "VPairs"
-            ).get_enum("RelType")
+            type_map = self._db._get_pw_tab(self._relation["EntryNr1"], "VPairs").get_enum("RelType")
             return type_map(self._relation["RelType"])
         else:
             return self._relation["RelType"]
 
     @LazyProperty
     def entry_1(self):
-        return ProteinEntry(
-            self._db, self._db.entry_by_entry_nr(self._relation["EntryNr1"])
-        )
+        return ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation["EntryNr1"]))
 
     @LazyProperty
     def entry_2(self):
-        return ProteinEntry(
-            self._db, self._db.entry_by_entry_nr(self._relation["EntryNr2"])
-        )
+        return ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation["EntryNr2"]))
 
 
 class GeneOntologyAnnotation(object):
@@ -794,11 +746,7 @@ class ExonStructure(object):
 
     @LazyProperty
     def _exons(self):
-        return (
-            self._db.get_exons(self._stored)
-            if isinstance(self._stored, int)
-            else self._stored
-        )
+        return self._db.get_exons(self._stored) if isinstance(self._stored, int) else self._stored
 
     @classmethod
     def from_entry_nr(cls, db, eNr):
@@ -816,9 +764,7 @@ class ExonStructure(object):
         return len(self._exons)
 
     def __repr__(self):
-        return "<{}(entry_nr={}, nr_exons={})>".format(
-            self.__class__.__name__, self._exons[0]["EntryNr"], len(self)
-        )
+        return "<{}(entry_nr={}, nr_exons={})>".format(self.__class__.__name__, self._exons[0]["EntryNr"], len(self))
 
     def __str__(self):
         exs = list(str(e) for e in self._iter_exons())
@@ -830,10 +776,7 @@ class ExonStructure(object):
             return "n/a"
 
     def as_list_of_dict(self):
-        return [
-            {"start": e.start, "end": e.end, "strand": e.strand}
-            for e in self._iter_exons()
-        ]
+        return [{"start": e.start, "end": e.end, "strand": e.strand} for e in self._iter_exons()]
 
 
 class Exon(object):

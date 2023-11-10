@@ -35,9 +35,7 @@ if __name__ == "__main__":
         default="hog-dump.txt",
         help="Output file path, defaults to hog-dump.txt",
     )
-    parser.add_argument(
-        "-v", action="count", default=0, help="Increase verbosity to INFO/DEBUG"
-    )
+    parser.add_argument("-v", action="count", default=0, help="Increase verbosity to INFO/DEBUG")
     parser.add_argument("db", help="Path to the hdf5 database file")
     parser.add_argument("level", help="Level at which to produce the groups")
     conf = parser.parse_args()

@@ -16,9 +16,7 @@ class StandaloneExporter(DarwinExporter):
         self.assert_cached_results()
         for gs in self.h5.root.Genome.iterrows():
             genome = gs["UniProtSpeciesCode"].decode()
-            rel_node_for_genome = self._get_or_create_node(
-                "/PairwiseRelation/{}".format(genome)
-            )
+            rel_node_for_genome = self._get_or_create_node("/PairwiseRelation/{}".format(genome))
             if "homologs" not in rel_node_for_genome:
                 pass
 
@@ -31,24 +29,18 @@ class StandaloneExporter(DarwinExporter):
 
     def assert_cached_results(self):
         if not self.transformed:
-            res = self.call_darwin_export(
-                "TransformDataToCache('{}');".format(self.cache_dir)
-            )
+            res = self.call_darwin_export("TransformDataToCache('{}');".format(self.cache_dir))
             if res != "success":
                 raise DarwinException("could not transform data from darwin", "")
             self.transformed = True
-            os.environ["DARWIN_NETWORK_SCRATCH_PATH"] = os.getenv(
-                "DARWIN_BROWSERDATA_PATH"
-            )
+            os.environ["DARWIN_NETWORK_SCRATCH_PATH"] = os.getenv("DARWIN_BROWSERDATA_PATH")
             common.package_logger.info("successfully transformed data to json")
 
     def add_orthologs(self):
         self.assert_cached_results()
         for gs in self.h5.root.Genome.iterrows():
             genome = gs["UniProtSpeciesCode"].decode()
-            rel_node_for_genome = self._get_or_create_node(
-                "/PairwiseRelation/{}".format(genome)
-            )
+            rel_node_for_genome = self._get_or_create_node("/PairwiseRelation/{}".format(genome))
             if "VPairs" not in rel_node_for_genome:
                 cache_file = os.path.join(
                     os.getenv("DARWIN_NETWORK_SCRATCH_PATH", ""),
@@ -74,9 +66,7 @@ class StandaloneExporter(DarwinExporter):
                 vp_tab.cols.EntryNr1.create_csindex()
             if "within" not in rel_node_for_genome:
                 # we don't add data about this, but browser requires the node
-                self.h5.create_table(
-                    rel_node_for_genome, "within", tablefmt.PairwiseRelationTable
-                )
+                self.h5.create_table(rel_node_for_genome, "within", tablefmt.PairwiseRelationTable)
 
     def add_hogs(self, **kwargs):
         fn = "HierarchicalGroups.orthoxml"
@@ -87,18 +77,14 @@ class StandaloneExporter(DarwinExporter):
             "EstimatedSpeciesTree.nwk",
             "LineageSpeciesTree.nwk",
         ):
-            tree_filename = os.path.join(
-                os.environ["DARWIN_BROWSERDATA_PATH"], "Output", tree_file
-            )
+            tree_filename = os.path.join(os.environ["DARWIN_BROWSERDATA_PATH"], "Output", tree_file)
             if os.path.exists(tree_filename):
                 self.logger.info("Use " + tree_filename + " as HOG backbone tree file")
                 break
         hog_treefile = None
         if os.path.exists(tree_filename):
             hog_treefile = tree_filename
-        return super().add_hogs(
-            hog_path=hog_cache_dir, hog_file=hog_file, tree_filename=hog_treefile
-        )
+        return super().add_hogs(hog_path=hog_cache_dir, hog_file=hog_file, tree_filename=hog_treefile)
 
     def _get_genome_database_paths(self):
         return self.call_darwin_export("GetGenomeFileNames();")
@@ -110,13 +96,9 @@ class StandaloneExporter(DarwinExporter):
 def mark_isoforms(dbfn):
     from .db import Database, OmaIdMapper
 
-    used_splice_fn = os.path.join(
-        os.getenv("DARWIN_BROWSERDATA_PATH"), "Output", "used_splicing_variants.txt"
-    )
+    used_splice_fn = os.path.join(os.getenv("DARWIN_BROWSERDATA_PATH"), "Output", "used_splicing_variants.txt")
     if not os.path.exists(used_splice_fn):
-        common.package_logger.info(
-            "no splicing output file found. Assume not splice variants"
-        )
+        common.package_logger.info("no splicing output file found. Assume not splice variants")
         return
 
     db = Database(dbfn)
@@ -131,13 +113,9 @@ def mark_isoforms(dbfn):
             except Exception:
                 common.package_logger.warning("cannot convert line: %s", line)
                 pass
-    common.package_logger.info(
-        "found {} main splicing variants".format(len(main_variants))
-    )
+    common.package_logger.info("found {} main splicing variants".format(len(main_variants)))
     common.package_logger.debug(main_variants)
-    splice_column = (
-        db.get_hdf5_handle().get_node("/Protein/Entries").col("AltSpliceVariant")
-    )
+    splice_column = db.get_hdf5_handle().get_node("/Protein/Entries").col("AltSpliceVariant")
     for file in os.scandir(os.path.join(os.getenv("DARWIN_BROWSERDATA_PATH"), "DB")):
         if not file.name.endswith(".splice"):
             continue
@@ -171,26 +149,17 @@ def import_oma_run(path, outfile, domains=None, log_level="INFO"):
     if domains is None:
         domains = ["file:///dev/null"]
     else:
-        domains = list(
-            map(lambda url: "file://" + url if url.startswith("/") else url, domains)
-        )
+        domains = list(map(lambda url: "file://" + url if url.startswith("/") else url, domains))
     log.info("loading domain annotations from {}".format(domains))
     x.add_domain_info(
-        filter_duplicated_domains(
-            only_pfam_or_cath_domains(
-                itertools.chain.from_iterable(map(iter_domains, domains))
-            )
-        )
+        filter_duplicated_domains(only_pfam_or_cath_domains(itertools.chain.from_iterable(map(iter_domains, domains))))
     )
     x.add_domainname_info(
         itertools.chain(
             CathDomainNameParser(
-                "http://download.cathdb.info/cath/releases/latest-release/"
-                "cath-classification-data/cath-names.txt"
+                "http://download.cathdb.info/cath/releases/latest-release/" "cath-classification-data/cath-names.txt"
             ).parse(),
-            PfamDomainNameParser(
-                "ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz"
-            ).parse(),
+            PfamDomainNameParser("ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz").parse(),
         )
     )
     x.add_canonical_id()

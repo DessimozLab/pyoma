@@ -195,15 +195,14 @@ class XRefSearchHelper:
         return cnts
 
 
-class XrefIdMapper(object):
-    def __init__(self, db):
+class NoSearchXrefIdMapper(object):
+    def __init__(self, db, sources=None):
         self._db = db
         self.xref_tab = db.get_hdf5_handle().get_node("/XRef")
         self.xrefEnum = self.xref_tab.get_enum("XRefSource")
-        self.idtype = frozenset(list(self.xrefEnum._values.keys()))
+        self.idtype = frozenset(nr for src, nr in self.xrefEnum._names.items() if sources is None or src in sources)
         self.verif_enum = self.xref_tab.get_enum("Verification")
         self._max_verif_for_mapping_entrynrs = 1000  # allow all verification values
-        self.search_helper = XRefSearchHelper(db.get_hdf5_handle())
         try:
             self._xref_entry_offset = db.get_hdf5_handle().get_node("/XRef_EntryNr_offset")
         except tables.NoSuchNodeError:
@@ -330,6 +329,48 @@ class XrefIdMapper(object):
         )
         return res
 
+    def source_as_string(self, source):
+        """string representation of xref source enum value
+
+        this auxiliary method converts the numeric value of
+        a xref source into a string representation.
+
+        :param int source: numeric value of xref source"""
+        return self.xrefEnum(source)
+
+    def verification_as_string(self, verif):
+        """string representation of xref verifiction enum value"""
+        return self.verif_enum(verif)
+
+    def xreftab_to_dict(self, tab):
+        """convert a xreftable to a dictionary per entry_nr.
+
+        All rows in `tab` are converted into a nested dictionary
+        where the outer key is a protein entry number and the
+        inner key the xref source type.
+
+        :param tab: a :class:`numpy.recarray` corresponding to XRef
+            table definition to be converted"""
+        xrefdict = collections.defaultdict(dict)
+        for row in tab:
+            try:
+                typ = self.xrefEnum(row["XRefSource"])
+            except IndexError:
+                logger.warning("invalid XRefSource value in %s", row)
+                continue
+            if typ not in xrefdict[row["EntryNr"]]:
+                xrefdict[row["EntryNr"]][typ] = {
+                    "id": row["XRefId"],
+                    "seq_match": self.verif_enum(row["Verification"]),
+                }
+        return xrefdict
+
+
+class XrefIdMapper(NoSearchXrefIdMapper):
+    def __init__(self, db):
+        super(XrefIdMapper, self).__init__(db)
+        self.search_helper = XRefSearchHelper(db.get_hdf5_handle())
+
     @timethis(logging.DEBUG)
     def search_xref(self, xref, is_prefix=False, match_any_substring=False):
         """identify proteins associcated with `xref`.
@@ -387,42 +428,6 @@ class XrefIdMapper(object):
             if limit is not None and len(result) >= limit:
                 break
         return result
-
-    def source_as_string(self, source):
-        """string representation of xref source enum value
-
-        this auxiliary method converts the numeric value of
-        a xref source into a string representation.
-
-        :param int source: numeric value of xref source"""
-        return self.xrefEnum(source)
-
-    def verification_as_string(self, verif):
-        """string representation of xref verifiction enum value"""
-        return self.verif_enum(verif)
-
-    def xreftab_to_dict(self, tab):
-        """convert a xreftable to a dictionary per entry_nr.
-
-        All rows in `tab` are converted into a nested dictionary
-        where the outer key is a protein entry number and the
-        inner key the xref source type.
-
-        :param tab: a :class:`numpy.recarray` corresponding to XRef
-            table definition to be converted"""
-        xrefdict = collections.defaultdict(dict)
-        for row in tab:
-            try:
-                typ = self.xrefEnum(row["XRefSource"])
-            except IndexError:
-                logger.warning("invalid XRefSource value in %s", row)
-                continue
-            if typ not in xrefdict[row["EntryNr"]]:
-                xrefdict[row["EntryNr"]][typ] = {
-                    "id": row["XRefId"],
-                    "seq_match": self.verif_enum(row["Verification"]),
-                }
-        return xrefdict
 
 
 class XRefNoApproximateIdMapper(XrefIdMapper):

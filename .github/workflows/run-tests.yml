@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
 
     steps:
     - uses: actions/checkout@v3
@@ -28,8 +28,8 @@ jobs:
         pip install .[create_db,enrichment]
     - name: Download test database
       run: |
-        curl https://ftp.vital-it.ch/altenhoff/TestDb.h5 -o TestDb.h5
-        curl https://ftp.vital-it.ch/altenhoff/TestDb.h5.idx -o TestDb.h5.idx
+        curl https://omabrowser.org/Test.Jul2014/OmaServer.h5 -o TestDb.h5
+        curl https://omabrowser.org/Test.Jul2014/OmServer.h5.idx -o TestDb.h5.idx
     - name: Check versions of installed libraries/systems
       run: python -c "import sys, tables; print(sys.version); tables.print_versions()"
     - name: Test with pytest

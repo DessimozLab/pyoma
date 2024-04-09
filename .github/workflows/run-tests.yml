@@ -21,8 +21,6 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: ${{matrix.python-version}}
-    - name: Setup git-annex
-      uses: jstritch/setup-git-annex@v1
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -30,7 +28,8 @@ jobs:
         pip install .[create_db,enrichment]
     - name: Download test database
       run: |
-        git annex get --from zoo-http .
+        curl https://omabrowser.org/Test.Jul2014/OmaServer.h5 -o TestDb.h5
+        curl https://omabrowser.org/Test.Jul2014/OmServer.h5.idx -o TestDb.h5.idx
     - name: Check versions of installed libraries/systems
       run: python -c "import sys, tables; print(sys.version); tables.print_versions()"
     - name: Test with pytest

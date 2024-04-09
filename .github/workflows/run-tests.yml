@@ -30,6 +30,8 @@ jobs:
         pip install .[create_db,enrichment]
     - name: Download test database
       run: |
+        git annex init
+        git annex enableremote zoo-http
         git annex get --from zoo-http .
     - name: Check versions of installed libraries/systems
       run: python -c "import sys, tables; print(sys.version); tables.print_versions()"

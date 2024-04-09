@@ -28,8 +28,8 @@ jobs:
         pip install .[create_db,enrichment]
     - name: Download test database
       run: |
-        curl https://omabrowser.org/Test.Jul2014/OmaServer.h5 -o TestDb.h5
-        curl https://omabrowser.org/Test.Jul2014/OmServer.h5.idx -o TestDb.h5.idx
+        curl https://zoo.cs.ucl.ac.uk/annex/TestDb.h5 -o TestDb.h5
+        curl https://zoo.cs.ucl.ac.uk/annex/TestDb.h5.idx -o TestDb.h5.idx
     - name: Check versions of installed libraries/systems
       run: python -c "import sys, tables; print(sys.version); tables.print_versions()"
     - name: Test with pytest

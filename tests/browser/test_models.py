@@ -1,14 +1,15 @@
 from __future__ import unicode_literals, division, absolute_import
-from builtins import bytes, range, str
+
+import sys
+import time
+import unittest
+from builtins import str
 
 import numpy
+from future.utils import with_metaclass
 
 import pyoma.browser.exceptions
 from pyoma.browser import models, db, tablefmt
-from future.utils import with_metaclass
-import sys
-import os
-import unittest
 from .test_db import find_path_to_test_db
 
 
@@ -188,6 +189,29 @@ class AncestralGenomeModelTests(TestDbBase):
         query_level = "Eukaryota"
         ag = models.AncestralGenome(self.db, query_level)
         self.assertLess(100, ag.nr_genes)
+
+
+class PairwiseRelationModelTest(TestDbBase):
+    def test_relations(self):
+        tab_data = self.db.get_vpairs_between_species_pair("YEAST", "PLAF7")
+        rels = [models.PairwiseRelation(self.db, d) for d in tab_data]
+        self.assertEqual(tab_data[0]["EntryNr1"], rels[0].entry_1.entry_nr)
+        self.assertEqual(tab_data[0]["Distance"], rels[0].distance)
+
+    def test_faster_when_passing_entries(self):
+        tab_data = self.db.get_vpairs_between_species_pair("YEAST", "PLAF7")
+        entries = {e["EntryNr"]: models.ProteinEntry(self.db, e) for e in self.db.main_isoforms("YEAST")}
+
+        t0 = time.time()
+        rels = [models.PairwiseRelation(self.db, d) for d in tab_data]
+        entry1_nrs_1 = [r.entry_1.entry_nr for r in rels]
+        t1 = time.time()
+        rels2 = [models.PairwiseRelation(self.db, d, entry1=entries[d["EntryNr1"]]) for d in tab_data]
+        entry1_nrs_2 = [r.entry_1.entry_nr for r in rels2]
+        t2 = time.time()
+        self.assertEqual(entry1_nrs_1, entry1_nrs_2)
+        print(t2 - t1, "vs", t1 - t0, "seconds elapsed")
+        self.assertLessEqual(t2 - t1, t1 - t0)
 
 
 class ExonStructureTest(unittest.TestCase):

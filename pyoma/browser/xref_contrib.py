@@ -9,6 +9,7 @@ import tables
 import logging
 import os
 from pathlib import Path
+from typing import List, Tuple, Set, Union
 from .hogprofile.build import Pipeline, SourceProcess, BaseProfileBuilderProcess, Stage
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,21 @@ class SpliceVariantHelper:
                 yield GeneEntries(res + 1, main + 1)
 
 
+class KeywordIndexer:
+    def __init__(self, stopwords: Union[os.PathLike, Set[str]]):
+        self.kw = collections.defaultdict(set)
+        if isinstance(stopwords, set):
+            self.stopwords = set(stopwords)
+        else:
+            self.stopwords = set()
+            with open(stopwords, "rt") as fh:
+                for line in fh:
+                    self.stopwords.union(line.split())
+
+    def process(self, desc, enr):
+        pass
+
+
 class XRefIndexHandler(BaseProfileBuilderProcess):
     def __init__(self, outfile, **kwargs):
         super().__init__(**kwargs)
@@ -68,6 +84,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
             outfile = Path(os.getenv("TMPDIR", "/tmp")) / "tmp_index.h5"
         self.outfile = outfile
         self.tmp_h5 = outfile + ".tmp"
+        self.kwi = None
 
     def setup(self):
         self.xref_h5 = tables.open_file(self.tmp_h5, "w", filters=tables.Filters(6, complib="blosc"))
@@ -82,6 +99,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         self.genenames = collections.defaultdict(list)
         self.spids = collections.defaultdict(list)
         self._buffer = []
+        self.kwi = KeywordIndexer()
 
     def _sort_and_store_xrefs(self):
         data = self.xref_idx.read()
@@ -143,7 +161,11 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         self.genenames[id.lower()].append((enr, xref_row))
         self.add_xref(id, enr, xref_row)
 
-    def handle_input(self, df: pandas.DataFrame):
+    def add_keyword(self, enr: int, desc: str):
+        self.kwi.process(desc, enr)
+
+    def handle_input(self, item: Tuple[pandas.DataFrame, List]):
+        df, desc = item
         for row in df.to_records(index=False):
             if row["XRefSource"] == 0:
                 self.add_swissprot(row["XRefId"], row["EntryNr"], row["xref_row"])
@@ -242,6 +264,19 @@ class XRefReducer(BaseProfileBuilderProcess):
         data = numpy.frombuffer(buf.getbuffer(), dtype=dtype)
         return pandas.DataFrame(data)
 
+    def _load_descriptions(self, gene):
+        query = " | ".join([f"((EntryNr >= {s.start}) & (EntryNr < {s.stop}))" for s in gene.entrynr_slices()])
+        descriptions = []
+        desc_buf = self.h5.get_node("/Protein/DescriptionBuffer")
+        for row in self.h5.get_node("/Protein/Entries").where(query):
+            desc = (
+                desc_buf[row["DescriptionOffset"] : row["DescriptionOffset"] + row["DescriptionLength"]]
+                .tobytes()
+                .decode()
+            )
+            descriptions.append((row["EntryNr"], desc))
+        return descriptions
+
     def handle_input(self, gene):
         if self.xref_eof is None:
             xrefs = self._load_xrefs_with_where_cond(gene)
@@ -255,7 +290,8 @@ class XRefReducer(BaseProfileBuilderProcess):
         # sort such that first element per xrefid is the one we want to keep in the index
         sorted_xrefs = xrefs.sort_values(["Verification", "is_main", "XRefSource"], ascending=[True, False, True])
         res = sorted_xrefs.groupby("XRefId").first().reset_index()
-        return res
+        desc = self._load_descriptions(gene)
+        return res, desc
 
 
 def reduce_xrefs(h5_path, outpath=None, nr_procs=None):

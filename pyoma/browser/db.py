@@ -3414,12 +3414,32 @@ HogMapperTuple = collections.namedtuple("HogMapperTuple", "query, closest_entry_
 class ClosestSeqMapper(object):
     """Fast mapper of sequeces to closest sequence and taken their HOG annotation"""
 
-    def __init__(self, db, threaded=False):
+    def __init__(self, db, threaded=False, nr_approx_alignments=50):
         self.db = Database(db.get_hdf5_handle().filename) if threaded else db
+        self.nr_approx_alignments = nr_approx_alignments
+        self._times = []
 
     def _get_main_protein_from_entrynr(self, enr):
         entry = ProteinEntry(self.db, self.db.entry_by_entry_nr(enr))
         return entry.get_main_isoform()
+
+    def _search_seq_with_time_stats(self, rec, entrynr_range=None):
+        t_start = time.time()
+        search_res = self.db.seq_search.search(
+            str(rec.seq), n=self.nr_approx_alignments, compute_distance=True, entrynr_range=entrynr_range
+        )
+        t_search = time.time() - t_start
+        self._times.append(t_search)
+        logger.debug("mapping of %s took %f sec", rec.id, t_search)
+        return search_res
+
+    def _log_time_stat(self, runtime):
+        self._times
+        quantiles = numpy.quantile(self._times, [0, 0.1, 0.5, 0.9, 1])
+        logger.info(
+            "Mapped %d sequences. Total mapping time %f (tot time %f)", len(self._times), sum(self._times), runtime
+        )
+        logger.info(" min_time: %f, 10%% time: %f, avg_time: %f, 90%% time: %f, max_time: %f", *quantiles)
 
     def imap_sequences(self, seqrecords, target_species=None):
         """maps an iterator of Bio.Seq.SeqRecords to database and
@@ -3428,18 +3448,19 @@ class ClosestSeqMapper(object):
         if target_species is not None:
             entrynr_range = self.db.id_mapper["OMA"].genome_range(target_species)
 
+        t_start = t_last = time.time()
         for rec in seqrecords:
-            logger.debug("projecting %s to closest sequence", rec)
-            r = self.db.seq_search.search(str(rec.seq), compute_distance=True, entrynr_range=entrynr_range)
-            if r is not None:
-                if r[0] == "exact":
+            logger.debug("projecting %s (%d AA) to closest sequence", rec.id, len(rec.seq))
+            search_res = self._search_seq_with_time_stats(rec, entrynr_range=entrynr_range)
+            if search_res is not None:
+                if search_res[0] == "exact":
                     # r[1] contains list of entry nr with exact sequence match (full length)
-                    for enr in r[1]:
+                    for enr in search_res[1]:
                         p = self._get_main_protein_from_entrynr(enr)
-                        # TODO: good score for identical sequences
-                        yield HogMapperTuple(rec.id, enr, p, 0, 0)
+                        # score is set to expected score for a matching AAs: sum(AF[k]*sim[k,k])=12.61
+                        yield HogMapperTuple(rec.id, enr, p, 0.01, len(rec.seq) * 12.61)
                 else:
-                    candidate_matches = r[1]
+                    candidate_matches = search_res[1]
                     if len(candidate_matches) <= 0:
                         continue
                     # Take best matches, up to score>80 & score_i > .5*score_max
@@ -3450,3 +3471,7 @@ class ClosestSeqMapper(object):
                         p = self._get_main_protein_from_entrynr(enr)
                         # score, distance, distvar = pyopa.MutipleAlEnv
                         yield HogMapperTuple(rec.id, enr, p, match_res["distance"], match_res["score"])
+            if time.time() - t_last > 60:
+                t_last = time.time()
+                self._log_time_stat(t_last - t_start)
+        self._log_time_stat(time.time() - t_start)

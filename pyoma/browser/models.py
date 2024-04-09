@@ -659,9 +659,11 @@ class HOG(object):
 
 
 class PairwiseRelation(object):
-    def __init__(self, db, relation):
+    def __init__(self, db, relation, entry1=None, entry2=None):
         self._relation = relation
         self._db = db
+        self._entry1 = entry1
+        self._entry2 = entry2
 
     @property
     def distance(self):
@@ -691,13 +693,17 @@ class PairwiseRelation(object):
         else:
             return self._relation["RelType"]
 
-    @LazyProperty
+    @property
     def entry_1(self):
-        return ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation["EntryNr1"]))
+        if self._entry1 is None:
+            self._entry1 = ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation["EntryNr1"]))
+        return self._entry1
 
-    @LazyProperty
+    @property
     def entry_2(self):
-        return ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation["EntryNr2"]))
+        if self._entry2 is None:
+            self._entry2 = ProteinEntry(self._db, self._db.entry_by_entry_nr(self._relation["EntryNr2"]))
+        return self._entry2
 
 
 class GeneOntologyAnnotation(object):

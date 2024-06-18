@@ -42,6 +42,7 @@ class AncestralSyntenyRels(tables.IsDescription):
         dflt="any",
         base="uint8",
     )
+    LCA_taxid = tables.Int32Col(pos=4, dflt=-1)
 
 
 class ProteinTable(tables.IsDescription):

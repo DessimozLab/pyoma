@@ -2975,7 +2975,7 @@ class Taxonomy(object):
         elif i2 - i1 == 1:
             res = self.tax_table[self.parent_key[i1]]
         else:
-            res = numpy.array([(0, -1, b"LUCA")], dtype=self.tax_table.dtype)[0]
+            res = numpy.array([(0, -1, b"LUCA", 4250)[: len(self.tax_table.dtype)]], dtype=self.tax_table.dtype)[0]
         return res
 
     def _add_luca_if_needed(self):
@@ -2984,7 +2984,7 @@ class Taxonomy(object):
         if i2 - i1 > 1:
             self.tax_table = numpy.append(
                 self.tax_table,
-                numpy.array([(0, -1, b"LUCA")], dtype=self.tax_table.dtype),
+                numpy.array([(0, -1, b"LUCA", 4250)[: len(self.tax_table.dtype)]], dtype=self.tax_table.dtype),
             )
             self.taxid_key = self.tax_table.argsort(order=("NCBITaxonId"))
             self.parent_key = self.tax_table.argsort(order=("ParentTaxonId"))

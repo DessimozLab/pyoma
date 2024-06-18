@@ -12,6 +12,7 @@ except ImportError:
     import mock
 from pyoma.browser.db import *
 from pyoma.browser import tablefmt
+from pyoma.browser.convert import _load_taxonomy_without_ref_to_itselfs as load_taxtable_with_defaults
 from Bio.SeqRecord import SeqRecord
 from Bio.Seq import Seq
 from Bio import SeqIO
@@ -669,7 +670,7 @@ class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
     <sciname> (disambiguate <code>) leaf."""
 
     taxtab = numpy.array(
-        [(10, 0, b"Root"), (20, 10, b"Outgroup"), (30, 10, b"A"), (40, 30, b"B")],
+        [(10, 0, b"Root", 30), (20, 10, b"Outgroup", 25), (30, 10, b"A", 10), (40, 30, b"B", 5)],
         dtype=tables.dtype_from_descr(tablefmt.TaxonomyTable),
     )
 
@@ -733,7 +734,7 @@ class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
 
 def _get_taxtab():
     # a random sample of 30 species from a production OMA release
-    taxtab = numpy.array(
+    return load_taxtable_with_defaults(
         [
             (2, 0, b"Bacteria"),
             (633, 1649845, b"Yersinia pseudotuberculosis"),
@@ -819,10 +820,8 @@ def _get_taxtab():
             (1230383, 5204, b"Malassezia sympodialis (strain ATCC 42132)"),
             (1649845, 91347, b"Yersinia pseudotuberculosis complex"),
             (2698737, 2759, b"Sar"),
-        ],
-        dtype=tables.dtype_from_descr(tablefmt.TaxonomyTable),
+        ]
     )
-    return taxtab
 
 
 class LucaBasedTaxonomyTests(unittest.TestCase):
@@ -862,7 +861,7 @@ class LucaWithNegTaxIDGenomeTaxonomyTests(LucaBasedTaxonomyTests):
         taxtab = _get_taxtab()
         taxtab = numpy.append(
             taxtab,
-            numpy.array([(-2, 451864, b"Some Random Genome")], dtype=taxtab.dtype),
+            numpy.array([(-2, 451864, b"Some Random Genome", 352)], dtype=taxtab.dtype),
         )
         self.tax = Taxonomy(taxtab)
         self.nr_species = 31

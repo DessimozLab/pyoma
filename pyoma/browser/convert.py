@@ -251,7 +251,10 @@ class DataImportError(Exception):
 
 def _load_taxonomy_without_ref_to_itselfs(data):
     dtype = tables.dtype_from_descr(tablefmt.TaxonomyTable)
-    arr = numpy.array([tuple(x) for x in data], dtype=dtype)
+    dflts = tuple()
+    if len(data[0]) < len(dtype):
+        dflts = tuple(tablefmt.TaxonomyTable.columns[col].dflt for col in dtype.names[len(data[0]) :])
+    arr = numpy.array([tuple(x) + dflts for x in data], dtype=dtype)
     clean = arr[numpy.where(arr["NCBITaxonId"] != arr["ParentTaxonId"])]
     return clean
 

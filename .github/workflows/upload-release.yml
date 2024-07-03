@@ -6,7 +6,7 @@
 # separate terms of service, privacy policy, and support
 # documentation.
 
-name: Upload pyoma to pypi
+name: Upload pyoma 📦 to PyPI
 
 on:
   push:
@@ -17,6 +17,8 @@ jobs:
   deploy:
 
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # IMPORTANT: mandatory for trusted publishing
 
     steps:
     - uses: actions/checkout@v4
@@ -32,6 +34,3 @@ jobs:
       run: python -m build
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@ec4db0b4ddc65acdf4bff5fa45ac92d78b56bdf0
-      with:
-        user: __token__
-        password: ${{ secrets.PYPI_API_TOKEN }}

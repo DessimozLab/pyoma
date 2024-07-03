@@ -5,7 +5,7 @@ import shutil
 name = "pyoma"
 
 req_packages = [
-    "numpy >= 1.20",
+    "numpy >= 1.20, <2",
     "tables >= 3.8.0",
     "future",
     "fuzzyset2 >= 0.1.1",

@@ -38,7 +38,7 @@ end:
 
 tab:= table():
 tab['enr'] := [seq(Goff + i, i=1..tot_entries)]:
-tab['seqs'] := [seq(Sequence(Entry(i))), i=1..tot_entries)]:
+tab['seqs'] := [seq(Sequence(Entry(i)), i=1..tot_entries)]:
 tab['cdna'] := [seq(SearchTag('DNA', Entry(i)), i=1..tot_entries)]:
 tab['chrs'] := [seq(SearchTag('CHR',Entry(i)), i=1..tot_entries)];
 locs := []:

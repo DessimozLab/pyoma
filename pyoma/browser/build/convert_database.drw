@@ -25,6 +25,12 @@ convert_loc := proc(s)
     elif type(s, structure(anything, join)) then
         r := [seq(procname(s[i]), i=1..length(s))];
         return(r);
+    elif type(s, posint..After(posint)) then
+        return([s[1], s[2,1], 1]);
+    elif type(s, Before(posint)..posint) then
+        return([s[1,1], s[2], 1]);
+    elif type(s, Before(posint)..After(posint)) then
+        return([s[1,1], s[2,1], 1]);
     else
         error('unexpected locus tag: '. string(s));
     fi:
@@ -55,4 +61,3 @@ Set(printgc=false);
 OpenWriting(outdir.'/'.genome.'.json');
 prints(json(tab)):
 OpenWriting(previous):
-done

@@ -31,7 +31,7 @@ convert_loc := proc(s)
         return([s[1,1], s[2], 1]);
     elif type(s, Before(posint)..After(posint)) then
         return([s[1,1], s[2,1], 1]);
-    elif type(s, FromElsewhere(string,posint..posint))
+    elif type(s, FromElsewhere(string,posint..posint)) then
         return([s[2,1], s[2,2], 1]);
     elif type(s, posint) then
         return([s, s, 1]);

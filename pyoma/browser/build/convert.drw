@@ -16,7 +16,7 @@ GS := GenomeSummaries:
 all_genomes := genomes:
 
 res := CallSystem('sed "/^tit/q" '.MatrixPath.' > /tmp/matrix_head');
-if res <> 0 then printf('cannot read %s\n', MatrixPath); exit(1);
+if res <> 0 then printf('cannot read %s\n', MatrixPath); exit(1); fi:
 ReadProgram('/tmp/matrix_head'):
 CallSystem('rm -f /tmp/matrix_head');
 

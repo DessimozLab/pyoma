@@ -31,6 +31,8 @@ convert_loc := proc(s)
         return([s[1,1], s[2], 1]);
     elif type(s, Before(posint)..After(posint)) then
         return([s[1,1], s[2,1], 1]);
+    elif type(s, posint) then
+        return([s, s, 1]);
     else
         error('unexpected locus tag: '. string(s));
     fi:

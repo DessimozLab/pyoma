@@ -54,4 +54,3 @@ if err = lasterror then
     printf('error while writing gs.tsv\n');
     exit(1);
 fi:
-done

@@ -855,6 +855,27 @@ class LucaBasedTaxonomyTests(unittest.TestCase):
     def test_as_newick_works(self):
         self.assertTrue(self.tax.newick().endswith("LUCA;"), self.tax.newick()[-30:])
 
+    def test_newick_encoder_options(self):
+        taxids = [713600, 640131, 37360, 284812, 13735]
+        t2s = {
+            x: self.tax.tax_table[numpy.where(self.tax.tax_table["NCBITaxonId"] == x)][0]["Name"].decode()
+            for x in taxids
+        }
+        subtax = self.tax.get_induced_taxonomy(taxids, augment_parents=True)
+        for quoted in (True, False):
+            for leaf in ("sciname", "taxid"):
+                for internal in ("taxid", "sciname", None):
+                    with self.subTest(quoted=quoted, leaf=leaf, internal=internal):
+                        tree = subtax.newick(quoted=quoted, leaf=leaf, internal=internal)
+                        exp_leaf = t2s[713600] if leaf == "sciname" else str(713600)
+                        exp_int = "2759" if internal == "taxid" else "Eukaryota" if internal == "sciname" else ""
+                        if quoted and not leaf == "taxid":
+                            exp_leaf = f'"{exp_leaf}"'
+                        else:
+                            exp_leaf = exp_leaf.replace(" ", "_").replace("(", "[").replace(")", "]")
+                        self.assertIn(exp_leaf, tree)
+                        self.assertIn(exp_int, tree)
+
 
 class LucaWithNegTaxIDGenomeTaxonomyTests(LucaBasedTaxonomyTests):
     def setUp(self):

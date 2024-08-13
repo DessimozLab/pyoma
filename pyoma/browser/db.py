@@ -3169,14 +3169,19 @@ class Taxonomy(object):
             return s.translate({ord(" "): "_", ord("("): "[", ord(")"): "]"})
 
         def newick_quoted(s):
-            if re.search("[\s'()[]]", s):
-                return '"%s"' % s
+            if re.search(r"[\s'()\[\]]", s):
+                return f'"{s}"'
             return s
 
-        if leaf is None or leaf == "sciname":
+        if leaf is None or leaf in ("sciname", "name"):
 
             def leaf_fn(n):
                 return n["Name"].decode()
+
+        elif leaf in ("taxid", "ncbitaxonid", "taxonid"):
+
+            def leaf_fn(n):
+                return str(int(n["NCBITaxonId"]))
 
         elif leaf in ("mnemonic", "uniprot_species_code", "species_code"):
 
@@ -3192,9 +3197,9 @@ class Taxonomy(object):
         def internal_fn(node):
             if internal is None:
                 return ""
-            elif internal == "name":
+            elif internal in ("name", "sciname", "scientific_name"):
                 return node["Name"].decode()
-            elif internal == "taxid":
+            elif internal in ("taxid", "ncbitaxonid", "taxonid"):
                 return str(int(node["NCBITaxonId"]))
             else:
                 raise ValueError(f"unknown internal encoder method: {internal}")

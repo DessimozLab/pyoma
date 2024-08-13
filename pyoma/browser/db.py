@@ -3178,7 +3178,7 @@ class Taxonomy(object):
             def leaf_fn(n):
                 return n["Name"].decode()
 
-        elif leaf == "mnemonic" or leaf == "uniprot_species_code":
+        elif leaf in ("mnemonic", "uniprot_species_code", "species_code"):
 
             def leaf_fn(node):
                 try:

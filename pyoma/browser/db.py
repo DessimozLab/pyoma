@@ -3159,7 +3159,7 @@ class Taxonomy(object):
                 return self.get_induced_taxonomy(numpy.delete(taxids_to_keep, idx))
         return Taxonomy(subtaxdata, genomes=self.genomes, _valid_levels=self.all_hog_levels)
 
-    def newick(self):
+    def newick(self, leaf=None, internal="name", quoted=False):
         """Get a Newick representation of the Taxonomy
 
         Note: as many newick parsers do not support quoted labels,
@@ -3168,29 +3168,63 @@ class Taxonomy(object):
         def newick_enc(s):
             return s.translate({ord(" "): "_", ord("("): "[", ord(")"): "]"})
 
+        def newick_quoted(s):
+            if re.search("[\s'()[]]", s):
+                return '"%s"' % s
+            return s
+
+        if leaf is None or leaf == "sciname":
+
+            def leaf_fn(n):
+                return n["Name"].decode()
+
+        elif leaf == "mnemonic" or leaf == "uniprot_species_code":
+
+            def leaf_fn(node):
+                try:
+                    return self.genomes[int(node["NCBITaxonId"])].uniprot_species_code
+                except KeyError:
+                    return node["Name"].decode()
+
+        else:
+            raise ValueError(f"unknown leaf encoder method: {leaf}")
+
+        def internal_fn(node):
+            if internal is None:
+                return ""
+            elif internal == "name":
+                return node["Name"].decode()
+            elif internal == "taxid":
+                return str(int(node["NCBITaxonId"]))
+            else:
+                raise ValueError(f"unknown internal encoder method: {internal}")
+
+        encoder = newick_enc if not quoted else newick_quoted
+
         def _rec_newick(node):
             children = []
             for child in self._direct_children_taxa(node["NCBITaxonId"]):
                 children.append(_rec_newick(child))
 
             if len(children) == 0:
-                return newick_enc(node["Name"].decode())
-            else:
-                if int(node["NCBITaxonId"]) in self.genomes:
-                    # this is a special case where the current internal level is also
-                    # an extant species in OMA. we resolve this by adding the current
-                    # level also as an extra child
-                    children.append(
-                        newick_enc(
-                            "{:s} (disambiguate {:s})".format(
-                                node["Name"].decode(),
-                                self.genomes[int(node["NCBITaxonId"])].uniprot_species_code,
-                            )
-                        )
-                    )
+                # leaf. encode and done
+                return encoder(leaf_fn(node))
 
-                t = ",".join(children)
-                return "(" + t + ")" + newick_enc(node["Name"].decode())
+            if int(node["NCBITaxonId"]) in self.genomes:
+                # this is a special case where the current internal level is also
+                # an extant species in OMA. we resolve this by adding the current
+                # level also as an extra child
+                if leaf is None or leaf == "sciname":
+                    fix_leaf = "{:s} (disambiguate {:s})".format(
+                        node["Name"].decode(),
+                        self.genomes[int(node["NCBITaxonId"])].uniprot_species_code,
+                    )
+                else:
+                    fix_leaf = leaf_fn(node)
+
+                children.append(encoder(fix_leaf))
+            t = ",".join(children)
+            return "(" + t + ")" + encoder(internal_fn(node))
 
         return _rec_newick(self._get_root_taxon()) + ";"
 

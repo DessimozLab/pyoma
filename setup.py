@@ -55,7 +55,11 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
     ],
-    scripts=["bin/importdata.py", "bin/oma2hdf", "bin/map_to_closest_seq"],
+    entry_points={
+        "console_scripts": [
+            "oma-build=pyoma.browser.build.main:build_database",
+        ]
+    },
     package_data={"pyoma": ["browser/*.drw"]},
     install_requires=req_packages,
     extras_require={

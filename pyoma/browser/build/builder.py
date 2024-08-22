@@ -70,6 +70,10 @@ class DBBuilder(DarwinExporter):
         if self._mode == "write":
             self.h5.set_node_attr("/", "convertion_start", time.strftime("%c"))
             self.h5.set_node_attr("/", "pyoma_version", version())
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.h5.close()
 
     def call_darwin_export(self, func):
         raise NotImplementedError("Darwin export must not be called anymore")

@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 def phase_genomes(conf):
     with DBBuilder(conf.db, mode="write", logger=logger) as db:
-        db.add_species(conf.gs_tsv, conf.tax_tsv)
+        db.add_species_data(conf.gs_tsv, conf.tax_tsv)
 
 
 def parse_command_line_args():

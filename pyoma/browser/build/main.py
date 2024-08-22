@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 def phase_genomes(conf):
     with DBBuilder(conf.db, mode="write", logger=logger) as db:
+        db.add_version(conf.rel_char)
         db.add_species_data(conf.gs_tsv, conf.tax_tsv)
+        db.add_proteins(conf.genomes)
 
 
 def parse_command_line_args():
@@ -31,24 +33,27 @@ def parse_command_line_args():
     genomes_parser.add_argument("--db", required=True, help="Path to database")
     genomes_parser.add_argument("--gs-tsv", required=True, help="Path to genomes summary file in TSV format")
     genomes_parser.add_argument("--tax-tsv", required=True, help="Path to taxonomy file in TSV format")
+    genomes_parser.add_argument("--rel-char", required=False, default=None, help="Release character")
+    genomes_parser.add_argument("--release", required=False, help="Release of database")
     genomes_parser.add_argument(
         "--genomes", required=True, nargs="+", help="List of genome files (json) containing essential data"
     )
 
     conf = parser.parse_args()
+    if not hasattr(conf, "func"):
+        parser.print_usage()
+        sys.exit(1)
+    return conf
+
+
+def build_database():
+    conf = parse_command_line_args()
     logging.basicConfig(
         level=30 - 10 * min(conf.verbose, 2),
         format="%(asctime)s %(levelname)s %(name): %(message)s",
     )
     logger.info("Command line options: %s", str(conf))
-    if hasattr(conf, "func"):
-        if not sys.warnoptions and not getattr(conf, "verbose", 0) >= 1:
-            warnings.simplefilter("ignore", category=PerformanceWarning)
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-        conf.func(conf)
-    else:
-        parser.print_usage()
-
-
-def build_database():
-    conf = parse_command_line_args()
+    if not sys.warnoptions and not getattr(conf, "verbose", 0) >= 1:
+        warnings.simplefilter("ignore", category=PerformanceWarning)
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+    conf.func(conf)

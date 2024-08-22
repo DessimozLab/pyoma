@@ -55,6 +55,21 @@ class DataImportError(Exception):
     pass
 
 
+class OmaGroupsProvider:
+    def __init__(self, source):
+        if source is not None:
+            with open(source, "r") as f:
+                self.data = json.load(f)
+        else:
+            self.data = None
+
+    def get_oma_group(self, genome, nr):
+        try:
+            return self.data[genome][nr]
+        except KeyError:
+            return 0
+
+
 class DBBuilder(DarwinExporter):
     def __init__(self, path, logger=None, mode=None):
         self.logger = logger if logger is not None else common.package_logger
@@ -196,7 +211,7 @@ class DBBuilder(DarwinExporter):
             row["MD5ProteinHash"] = hashlib.md5(sequence.encode("utf-8")).hexdigest()
         return seqLen
 
-    def add_proteins(self, genome_files):
+    def add_proteins(self, genome_files, oma_group_provider):
         code_to_file = {os.path.basename(f).split(".")[0]: f for f in genome_files}
         gs_node = self.h5.get_node("/Genome")
         if len(code_to_file) < len(gs_node):
@@ -246,7 +261,7 @@ class DBBuilder(DarwinExporter):
             for nr in range(gs["TotEntries"]):
                 e_nr = gs["EntryOff"] + nr + 1
                 prot_tab.row["EntryNr"] = e_nr
-                prot_tab.row["OmaGroup"] = data["ogs"][nr]
+                prot_tab.row["OmaGroup"] = oma_group_provider.get_oma_group(genome, nr + 1)
 
                 seq_off += self._add_sequence(data["seqs"][nr], prot_tab.row, seq_arr, seq_off)
                 cdna_off += self._add_sequence(data["cdna"][nr], prot_tab.row, cdna_arr, cdna_off, "CDNA")

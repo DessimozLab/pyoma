@@ -87,8 +87,26 @@ class DBBuilder(DarwinExporter):
         """
         return "Test"
 
-    def add_species_data(self, gs_tsv, tax_tsv):
+    def add_taxonomy(self, tax_tsv):
+        col_names = list(tablefmt.TaxonomyTable.columns)[:3]
+        tax_data = pandas.read_csv(tax_tsv, sep="\t", names=col_names)
+        dflt_cols = set(tablefmt.TaxonomyTable.columns) - set(tax_data.columns)
+        for col in dflt_cols:
+            tax_data[col] = tablefmt.TaxonomyTable.columns[col].dflt
+
+        dt = {k: v.dtype for k, v in tablefmt.TaxonomyTable.columns.items()}
+        taxtab = self.h5.create_table(
+            "/",
+            "Taxonomy",
+            tablefmt.TaxonomyTable,
+            obj=tax_data.to_records(index=False, column_dtypes=dt),
+            expectedrows=len(tax_data),
+        )
+        create_index_for_columns(taxtab, "NCBITaxonId")
+
+    def add_species_data(self, gs_tsv):
         """parses a genome summary from the tsv file and adds it to the database"""
+        from pyoma.browser.db import Taxonomy
 
         def parse_as_date_column(val):
             if val == "":
@@ -109,11 +127,19 @@ class DBBuilder(DarwinExporter):
                     pass
             raise ValueError("Cannot parse date of '{}'".format(val))
 
+        tax = Taxonomy(self.h5.get_node("/Taxonomy").read())
+        taxid_order = {tax: i for i, tax in enumerate(tax.get_taxid_of_extent_genomes())}
+
         data = pandas.read_csv(gs_tsv, sep="\t")
+        data.sort_values(by="NCBITaxonId", key=lambda tid: taxid_order[tid], inplace=True)
         cols = list(tablefmt.GenomeTable.columns)
         dflt_cols = set(cols) - set(data.columns)
         for col in dflt_cols:
             data[col] = tablefmt.GenomeTable.columns[col].dflt
+
+        # Build EntryOff after sorting genomes
+        for i in range(len(data) - 1):
+            data.loc[i + 1, "EntryOff"] = data.loc[i, "EntryOff"] + data.loc[i, "TotEntries"]
 
         gs = data[cols]
         for col, typeinfo in tablefmt.GenomeTable.columns.items():
@@ -124,22 +150,6 @@ class DBBuilder(DarwinExporter):
             "/", "Genome", tablefmt.GenomeTable, obj=gs.to_records(index=False, column_dtypes=dt), expectedrows=len(gs)
         )
         create_index_for_columns(gstab, "NCBITaxonId", "UniProtSpeciesCode", "EntryOff")
-
-        col_names = list(tablefmt.TaxonomyTable.columns)[:3]
-        tax_data = pandas.read_csv(tax_tsv, sep="\t", names=col_names)
-        dflt_cols = set(tablefmt.TaxonomyTable.columns) - set(tax_data.columns)
-        for col in dflt_cols:
-            tax_data[col] = tablefmt.TaxonomyTable.columns[col].dflt
-
-        dt = {k: v.dtype for k, v in tablefmt.TaxonomyTable.columns.items()}
-        taxtab = self.h5.create_table(
-            "/",
-            "Taxonomy",
-            tablefmt.TaxonomyTable,
-            obj=tax_data.to_records(index=False, column_dtypes=dt),
-            expectedrows=len(tax_data),
-        )
-        create_index_for_columns(taxtab, "NCBITaxonId")
 
     def add_orthologs(self, basedir):
         genome_offs = self.h5.root.Genome.col("EntryOff")

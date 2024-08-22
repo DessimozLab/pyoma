@@ -2,8 +2,8 @@
 #  to be called with a given genome, it's database dbpath
 #
 
-if not assigned(dbpath) or not assigned(genome) or not assigned(Goff) or not assigned(tot_entries) or not assigned(tot_aa) then
-    printf('not all input arguments are assigned: %A, %A, %A, TotAA\n', dbpath, genome, Goff, tot_entries, tot_aa);
+if not assigned(dbpath) or not assigned(genome)or not assigned(tot_entries) or not assigned(tot_aa) then
+    printf('not all input arguments are assigned: %A, %A, %A %A\n', dbpath, genome, tot_entries, tot_aa);
     exit(1);
 fi:
 if not assigned(outdir) then outdir := './' fi:
@@ -41,7 +41,6 @@ convert_loc := proc(s)
 end:
 
 tab:= table():
-tab['enr'] := [seq(Goff + i, i=1..tot_entries)]:
 tab['seqs'] := [seq(Sequence(Entry(i)), i=1..tot_entries)]:
 tab['cdna'] := [seq(SearchTag('DNA', Entry(i)), i=1..tot_entries)]:
 tab['chrs'] := [seq(SearchTag('CHR',Entry(i)), i=1..tot_entries)];
@@ -52,6 +51,8 @@ for i to tot_entries do
     locs := append(locs, r):
 od:
 tab['locs'] := locs:
+tab['ids'] := [seq(SearchDelim('; ', SearchTag('ID', Entry(i)))[1], i=1..tot_entries)];
+tab['acs'] := [seq(SearchDelim('; ', SearchTag('AC', Entry(i))), i=1..tot_entries)];
 
 #TODO: fix thses things!
     #if SubGenome[g]<>0 then
@@ -59,7 +60,6 @@ tab['locs'] := locs:
     #else
     #    tab['subgenome'] := [seq('', GS[g,tot_entries])]
     #fi:
-#tab['ogs'] := [seq(parse(SearchTag('OG',Entry(Goff[gNr]+i))), i=1..GS[g,tot_entries])]:
 
 Set(printgc=false);
 OpenWriting(outdir.'/'.genome.'.json');

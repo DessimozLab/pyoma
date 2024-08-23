@@ -3159,6 +3159,32 @@ class Taxonomy(object):
                 return self.get_induced_taxonomy(numpy.delete(taxids_to_keep, idx))
         return Taxonomy(subtaxdata, genomes=self.genomes, _valid_levels=self.all_hog_levels)
 
+    def traverse(self, strategy="preorder"):
+        """traverse the taxonomy either in pre- or post-order.
+
+        The method returns a generator that yields tuples of the form:
+           (node, is_leaf).
+
+        is_leaf is a boolean value whether the node is a leaf in the taxonomy or not.
+
+        :param strategy: either `preorder` or `postorder`. defaults to preorder traversal.
+        """
+        if strategy not in ("preorder", "postorder"):
+            raise ValueError(f"unknown strategy: {strategy}")
+        to_visit = [self._get_root_taxon()]
+        while len(to_visit) > 0:
+            node = to_visit.pop(-1)
+            if isinstance(node, tuple):
+                # postorder action
+                if strategy == "postorder":
+                    yield node[1], False
+            else:
+                children = self._direct_children_taxa(node["NCBITaxonId"])
+                if strategy == "preorder" or len(children) == 0:
+                    yield node, len(children) > 0
+                if len(children) > 0:
+                    to_visit.extend(reversed([c for c in children] + [(1, node)]))
+
     def newick(self):
         """Get a Newick representation of the Taxonomy
 

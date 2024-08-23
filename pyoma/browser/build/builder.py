@@ -143,16 +143,20 @@ class DBBuilder(DarwinExporter):
             raise ValueError("Cannot parse date of '{}'".format(val))
 
         tax = Taxonomy(self.h5.get_node("/Taxonomy").read())
-        taxid_order = {tax: i for i, tax in enumerate(tax.get_taxid_of_extent_genomes())}
+        taxid_order = {int(node["NCBITaxonId"]): i for i, (node, _) in enumerate(tax.traverse(strategy="postorder"))}
 
         data = pandas.read_csv(gs_tsv, sep="\t")
-        data.sort_values(by="NCBITaxonId", key=lambda tid: taxid_order[tid], inplace=True)
+        data["order"] = data["NCBITaxonId"].map(taxid_order)
+        data.sort_values(by="order", inplace=True)
+        data.reset_index(drop=True, inplace=True)
+
         cols = list(tablefmt.GenomeTable.columns)
         dflt_cols = set(cols) - set(data.columns)
         for col in dflt_cols:
             data[col] = tablefmt.GenomeTable.columns[col].dflt
 
         # Build EntryOff after sorting genomes
+        data.loc[0, "EntryOff"] = 0
         for i in range(len(data) - 1):
             data.loc[i + 1, "EntryOff"] = data.loc[i, "EntryOff"] + data.loc[i, "TotEntries"]
 

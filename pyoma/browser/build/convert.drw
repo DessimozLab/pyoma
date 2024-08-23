@@ -46,7 +46,7 @@ GetGenomeData := proc(outdir)
     od:
 
     headers := ['NCBITaxonId', 'UniProtSpeciesCode', 'TotEntries', 'TotAA', 'EntryOff', 'SciName', 'CommonName', 'SynName',
-                'Release', 'URL', 'Source', 'Date', 'IsPolyploid', 'DBpath', 'OriginalNCBITaxonId'];
+                'Release', 'Url', 'Source', 'Date', 'IsPolyploid', 'DBpath', 'OriginalNCBITaxonId'];
     OpenWriting(outdir.'/gs.tsv');
     printf('%s\n', ConcatStrings(headers, '\t'));
     for curGS in gs do

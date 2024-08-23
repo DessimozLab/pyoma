@@ -5,7 +5,7 @@ from tables import PerformanceWarning
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
 from .. import convert
-from .builder import DBBuilder, OmaGroupsProvider
+from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,8 @@ def phase_genomes(conf):
         db.add_version(conf.rel_char)
         db.add_taxonomy(conf.tax_tsv)
         db.add_species_data(conf.gs_tsv)
-        db.add_proteins(conf.genomes, OmaGroupsProvider(conf.oma_groups))
+        with XrefStorer(conf.xref_db) as xref_storer:
+            db.add_proteins(conf.genomes, OmaGroupsProvider(conf.oma_groups), xref_collector=xref_storer)
 
 
 def parse_command_line_args():
@@ -37,6 +38,7 @@ def parse_command_line_args():
     genomes_parser.add_argument("--oma-groups", required=False, help="Path to OMA groups json file")
     genomes_parser.add_argument("--rel-char", required=False, default=None, help="Release character")
     genomes_parser.add_argument("--release", required=False, help="Release of database")
+    genomes_parser.add_argument("--xref-db", required=False, help="Path where source xrefs are stored")
     genomes_parser.add_argument(
         "--genomes", required=True, nargs="+", help="List of genome files (json) containing essential data"
     )

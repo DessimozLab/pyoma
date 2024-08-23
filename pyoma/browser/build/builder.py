@@ -66,9 +66,41 @@ class OmaGroupsProvider:
 
     def get_oma_group(self, genome, nr):
         try:
-            return self.data[genome][nr]
+            return self.data[str(genome)][str(nr)]
         except KeyError:
             return 0
+
+
+class XrefStorer:
+    def __init__(self, path, mode="w"):
+        self.path = path
+        self.mode = mode
+
+    def __enter__(self):
+        self.h5 = tables.open_file(
+            self.path, mode=self.mode, filters=tables.Filters(complevel=5, complib="blosc2", fletcher32=True)
+        )
+        if self.mode == "w":
+            self.xref = self.h5.create_table("/", "XRef", tablefmt.XRefTable, expectedrows=1e7)
+        self.source_enum = self.xref.get_enum("XRefSource")
+        self.verify_enum = self.xref.get_enum("Verification")
+        self._buffer = []
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.flush()
+        self.h5.flush()
+        self.h5.close()
+
+    def flush(self):
+        self.xref.append(self._buffer)
+        self._buffer = []
+
+    def add_source_xref(self, enr, xref, typ):
+        src = self.source_enum["SourceID"] if typ == "id" else self.source_enum["SourceAC"]
+        self._buffer.append((enr, src, xref.encode("utf-8"), self.verify_enum["exact"]))
+        if len(self._buffer) > 500_000:
+            self.flush()
 
 
 class DBBuilder(DarwinExporter):
@@ -163,7 +195,7 @@ class DBBuilder(DarwinExporter):
         gs = data[cols]
         for col, typeinfo in tablefmt.GenomeTable.columns.items():
             if typeinfo.kind == "time":
-                gs[col] = gs[col].apply(parse_as_date_column)
+                gs.loc[:, col] = gs.loc[:, col].apply(parse_as_date_column)
         dt = {k: v.dtype for k, v in tablefmt.GenomeTable.columns.items()}
         gstab = self.h5.create_table(
             "/", "Genome", tablefmt.GenomeTable, obj=gs.to_records(index=False, column_dtypes=dt), expectedrows=len(gs)
@@ -180,7 +212,7 @@ class DBBuilder(DarwinExporter):
         self.logger.info("using %s as base dir for pairwise orthology", basedir)
         for gs in self.h5.root.Genome.iterrows():
             genome = gs["UniProtSpeciesCode"].decode()
-            rel_node_for_genome = self._get_or_create_node("/PairwiseRelation/{}".format(genome))
+            rel_node_for_genome = self._get_or_create_node(f"/PairwiseRelation/{genome}")
             if "VPairs" not in rel_node_for_genome:
                 data = read_vps_from_tsv(self.h5.root.Genome, genome.encode("utf-8"), basedir=basedir)
                 vp_tab = self.h5.create_table(
@@ -215,7 +247,7 @@ class DBBuilder(DarwinExporter):
             row["MD5ProteinHash"] = hashlib.md5(sequence.encode("utf-8")).hexdigest()
         return seqLen
 
-    def add_proteins(self, genome_files, oma_group_provider):
+    def add_proteins(self, genome_files, oma_group_provider, xref_collector):
         code_to_file = {os.path.basename(f).split(".")[0]: f for f in genome_files}
         gs_node = self.h5.get_node("/Genome")
         if len(code_to_file) < len(gs_node):
@@ -271,9 +303,14 @@ class DBBuilder(DarwinExporter):
                 cdna_off += self._add_sequence(data["cdna"][nr], prot_tab.row, cdna_arr, cdna_off, "CDNA")
 
                 prot_tab.row["Chromosome"] = data["chrs"][nr]
-                # prot_tab.row["AltSpliceVariant"] = data["alts"][nr]
                 prot_tab.row["OmaHOG"] = b""  # will be assigned later
-                prot_tab.row["CanonicalId"] = b""  # will be assigned later
+                prot_tab.row["CanonicalId"] = data["acs"][nr][0].encode("utf-8")
+                if xref_collector is not None:
+                    for xref in data["acs"][nr]:
+                        xref_collector.add_source_xref(e_nr, xref, "ac")
+                    xref_collector.add_source_xref(e_nr, data["ids"][nr], "id")
+
+                # prot_tab.row["AltSpliceVariant"] = data["alts"][nr]
                 # if prot_tab.row["AltSpliceVariant"] == 0 or prot_tab.row["AltSpliceVariant"] == prot_tab.row["EntryNr"]:
                 #     cnt_genes += 1  # main isoforms of gene
 
@@ -298,7 +335,9 @@ class DBBuilder(DarwinExporter):
             # gs["TotGenes"] = cnt_genes
             # gs.update()
             if cnt_missmatch_locus > 0:
-                self.logger.warning("%d miss-matches in exon-lengths compared to locus info", cnt_missmatch_locus)
+                self.logger.warning(
+                    "[%s]: %d miss-matches in exon-lengths compared to locus info", genome, cnt_missmatch_locus
+                )
             for n in (prot_tab, seq_arr, loc_tab):
                 if n.size_in_memory != 0:
                     self.logger.info(

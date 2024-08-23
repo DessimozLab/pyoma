@@ -48,6 +48,7 @@ from ..convert import (
     create_fast_famhoglevel_lookup,
     create_and_store_fast_famhoglevel_lookup,
 )
+from ..db import Taxonomy
 from ..convert import DarwinExporter
 
 
@@ -121,7 +122,6 @@ class DBBuilder(DarwinExporter):
 
     def add_species_data(self, gs_tsv):
         """parses a genome summary from the tsv file and adds it to the database"""
-        from pyoma.browser.db import Taxonomy
 
         def parse_as_date_column(val):
             if val == "":

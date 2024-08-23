@@ -52,7 +52,7 @@ def build_database():
     conf = parse_command_line_args()
     logging.basicConfig(
         level=30 - 10 * min(conf.verbose, 2),
-        format="%(asctime)s %(levelname)s %(name): %(message)s",
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logger.info("Command line options: %s", str(conf))
     if not sys.warnoptions and not getattr(conf, "verbose", 0) >= 1:

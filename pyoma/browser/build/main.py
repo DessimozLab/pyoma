@@ -21,8 +21,8 @@ def phase_genomes(conf):
 
 def phase_build_seq_indexes(conf):
     with DBBuilder(conf.db, mode="read", logger=logger) as db, DBBuilder(conf.out, mode="write", logger=logger) as out:
-        seqs = db.get_node("/Protein/SequenceBuffer").read().tobytes()
-        nr_entries = len(db.get_node("/Protein/Entries"))
+        seqs = db.h5.get_node("/Protein/SequenceBuffer").read().tobytes()
+        nr_entries = len(db.h5.get_node("/Protein/Entries"))
         out.add_sequence_index(seqs=seqs, nr_entries=nr_entries, k=6)
 
 

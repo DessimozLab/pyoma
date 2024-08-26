@@ -104,15 +104,16 @@ class XrefStorer:
 
 
 class DBBuilder(DarwinExporter):
-    def __init__(self, path, logger=None, mode=None):
+    def __init__(self, path, logger=None, mode=None, complib="blosc2"):
         self.logger = logger if logger is not None else common.package_logger
         self._path = path
+        self._complib = complib
         if mode is None:
             mode = "append" if os.path.exists(path) else "write"
         self._mode = mode
 
     def __enter__(self):
-        compr = tables.Filters(complevel=6, complib="zlib", fletcher32=True)
+        compr = tables.Filters(complevel=6, complib=self._complib, fletcher32=True)
         self.h5 = tables.open_file(self._path, mode=self._mode[0], filters=compr)
         self.logger.info(f"opened {self._path} in {self._mode} mode, options {compr} ; pyoma {version()}")
         if self._mode == "write":
@@ -320,7 +321,7 @@ class DBBuilder(DarwinExporter):
                 if len_cds != prot_tab.row["CDNABufferLength"] - 1:
                     if cnt_missmatch_locus < 10:
                         self.logger.debug(
-                            f"Sum of exon lengths differs cDNA sequence {genome}{nr:05d} ({len(locus_tab)} exons): "
+                            f"Sum of exon lengths differs cDNA sequence {genome}{nr+1:05d} ({len(locus_tab)} exons): "
                             f"{len_cds} vs {prot_tab.row['CDNABufferLength'] - 1}"
                         )
                     cnt_missmatch_locus += 1
@@ -344,3 +345,66 @@ class DBBuilder(DarwinExporter):
                         "worte %s: compression ratio %3f%%" % (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory)
                     )
         create_index_for_columns(prot_tab, "EntryNr", "MD5ProteinHash")
+
+    def add_sequence_index(self, seqs: bytes, nr_entries: int, k: int = 6):
+        """compute the suffix array and Kmer lookup index and store in the hdf5 under /Protein
+        :param seqs: concatenated sequences, delimitted between entries with a space
+        :param nr_entries: number of entries in the database
+        :param k: kmer size used for KmerIndex.
+        """
+        # Compute & save the suffix array to DB.
+        sa = sais(seqs)
+        sa[:nr_entries].sort()  # Sort delimiters by position.
+        self.h5.create_carray(
+            "/Protein",
+            createparents=True,
+            name="SequenceIndex",
+            title="concatenated protein sequences suffix array",
+            obj=sa,
+        )
+
+        # Create lookup table for fa2go
+        dtype = numpy.uint32 if (nr_entries < numpy.iinfo(numpy.uint32).max) else numpy.uint64
+        idx = numpy.zeros(sa.shape, dtype=dtype)
+        mask = numpy.zeros(sa.shape, dtype=bool)
+
+        # Compute mask and entry index for sequence buff
+        for i in range(nr_entries):
+            s = (sa[i - 1] if i > 0 else -1) + 1
+            e = sa[i] + 1
+            idx[s:e] = i + 1
+            mask[(e - k) : e] = True  # (k-1) invalid and delim.
+
+        # Mask off those we don't want...
+        sa = sa[~mask[sa]]
+
+        # Reorder the necessary elements of entry index
+        idx = idx[sa]
+
+        # Initialise lookup array
+        atom = tables.UInt32Atom if dtype is numpy.uint32 else tables.UInt64Atom
+        kmers = KmerEncoder(k, is_protein=True)
+        kmer_lookup_arr = self.h5.create_vlarray(
+            "/Protein",
+            name="KmerLookup",
+            atom=atom(shape=()),
+            title="kmer entry lookup table",
+            expectedrows=len(kmers),
+        )
+        self.h5.set_node_attr(kmer_lookup_arr, "k", k)
+
+        # Now find the split points and construct lookup ragged array.
+        ii = 0
+        for kk in tqdm(range(len(kmers)), desc="Constructing kmer lookup"):
+            kmer = kmers.encode(kk)
+            if (ii < len(sa)) and (seqs[sa[ii] : (sa[ii] + k)] == kmer):
+                jj = ii + 1
+                while (jj < len(sa)) and (seqs[sa[jj] : (sa[jj] + k)] == kmer):
+                    jj += 1
+                kmer_lookup_arr.append(idx[ii:jj])
+                # New start
+                ii = jj
+            else:
+                # End or not found
+                kmer_lookup_arr.append([])
+        kmer_lookup_arr.flush()

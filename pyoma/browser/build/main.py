@@ -19,6 +19,13 @@ def phase_genomes(conf):
             db.add_proteins(conf.genomes, OmaGroupsProvider(conf.oma_groups), xref_collector=xref_storer)
 
 
+def phase_build_seq_indexes(conf):
+    with DBBuilder(conf.db, mode="read", logger=logger) as db, DBBuilder(conf.out, mode="write", logger=logger) as out:
+        seqs = db.get_node("/Protein/SequenceBuffer").read().tobytes()
+        nr_entries = len(db.get_node("/Protein/Entries"))
+        out.add_sequence_index(seqs=seqs, nr_entries=nr_entries, k=6)
+
+
 def parse_command_line_args():
     parser = ArgumentParser(description="Builder for OMA Browser hdf5")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
@@ -42,6 +49,11 @@ def parse_command_line_args():
     genomes_parser.add_argument(
         "--genomes", required=True, nargs="+", help="List of genome files (json) containing essential data"
     )
+
+    seqindex_parser = subparsers.add_parser("seqindex", help="Adding sequence indexes")
+    seqindex_parser.set_defaults(func=phase_build_seq_indexes)
+    seqindex_parser.add_argument("--db", required=True, help="Path to database containing sequence")
+    seqindex_parser.add_argument("--out", required=True, help="Path to output sequence index database file")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

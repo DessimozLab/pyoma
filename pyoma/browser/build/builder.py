@@ -104,7 +104,7 @@ class XrefStorer:
 
 
 class DBBuilder(DarwinExporter):
-    def __init__(self, path, logger=None, mode=None, complib="blosc2"):
+    def __init__(self, path, logger=None, mode=None, complib="zlib"):
         self.logger = logger if logger is not None else common.package_logger
         self._path = path
         self._complib = complib
@@ -113,7 +113,7 @@ class DBBuilder(DarwinExporter):
         self._mode = mode
 
     def __enter__(self):
-        compr = tables.Filters(complevel=6, complib=self._complib, fletcher32=True)
+        compr = tables.Filters(complevel=6, complib=self._complib, fletcher32=False)
         self.h5 = tables.open_file(self._path, mode=self._mode[0], filters=compr)
         self.logger.info(f"opened {self._path} in {self._mode} mode, options {compr} ; pyoma {version()}")
         if self._mode == "write":

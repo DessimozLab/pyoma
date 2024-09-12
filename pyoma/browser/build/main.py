@@ -4,8 +4,9 @@ import warnings
 from tables import PerformanceWarning
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
-from .. import convert
+# from .. import convert
 from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
+from . import hogconvert
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,17 @@ def phase_build_seq_indexes(conf):
         seqs = db.h5.get_node("/Protein/SequenceBuffer").read().tobytes()
         nr_entries = len(db.h5.get_node("/Protein/Entries"))
         out.add_sequence_index(seqs=seqs, nr_entries=nr_entries, k=6)
+
+
+def phase_convert_hogs(conf):
+    parser = hogconvert.get_orthoxml_parser(conf.db, conf.oma_prot_id)
+    if conf.orthoxml_out is not None:
+        hogconvert.FullOrthoXMLObserver(parser, conf.orthoxml_out)
+    if conf.augmented_orthoxml_out is not None:
+        hogconvert.FullAugmentedOrthoXMLObserver(parser, conf.augmented_orthoxml_out)
+    with hogconvert.HOGtoHDF5(parser, conf.hdf5_out) as hog_h5:
+        hogconvert.PerFamilyHOGObserver(parser, hog_h5.store_orthoxml, hog_h5.store_orthoxml_augmented)
+        hogconvert.parse_orthoxml(conf.orthoxml, parser)
 
 
 def parse_command_line_args():
@@ -56,6 +68,29 @@ def parse_command_line_args():
     seqindex_parser.set_defaults(func=phase_build_seq_indexes)
     seqindex_parser.add_argument("--db", required=True, help="Path to database containing sequence")
     seqindex_parser.add_argument("--out", required=True, help="Path to output sequence index database file")
+
+    hogconv_parser = subparsers.add_parser(
+        name="hog", help="Converting input orthoxml into reformatted versions and HDF5"
+    )
+    hogconv_parser.set_defaults(func=phase_convert_hogs)
+    hogconv_parser.add_argument("--orthoxml", required=True, help="Path to input orthoxml file")
+    hogconv_parser.add_argument("--db", required=True, help="Path to hdf5 database with entires and taxonomy")
+    hogconv_parser.add_argument(
+        "--hdf5-out", required=True, help="Path to store hoglevel table and per family orthoxml"
+    )
+    hogconv_parser.add_argument(
+        "--augmented-orthoxml-out",
+        required=False,
+        help="Path where to store the augmented orthoxml file for all the HOGs",
+    )
+    hogconv_parser.add_argument(
+        "--orthoxml-out",
+        required=False,
+        help="Path where to store the orthoxml file for all the HOGs with updated IDs etc",
+    )
+    hogconv_parser.add_argument(
+        "--oma-prot-id", action="store_true", help="Whether the protId attributes in the input orthoxml contain OMA-IDs"
+    )
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

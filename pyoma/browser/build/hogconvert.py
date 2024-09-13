@@ -3,6 +3,7 @@ import bisect
 import collections
 import copy
 import logging
+import os
 import re
 import string
 from typing import Optional, Union
@@ -471,7 +472,7 @@ class OrthoXMLGeneIdParserGeneralProtID(OrthoXMLGeneIdParserWithOmaProtId):
         self._prot_ids = h5.get_node("/Protein/Entries").read(field="CanonicalId")
 
 
-def get_orthoxml_parser(h5path: Union[str, Path], is_oma_protId: bool = False) -> AbstractOrthoXMLParser:
+def get_orthoxml_parser(h5path: Union[str, os.PathLike], is_oma_protId: bool = False) -> AbstractOrthoXMLParser:
     if is_oma_protId:
         return OrthoXMLGeneIdParserWithOmaProtId(h5path)
     else:

@@ -38,6 +38,7 @@ def phase_convert_hogs(conf):
     if conf.augmented_orthoxml_out is not None:
         hogconvert.FullAugmentedOrthoXMLObserver(parser, conf.augmented_orthoxml_out)
     with hogconvert.HOGtoHDF5(parser, conf.hdf5_out) as hog_h5:
+        annotator = hogconvert.Annotator(parser)
         hogconvert.PerFamilyHOGObserver(parser, hog_h5.store_orthoxml, hog_h5.store_orthoxml_augmented)
         hogconvert.parse_orthoxml(conf.orthoxml, parser)
 

@@ -1,6 +1,8 @@
 import logging
 import sys
 import warnings
+
+import tables
 from tables import PerformanceWarning
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
@@ -38,6 +40,13 @@ def phase_convert_hogs(conf):
     with hogconvert.HOGtoHDF5(parser, conf.hdf5_out) as hog_h5:
         hogconvert.PerFamilyHOGObserver(parser, hog_h5.store_orthoxml, hog_h5.store_orthoxml_augmented)
         hogconvert.parse_orthoxml(conf.orthoxml, parser)
+
+
+def phase_vps(conf):
+    with tables.open_file(conf.db, "r") as db:
+        genomes = db.get_node("/Genome").read()
+    with DBBuilder(conf.hdf5_out, mode="write", logger=logger, complib="blosc") as out:
+        out.add_orthologs(conf.vps_base, genomes=genomes)
 
 
 def parse_command_line_args():
@@ -91,6 +100,12 @@ def parse_command_line_args():
     hogconv_parser.add_argument(
         "--oma-prot-id", action="store_true", help="Whether the protId attributes in the input orthoxml contain OMA-IDs"
     )
+
+    vp_parser = subparsers.add_parser("vps", help="Adding pairwise orthologs")
+    vp_parser.set_defaults(func=phase_vps)
+    vp_parser.add_argument("--db", required=True, help="Path to hdf5 database containing genomes")
+    vp_parser.add_argument("--vps-base", required=True, help="Folder where all the pairwise orthologs are stored")
+    vp_parser.add_argument("--hdf5-out", required=True, help="Path to store pairwise orthologs in HDF5")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

@@ -13,15 +13,14 @@ import operator
 import os
 import re
 import time
+from typing import Union
 
-import familyanalyzer
-import lxml.html
 import numpy
 import numpy.lib.recfunctions
 import pandas
 import tables
 from PySAIS import sais
-from future.standard_library import hooks
+
 from tqdm import tqdm
 
 from .. import suffixsearch
@@ -203,15 +202,15 @@ class DBBuilder(DarwinExporter):
         )
         create_index_for_columns(gstab, "NCBITaxonId", "UniProtSpeciesCode", "EntryOff")
 
-    def add_orthologs(self, basedir):
-        genome_offs = self.h5.root.Genome.col("EntryOff")
-        anygenome = self.h5.root.Genome[0]["UniProtSpeciesCode"].decode()
+    def add_orthologs(self, basedir: Union[str, os.PathLike], genomes: tables.Table):
+        genome_offs = genomes["EntryOff"]
+        anygenome = genomes[0]["UniProtSpeciesCode"].decode()
         testdir = os.path.join(basedir, anygenome)
         if not (os.path.isdir(testdir) and any(map(lambda x: x.endswith(".orth.txt.gz"), os.listdir(testdir)))):
             raise RuntimeError(f"{basedir} does not contain ortholog files")
 
         self.logger.info("using %s as base dir for pairwise orthology", basedir)
-        for gs in self.h5.root.Genome.iterrows():
+        for gs in genomes.iterrows():
             genome = gs["UniProtSpeciesCode"].decode()
             rel_node_for_genome = self._get_or_create_node(f"/PairwiseRelation/{genome}")
             if "VPairs" not in rel_node_for_genome:

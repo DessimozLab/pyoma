@@ -45,9 +45,9 @@ def phase_convert_hogs(conf):
 
 def phase_vps(conf):
     with tables.open_file(conf.db, "r") as db:
-        genomes = db.get_node("/Genome").read()
-    with DBBuilder(conf.hdf5_out, mode="write", logger=logger, complib="blosc") as out:
-        out.add_orthologs(conf.vps_base, genomes=genomes)
+        with DBBuilder(conf.hdf5_out, mode="write", logger=logger, complib="blosc") as out:
+            genomesTab = db.get_node("/Genome")
+            out.add_orthologs(conf.vps_base, genomes=genomesTab)
 
 
 def parse_command_line_args():

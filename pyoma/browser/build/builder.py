@@ -202,19 +202,19 @@ class DBBuilder(DarwinExporter):
         )
         create_index_for_columns(gstab, "NCBITaxonId", "UniProtSpeciesCode", "EntryOff")
 
-    def add_orthologs(self, basedir: Union[str, os.PathLike], genomes: numpy.ndarray):
-        genome_offs = genomes["EntryOff"]
+    def add_orthologs(self, basedir: Union[str, os.PathLike], genomes: tables.Table):
+        genome_offs = genomes.col("EntryOff")
         anygenome = genomes[0]["UniProtSpeciesCode"].decode()
         testdir = os.path.join(basedir, anygenome)
         if not (os.path.isdir(testdir) and any(map(lambda x: x.endswith(".orth.txt.gz"), os.listdir(testdir)))):
             raise RuntimeError(f"{basedir} does not contain ortholog files")
 
         self.logger.info("using %s as base dir for pairwise orthology", basedir)
-        for gs in genomes:
+        for gs in genomes.iterrows():
             genome = gs["UniProtSpeciesCode"].decode()
             rel_node_for_genome = self._get_or_create_node(f"/PairwiseRelation/{genome}")
             if "VPairs" not in rel_node_for_genome:
-                data = read_vps_from_tsv(self.h5.root.Genome, genome.encode("utf-8"), basedir=basedir)
+                data = read_vps_from_tsv(genomes, genome.encode("utf-8"), basedir=basedir)
                 vp_tab = self.h5.create_table(
                     rel_node_for_genome,
                     "VPairs",

@@ -202,7 +202,7 @@ class DBBuilder(DarwinExporter):
         )
         create_index_for_columns(gstab, "NCBITaxonId", "UniProtSpeciesCode", "EntryOff")
 
-    def add_orthologs(self, basedir: Union[str, os.PathLike], genomes: tables.Table):
+    def add_orthologs(self, basedir: Union[str, os.PathLike], genomes: numpy.ndarray):
         genome_offs = genomes["EntryOff"]
         anygenome = genomes[0]["UniProtSpeciesCode"].decode()
         testdir = os.path.join(basedir, anygenome)
@@ -210,7 +210,7 @@ class DBBuilder(DarwinExporter):
             raise RuntimeError(f"{basedir} does not contain ortholog files")
 
         self.logger.info("using %s as base dir for pairwise orthology", basedir)
-        for gs in genomes.iterrows():
+        for gs in genomes:
             genome = gs["UniProtSpeciesCode"].decode()
             rel_node_for_genome = self._get_or_create_node(f"/PairwiseRelation/{genome}")
             if "VPairs" not in rel_node_for_genome:
@@ -232,20 +232,20 @@ class DBBuilder(DarwinExporter):
         # add ' ' after each sequence (Ascii is smaller than
         # any AA, allows to build PAT array with split between
         # sequences.
-        seqLen = len(sequence) + 1
+        seq_len = len(sequence) + 1
         row[typ + "BufferOffset"] = off
-        row[typ + "BufferLength"] = seqLen
+        row[typ + "BufferLength"] = seq_len
         if typ == "CDNA":
             sequence = sequence.replace("X", "N")
-        seqNumpyObj = numpy.ndarray(
-            (seqLen,),
+        seq_numpy_obj = numpy.ndarray(
+            (seq_len,),
             buffer=(sequence + " ").encode("utf-8"),
             dtype=tables.StringAtom(1),
         )
-        sequence_array.append(seqNumpyObj)
+        sequence_array.append(seq_numpy_obj)
         if typ == "Seq":
             row["MD5ProteinHash"] = hashlib.md5(sequence.encode("utf-8")).hexdigest()
-        return seqLen
+        return seq_len
 
     def add_proteins(self, genome_files, oma_group_provider, xref_collector):
         code_to_file = {os.path.basename(f).split(".")[0]: f for f in genome_files}

@@ -207,7 +207,7 @@ def load_tsv_to_numpy(args):
     return full_table
 
 
-def read_vps_from_tsv(gs, ref_genome, basedir=None):
+def read_vps_from_tsv(gs, ref_genome, basedir=None, check_exist_and_swap=False):
     ref_genome_idx = gs.get_where_list("(UniProtSpeciesCode==code)", condvars={"code": ref_genome})[0]
     job_args = []
     if basedir is None:
@@ -223,6 +223,15 @@ def read_vps_from_tsv(gs, ref_genome, basedir=None):
             gs.cols.UniProtSpeciesCode[g2].decode() + ".orth.txt.gz",
         )
         tup = (fn, off1, off2, g1 != ref_genome_idx)
+        if check_exist_and_swap:
+            if not os.path.exists(fn):
+                fn = os.path.join(
+                    basedir,
+                    gs.cols.UniProtSpeciesCode[g2].decode(),
+                    gs.cols.UniProtSpeciesCode[g1].decode() + ".orth.txt.gz",
+                )
+                tup = (fn, off2, off1, g1 == ref_genome_idx)
+        # tup = (fn, off1, off2, g1 != ref_genome_idx)
         common.package_logger.debug("adding job: %s", tup)
         job_args.append(tup)
 

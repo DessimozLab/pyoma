@@ -214,7 +214,7 @@ class DBBuilder(DarwinExporter):
             genome = gs["UniProtSpeciesCode"].decode()
             rel_node_for_genome = self._get_or_create_node(f"/PairwiseRelation/{genome}")
             if "VPairs" not in rel_node_for_genome:
-                data = read_vps_from_tsv(genomes, genome.encode("utf-8"), basedir=basedir)
+                data = read_vps_from_tsv(genomes, genome.encode("utf-8"), basedir=basedir, check_exist_and_swap=True)
                 vp_tab = self.h5.create_table(
                     rel_node_for_genome,
                     "VPairs",

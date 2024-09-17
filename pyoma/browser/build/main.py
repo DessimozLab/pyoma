@@ -8,7 +8,6 @@ import tables
 from tables import PerformanceWarning
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
-# from .. import convert
 from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
 from . import hogconvert
 from ..convert import (
@@ -55,8 +54,8 @@ def phase_convert_hogs(conf):
 def phase_vps(conf):
     with tables.open_file(conf.db, "r") as db:
         with DBBuilder(conf.hdf5_out, mode="write", logger=logger, complib="blosc") as out:
-            genomesTab = db.get_node("/Genome")
-            out.add_orthologs(conf.vps_base, genomes=genomesTab)
+            genomes_tab = db.get_node("/Genome")
+            out.add_orthologs(conf.vps_base, genomes=genomes_tab)
 
 
 def phase_add_domains(conf):

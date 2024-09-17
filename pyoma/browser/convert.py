@@ -1031,20 +1031,11 @@ class DarwinExporter(object):
         ec_tab = self.h5.get_node("/Annotations/EC")
         create_index_for_columns(ec_tab, "EntryNr", "ECacc")
 
-        self.logger.info("creating index for domains (EntryNr)")
-        domtab = self.h5.get_node("/Annotations/Domains")
-        create_index_for_columns(domtab, "EntryNr", "DomainId")
-
         self.logger.info("creating indexes for HOG to prevalent domains " "(Fam and DomainId)")
         dom2hog_tab = self.h5.get_node("/HOGAnnotations/Domains")
         create_index_for_columns(dom2hog_tab, "DomainId")
         domprev_tab = self.h5.get_node("/HOGAnnotations/DomainArchPrevalence")
         create_index_for_columns(domprev_tab, "Fam")
-
-        self.logger.info("createing indexes for Domain Descriptions")
-        domdesc = self.h5.get_node("/Annotations/DomainDescription")
-        create_index_for_columns(domdesc, "DomainId")
-        suffixsearch.create_suffix_index(domdesc, "Description")
 
     def _iter_canonical_xref(self):
         """extract one canonical xref id for each protein.
@@ -1127,10 +1118,13 @@ class DarwinExporter(object):
                     domtab.append(buffer)
                     buffer = []
             if i % 50000 == 0:
-                self.logger.info("processed %s domain annotations so far", i)
+                self.logger.info(
+                    "processed %s domain annotations so far. Added %d to database", i, len(buffer) + len(domtab)
+                )
         if len(buffer) > 0:
             domtab.append(buffer)
         domtab.flush()
+        create_index_for_columns(domtab, "EntryNr", "DomainId")
 
     def add_domainname_info(self, domainname_infos):
         self.logger.info("adding domain name information...")
@@ -1152,6 +1146,8 @@ class DarwinExporter(object):
         if len(buffer) > 0:
             self._write_to_table(dom_name_tab, buffer)
         dom_name_tab.flush()
+        create_index_for_columns(dom_name_tab, "DomainId")
+        suffixsearch.create_suffix_index(dom_name_tab, "Description")
 
     def update_summary_stats(self):
         """update the summary statistics of xrefs & go.

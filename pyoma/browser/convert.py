@@ -2457,7 +2457,7 @@ class CathDomainNameParser(object):
     source = b"CATH/Gene3D"
 
     def __init__(self, url):
-        self.fname = download_url_if_not_present(url)
+        self.fname = download_url_if_not_present(url) if "://" in url else url
 
     def parse(self):
         with common.auto_open(self.fname, "rt") as fh:

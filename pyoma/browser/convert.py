@@ -17,6 +17,7 @@ import re
 import resource
 import subprocess
 import time
+from typing import List, Iterable, Tuple, Union, Mapping
 from builtins import str, chr, range, object, super, bytes
 from tempfile import NamedTemporaryFile
 
@@ -1103,7 +1104,7 @@ class DarwinExporter(object):
         prot_tab.modify_column(0, len(prot_tab), 1, column=canonical_ids, colname="CanonicalId")
         prot_tab.flush()
 
-    def add_domain_info(self, domains):
+    def add_domain_info(self, domains: Iterable, md5_to_enr: Mapping = None):
         self.logger.info("adding domain information...")
         domtab = self.h5.create_table(
             "/Annotations",
@@ -1112,10 +1113,11 @@ class DarwinExporter(object):
             createparents=True,
             expectedrows=1e7,
         )
-        entrytab = self.h5.get_node("/Protein/Entries")
-        md5_to_enr = collections.defaultdict(list)
-        for e in entrytab:
-            md5_to_enr[e["MD5ProteinHash"]].append(e["EntryNr"])
+        if md5_to_enr is None:
+            entrytab = self.h5.get_node("/Protein/Entries")
+            md5_to_enr = collections.defaultdict(list)
+            for e in entrytab:
+                md5_to_enr[e["MD5ProteinHash"]].append(e["EntryNr"])
 
         buffer = []
         for i, domain in enumerate(domains):
@@ -1626,7 +1628,7 @@ def download_url_if_not_present(url, force_copy=False):
 def iter_domains(url):
     DomainTuple = collections.namedtuple("DomainTuple", ("md5", "id", "coords"))
 
-    fname = download_url_if_not_present(url)
+    fname = download_url_if_not_present(url) if "://" in url else url
     if fname is None:
         return
     with common.auto_open(fname, "rt") as uncompressed:

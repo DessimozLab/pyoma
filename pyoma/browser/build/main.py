@@ -1,3 +1,5 @@
+import collections
+import itertools
 import logging
 import sys
 import warnings
@@ -9,6 +11,13 @@ from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 # from .. import convert
 from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
 from . import hogconvert
+from ..convert import (
+    iter_domains,
+    filter_duplicated_domains,
+    only_pfam_or_cath_domains,
+    CathDomainNameParser,
+    PfamDomainNameParser,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +57,26 @@ def phase_vps(conf):
         with DBBuilder(conf.hdf5_out, mode="write", logger=logger, complib="blosc") as out:
             genomesTab = db.get_node("/Genome")
             out.add_orthologs(conf.vps_base, genomes=genomesTab)
+
+
+def phase_add_domains(conf):
+    with tables.open_file(conf.db, "r") as db:
+        with DBBuilder(conf.hdf5_out, mode="write", logger=logger) as out:
+            md5_to_enr = collections.defaultdict(list)
+            for e in db.get_node("/Protein/Entries"):
+                md5_to_enr[e["MD5ProteinHash"]].append(e["EntryNr"])
+            logger.info("loaded mapping of md5 hashes to entries with %d unique hashes", len(md5_to_enr))
+            out.add_domain_info(
+                filter_duplicated_domains(
+                    only_pfam_or_cath_domains(itertools.chain.from_iterable(map(iter_domains, conf.domains)))
+                )
+            )
+            out.add_domainname_info(
+                itertools.chain(
+                    CathDomainNameParser(conf.cath_names).parse(),
+                    PfamDomainNameParser(conf.pfam_names).parse(),
+                )
+            )
 
 
 def parse_command_line_args():
@@ -107,6 +136,31 @@ def parse_command_line_args():
     vp_parser.add_argument("--db", required=True, help="Path to hdf5 database containing genomes")
     vp_parser.add_argument("--vps-base", required=True, help="Folder where all the pairwise orthologs are stored")
     vp_parser.add_argument("--hdf5-out", required=True, help="Path to store pairwise orthologs in HDF5")
+
+    domain_parser = subparsers.add_parser(
+        "domains", help="Adding domain annotations to OMA", formatter_class=ArgumentDefaultsHelpFormatter
+    )
+    domain_parser.set_defaults(func=phase_add_domains)
+    domain_parser.add_argument("--db", required=True, help="Path to database")
+    domain_parser.add_argument("--hdf5-out", required=True, help="Path to store domain annotations in HDF5")
+    domain_parser.add_argument(
+        "--domains",
+        required=True,
+        nargs="+",
+        help="List filenames containing domain annotations for protein sequence hashes",
+    )
+    domain_parser.add_argument(
+        "--cath-names",
+        required=False,
+        default="http://download.cathdb.info/cath/releases/latest-release/cath-classification-data/cath-names.txt",
+        help="Path pointing to cath_names.txt files which provide names for cath domain numbers",
+    )
+    domain_parser.add_argument(
+        "--pfam_names",
+        required=False,
+        default="ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz",
+        help="Path pointing to pfam domain name mapping file",
+    )
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

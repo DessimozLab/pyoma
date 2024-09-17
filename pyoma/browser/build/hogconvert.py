@@ -402,7 +402,7 @@ class AbstractOrthoXMLParser(metaclass=abc.ABCMeta):
 
     def finish(self):
         for observer in self._group_observers:
-            observer.finish()
+            observer.finished()
         logger.debug("send finish signal to all observers")
 
 

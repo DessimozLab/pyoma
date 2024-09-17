@@ -69,7 +69,8 @@ def phase_add_domains(conf):
             out.add_domain_info(
                 filter_duplicated_domains(
                     only_pfam_or_cath_domains(itertools.chain.from_iterable(map(iter_domains, conf.domains)))
-                )
+                ),
+                md5_to_enr=md5_to_enr,
             )
             out.add_domainname_info(
                 itertools.chain(

@@ -1659,7 +1659,7 @@ def iter_domains(url):
                     # do some sanity checks on the first few lines
                     if re.match(r"[0-9a-f]{32}$", dom.md5) is None:
                         raise DataImportError("md5 hash of line {:d} has unexpected values: {}".format(lineNr, dom.md5))
-                    if re.match(r"([1-4]\.\d+\.\d+\.\d+|PF\d+)$", dom.id) is None:
+                    if re.match(r"([1-6]\.\d+\.\d+\.\d+|PF\d+)$", dom.id) is None:
                         raise DataImportError("Domain-ID of line {:d} has unexpected value: {}".format(lineNr, dom.id))
                     if re.match(r"\d+:\d+", dom.coords) is None:
                         raise DataImportError(
@@ -1671,7 +1671,7 @@ def iter_domains(url):
 
 
 def only_pfam_or_cath_domains(iterable):
-    cath_re = re.compile(r"[1-4]\.")
+    cath_re = re.compile(r"[1-6]\.")
     for dom in iterable:
         if dom.id.startswith("PF") or cath_re.match(dom.id) is not None:
             yield dom

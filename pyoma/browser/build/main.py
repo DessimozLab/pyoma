@@ -156,7 +156,7 @@ def parse_command_line_args():
         help="Path pointing to cath_names.txt files which provide names for cath domain numbers",
     )
     domain_parser.add_argument(
-        "--pfam_names",
+        "--pfam-names",
         required=False,
         default="ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz",
         help="Path pointing to pfam domain name mapping file",

@@ -11,6 +11,7 @@ from typing import Tuple, Mapping
 from .decorators import timethis
 from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .exceptions import TooUnspecificQuery
+from ..common import count_elements
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +108,6 @@ class XRefSearchHelper:
         return xref_rows
 
     def _prefix_reducecd_count(self, query, entrynr_range=None):
-        from .db import count_elements
-
         query = self._version_free_query(query).lower().encode("utf-8")
         cnts = self.gene_name_lookup.count(query)
         if cnts == 0:
@@ -164,8 +163,6 @@ class XRefSearchHelper:
         return xrefs
 
     def _prefix_direct_count(self, query, entrynr_range=None):
-        from .db import count_elements
-
         query = query.encode("utf-8")
         it = self.xref_tab.where(*self._query_prefix(query, entrynr_range))
         return count_elements(it)

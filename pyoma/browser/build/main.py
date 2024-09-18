@@ -79,6 +79,16 @@ def phase_add_domains(conf):
             )
 
 
+def phase_select_alt_splice_variants(conf):
+    with DBBuilder(conf.db, mode="append", logger=logger) as db:
+        prot_hogid_arr = db.h5.get_node("/OmaHOG")
+        hogids = prot_hogid_arr.read()
+        db.add_protein_hog_ids(hogids)
+        prot_hogid_arr.remove()
+
+        db.identify_and_store_splice_variants(conf.splice_json)
+
+
 def parse_command_line_args():
     parser = ArgumentParser(description="Builder for OMA Browser hdf5")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
@@ -161,6 +171,11 @@ def parse_command_line_args():
         default="ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz",
         help="Path pointing to pfam domain name mapping file",
     )
+
+    splice_parser = subparsers.add_parser("splice", help="Adding alternative splice information - set main variant")
+    splice_parser.set_defaults(func=phase_select_alt_splice_variants)
+    splice_parser.add_argument("--db", required=True, help="Path to database - will be modified")
+    splice_parser.add_argument("--splice-json", required=True, help="Path to splice json file")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

@@ -62,6 +62,7 @@ from .idmapper import (
     DomainNameIdMapper,
 )
 from .. import version
+from ..common import count_elements
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings(
@@ -75,18 +76,6 @@ threading.stack_size(4096 * 100000)
 
 # Global initialisations
 GAF_VERSION = "2.1"
-
-
-def count_elements(iterable):
-    """return the number of elements in an iterator in the most efficient way.
-
-    Be aware that for unbound iterators, this method won't terminate!
-    :param iterable: an iterable object.
-    """
-    counter = itertools.count()
-    collections.deque(zip(iterable, counter), maxlen=0)  # (consume at C speed)
-    return next(counter)
-
 
 _first_cap_re = re.compile("(.)([A-Z][a-z]+)")
 _all_cap_re = re.compile("([a-z0-9])([A-Z])")

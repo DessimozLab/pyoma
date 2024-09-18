@@ -47,6 +47,7 @@ from ..convert import (
     create_fast_famhoglevel_lookup,
     create_and_store_fast_famhoglevel_lookup,
 )
+from ..exceptions import DBConsistencyError
 from ..db import Taxonomy
 from ..convert import DarwinExporter
 
@@ -407,3 +408,60 @@ class DBBuilder(DarwinExporter):
                 # End or not found
                 kmer_lookup_arr.append([])
         kmer_lookup_arr.flush()
+
+    def add_protein_hog_ids(self, hog_ids: numpy.array) -> None:
+        entries_tab = self.h5.get_node("/Protein/Entries")
+        assert len(hog_ids) == len(entries_tab)
+        entries_tab.modify_column(0, len(entries_tab), 1, column=hog_ids, colname="OmaHOG")
+
+    def identify_and_store_splice_variants(self, splice_json):
+        with open(splice_json, "rt") as f:
+            splice_info = json.load(splice_json)
+        gs = {
+            row["UniProtSpeciesCode"].decode(): slice(int(row["EntryOff"]), int(row["EntryOff"] + row["TotEntries"]), 1)
+            for row in self.h5.get_node("Genome")
+        }
+        entry_tab = self.h5.get_node("/Protein/Entry")
+        alt_splice = numpy.zeros((len(entry_tab),), dtype=entry_tab.cols.AltSpliceVariant.dtype)
+        for sp in splice_info:
+            if sp not in gs:
+                continue
+            self._identify_main_variants(
+                splice_groups=splice_info[sp],
+                splice_arr=alt_splice,
+                entries=entry_tab.read(gs[sp]),
+                offset=gs[sp].start,
+                vp_tab=self.h5.get_node(f"/PairwiseRelation/{sp}/VPairs"),
+            )
+        entry_tab.modify_column(0, len(entry_tab), 1, column=alt_splice, colname="AltSpliceVariant")
+        entry_tab.flush()
+
+    def _identify_main_variants(self, splice_groups, splice_arr, entries, offset, vp_tab):
+        for grp in splice_groups:
+            idx = numpy.array(grp, dtype="i4") - 1
+            ent = entries[idx]
+            og = numpy.nonzero(ent["OmaGroup"])[0]
+            if len(og) > 1:
+                raise DBConsistencyError("Several splice variants in OMA Groups", ent)
+            if len(og) == 1:
+                splice_arr[idx + offset] = ent["EntryNr"][og[0]]
+                continue
+
+            hog = numpy.nonzero(ent["OmaHOG"])[0]
+            if len(hog) > 1:
+                raise DBConsistencyError("Several splice variants in HOGs", ent)
+            if len(hog) == 1:
+                splice_arr[idx + offset] = ent["EntryNr"][hog[0]]
+                continue
+
+            nr_vps = numpy.array(
+                map(lambda enr: common.count_elements(vp_tab.where("EntryNr1 == enr")), ent["EntryNr"]), dtype="i4"
+            )
+            vp = numpy.nonzero(nr_vps)[0]
+            if len(vp) > 1:
+                raise DBConsistencyError("Several splice variants contain pairwise orthologs", ent, nr_vps)
+            if len(vp) == 1:
+                splice_arr[idx + offset] = ent["EntryNr"][vp[0]]
+
+            # no orthologs for any variant. choose the longest variant as main one.
+            splice_arr[idx + offset] = ent["EntryNr"][numpy.argmax(ent["SeqBufferLength"])]

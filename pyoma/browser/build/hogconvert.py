@@ -655,7 +655,7 @@ class HOGtoHDF5(HogObserver):
             expectedrows=1e8,
         )
         self.index = {}
-        self.hogid = numpy.zeros(shape=(self.nr_entries + 1,), dtype=tablefmt.ProteinTable.columns["OmaHOG"].dtype)
+        self.hogid = numpy.zeros(shape=(self.nr_entries,), dtype=tablefmt.ProteinTable.columns["OmaHOG"].dtype)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -709,6 +709,8 @@ class HOGtoHDF5(HogObserver):
                 )
             )
         self.leveltab.append(levs)
+        for gene in node.iterfind(".//geneRef"):
+            self.hogid[int(gene.attrib["id"]) - 1] = gene.attrib["LOFT"].encode("utf-8")
 
     def _store_orthoxml_data(self, hogid, orthoxml, kind=None):
         if kind is None:

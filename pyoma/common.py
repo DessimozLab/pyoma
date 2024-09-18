@@ -1,3 +1,7 @@
+from __future__ import division, print_function, unicode_literals
+
+import collections
+import itertools
 import logging
 import gzip
 import bz2
@@ -48,3 +52,14 @@ def auto_open(fn, *args, **kwargs):
         elif fn.endswith("bz2"):
             return bz2.open(fn, *args, **kwargs)
     return open(fn, *args, **kwargs)
+
+
+def count_elements(iterable):
+    """return the number of elements in an iterator in the most efficient way.
+
+    Be aware that for unbound iterators, this method won't terminate!
+    :param iterable: an iterable object.
+    """
+    counter = itertools.count()
+    collections.deque(zip(iterable, counter), maxlen=0)  # (consume at C speed)
+    return next(counter)

@@ -570,6 +570,7 @@ class Database(object):
                     {
                         "chromosome": g["Chromosome"].decode(),
                         "start": int(g["LocusStart"]),
+                        "end": int(g["LocusEnd"]),
                         "strand": "+" if g["LocusStrand"] > 0 else "-",
                         "hog_id": g["OmaHOG"].decode(),
                     },

@@ -197,6 +197,8 @@ class DBBuilder(DarwinExporter):
         for col, typeinfo in tablefmt.GenomeTable.columns.items():
             if typeinfo.kind == "time":
                 gs.loc[:, col] = gs.loc[:, col].apply(parse_as_date_column)
+            elif typeinfo.kind == "string":
+                gs.loc[:, col] = gs.loc[:, col].fillna('')
         dt = {k: v.dtype for k, v in tablefmt.GenomeTable.columns.items()}
         gstab = self.h5.create_table(
             "/", "Genome", tablefmt.GenomeTable, obj=gs.to_records(index=False, column_dtypes=dt), expectedrows=len(gs)

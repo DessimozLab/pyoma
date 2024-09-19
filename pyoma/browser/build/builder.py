@@ -416,12 +416,12 @@ class DBBuilder(DarwinExporter):
 
     def identify_and_store_splice_variants(self, splice_json):
         with open(splice_json, "rt") as f:
-            splice_info = json.load(splice_json)
+            splice_info = json.load(f)
         gs = {
             row["UniProtSpeciesCode"].decode(): slice(int(row["EntryOff"]), int(row["EntryOff"] + row["TotEntries"]), 1)
-            for row in self.h5.get_node("Genome")
+            for row in self.h5.get_node("/Genome")
         }
-        entry_tab = self.h5.get_node("/Protein/Entry")
+        entry_tab = self.h5.get_node("/Protein/Entries")
         alt_splice = numpy.zeros((len(entry_tab),), dtype=entry_tab.cols.AltSpliceVariant.dtype)
         for sp in splice_info:
             if sp not in gs:
@@ -429,7 +429,7 @@ class DBBuilder(DarwinExporter):
             self._identify_main_variants(
                 splice_groups=splice_info[sp],
                 splice_arr=alt_splice,
-                entries=entry_tab.read(gs[sp]),
+                entries=entry_tab.read(start=gs[sp].start, stop=gs[sp].stop),
                 offset=gs[sp].start,
                 vp_tab=self.h5.get_node(f"/PairwiseRelation/{sp}/VPairs"),
             )
@@ -454,8 +454,9 @@ class DBBuilder(DarwinExporter):
                 splice_arr[idx + offset] = ent["EntryNr"][hog[0]]
                 continue
 
-            nr_vps = numpy.array(
-                map(lambda enr: common.count_elements(vp_tab.where("EntryNr1 == enr")), ent["EntryNr"]), dtype="i4"
+            nr_vps = numpy.fromiter(
+                map(lambda enr: common.count_elements(vp_tab.where("EntryNr1 == enr")), ent["EntryNr"]), 
+                dtype="i4"
             )
             vp = numpy.nonzero(nr_vps)[0]
             if len(vp) > 1:

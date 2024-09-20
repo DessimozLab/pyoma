@@ -3,13 +3,18 @@ import itertools
 import logging
 import sys
 import warnings
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
+import ete3
+import pandas
 import tables
 from tables import PerformanceWarning
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+import omataxonomy
+
 
 from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
 from . import hogconvert
+from pyoma.browser.build import xref as xref_build
 from ..convert import (
     iter_domains,
     filter_duplicated_domains,
@@ -85,8 +90,19 @@ def phase_select_alt_splice_variants(conf):
         hogids = prot_hogid_arr.read()
         db.add_protein_hog_ids(hogids)
         prot_hogid_arr.remove()
-
         db.identify_and_store_splice_variants(conf.splice_json)
+
+
+def fetch_refseq(conf):
+    xref_build.fetch(**vars(conf))
+
+
+def filter_and_split_xrefs(conf):
+    gs = pandas.read_csv(conf.gs_tsv, sep="\t")
+    ncbi_taxids = set(gs["OriginalNCBITaxonId"])
+    relevant_taxids = xref_build.load_relevant_taxids(ncbi_taxids, omataxonomy.Taxonomy(conf.tax_sqlite))
+    with xref_build.ChunkWriter(conf.out_prefix) as writer:
+        xref_build.filter_records_on_taxids(conf.xref, writer, relevant_taxids, conf.format)
 
 
 def parse_command_line_args():
@@ -176,6 +192,65 @@ def parse_command_line_args():
     splice_parser.set_defaults(func=phase_select_alt_splice_variants)
     splice_parser.add_argument("--db", required=True, help="Path to database - will be modified")
     splice_parser.add_argument("--splice-json", required=True, help="Path to splice json file")
+
+    # refseq subparser
+    refseq_fetch_parser = subparsers.add_parser(
+        "fetch-refseq", help="Fetching refseq data from remote servers to be integrated"
+    )
+    refseq_fetch_parser.set_defaults(func=fetch_refseq)
+    refseq_fetch_parser.add_argument(
+        "--host", default="ftp.ncbi.nih.gov", help="ftp host from where to fetch_parser the data"
+    )
+    refseq_fetch_parser.add_argument(
+        "--directory",
+        default="/refseq/release/complete/",
+        help="directory from which files matching '--pattern' argument will be " "downloaded",
+    )
+    refseq_fetch_parser.add_argument(
+        "--pattern", default=r".*protein\.gpff\.gz", help="regex pattern of files to download."
+    )
+    refseq_fetch_parser.add_argument(
+        "--checksum-ftp-path",
+        default=r"/refseq/release/release-catalog/.*\.files\.installed",
+        help="Path (regex pattern) of a file which contains md5 checksums. Download will "
+        "verify that checksum matches for every file if the name is found in the list.",
+    )
+    refseq_fetch_parser.add_argument(
+        "-n",
+        "--nr-cpu",
+        default=4,
+        type=int,
+        help="nr of parallel processes to use to download the files from the remote host",
+    )
+    refseq_fetch_parser.add_argument(
+        "-c",
+        "--ftp-config",
+        help="path to config file for ftp configuration. If not specified, it will try "
+        "location in $DARWIN_OMA_RC, or if not set, ~/.omarc. The config files "
+        "is not required to exist. The intention is to provide means for a proxy "
+        "host for example.",
+    )
+    refseq_fetch_parser.add_argument(
+        "-o",
+        "--out",
+        default="./",
+        help="output directory where the remote files are written to. Defaults to the " "current working directory",
+    )
+
+    filter_xref_parser = subparsers.add_parser("filter-xref", help="Filtering xref files")
+    filter_xref_parser.set_defaults(func=filter_and_split_xrefs)
+    filter_xref_parser.add_argument("--xref", required=True, help="Path to input xref file")
+    filter_xref_parser.add_argument(
+        "--format", required=True, choices=("swiss", "genbank"), help="Format of input xref file"
+    )
+    filter_xref_parser.add_argument(
+        "--out-prefix",
+        default="./xref",
+        required=False,
+        help="Prefix of output xref file. Output files will contain < 30k records, " "all named {prefix}-{03d}.gz",
+    )
+    filter_xref_parser.add_argument("--gs-tsv", required=True, help="Path to GS tsv file")
+    filter_xref_parser.add_argument("--tax-sqlite", required=False, help="Path to tax-sqlite file")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

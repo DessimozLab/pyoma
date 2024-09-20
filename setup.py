@@ -7,13 +7,11 @@ name = "pyoma"
 req_packages = [
     "numpy >= 1.20, <2",
     "tables >= 3.8.0",
-    "future",
     "fuzzyset2 >= 0.1.1",
     "tqdm",
     "pyopa >= 0.8",
     "pandas >= 0.22",
-    'biopython >= 1.76 ; python_version >= "3.6"',
-    'biopython == 1.76 ; python_version < "3.6"',
+    "biopython >= 1.78",
     "datasketch",
     "ete3",
     "networkx",
@@ -65,13 +63,11 @@ setup(
     extras_require={
         "create_db": [
             "PySAIS",
-            "familyanalyzer>=0.7.3",
             "matplotlib",
             "scikit-learn",
             "scikit-fuzzy",
-            "pebble",
-            "lark-parser",
             "pyham",
+            "omataxonomy",
         ],
         "enrichment": [
             "plotly",
@@ -87,7 +83,7 @@ setup(
         "docs": ["sphinx"],
     },
     test_require=["nose"],
-    python_requires=">=3.6",
+    python_requires=">=3.8",
 )
 
 # Remove local copy of oma2hdf (installed)

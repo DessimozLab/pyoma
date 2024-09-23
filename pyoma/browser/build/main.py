@@ -94,7 +94,14 @@ def phase_select_alt_splice_variants(conf):
 
 
 def fetch_refseq(conf):
-    xref_build.fetch(**vars(conf))
+    xref_build.fetch(
+        host=conf.host,
+        directory=conf.directory,
+        pattern=conf.pattern,
+        out_dir=conf.out,
+        ftp_config=conf.ftp_config,
+        nr_cpu=conf.nr_cpu,
+    )
 
 
 def filter_and_split_xrefs(conf):

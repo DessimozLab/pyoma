@@ -88,5 +88,5 @@ def load_relevant_taxids(species_taxids, ncbi_taxonomy: ete3.NCBITaxa) -> Set[in
     relevant_taxids = set(species_taxids)
     for taxid in species_taxids:
         if ranks[taxid] in ("species", "genus", "varietas", "strain"):
-            relevant_taxids |= ncbi_taxonomy.get_descendant_taxa(taxid)
+            relevant_taxids |= set(ncbi_taxonomy.get_descendant_taxa(taxid, intermediate_nodes=True))
     return relevant_taxids

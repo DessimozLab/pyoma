@@ -109,7 +109,7 @@ def filter_and_split_xrefs(conf):
     gs = pandas.read_csv(conf.gs_tsv, sep="\t")
     ncbi_taxids = set(gs["OriginalNCBITaxonId"])
     relevant_taxids = xref_build.load_relevant_taxids(ncbi_taxids, omataxonomy.Taxonomy(conf.tax_sqlite))
-    with xref_build.ChunkWriter(conf.out_prefix) as writer:
+    with xref_build.ChunkWriter(conf.out_prefix, 30_000) as writer:
         xref_build.filter_records_on_taxids(conf.xref, writer, relevant_taxids, conf.format)
 
 

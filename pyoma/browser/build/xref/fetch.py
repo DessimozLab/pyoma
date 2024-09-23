@@ -129,7 +129,7 @@ def fetch(
     directory: str,
     pattern: str,
     out_dir: str = "./",
-    checksum_ftp_path=Optional[str],
+    checksum_ftp_path: Optional[str] = None,
     ftp_config=None,
     nr_cpu: int = 1,
 ) -> None:

@@ -98,6 +98,7 @@ def fetch_refseq(conf):
         host=conf.host,
         directory=conf.directory,
         pattern=conf.pattern,
+        checksum_ftp_path=conf.checksum_ftp_path,
         out_dir=conf.out,
         ftp_config=conf.ftp_config,
         nr_cpu=conf.nr_cpu,

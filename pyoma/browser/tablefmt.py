@@ -44,6 +44,13 @@ class AncestralSyntenyRels(tables.IsDescription):
         base="uint8",
     )
     LCA_taxid = tables.Int32Col(pos=4, dflt=-1)
+    Orientation = tables.EnumCol(
+        tables.Enum({"unidirectional": 1, "divergent": 2, "convergent": 4, "n/a": -1}),
+        pos=5,
+        dflt="n/a",
+        base="int8",
+    )
+    OrientationScore = tables.Float16Col(pos=6, dflt=-1)
 
 
 class ProteinTable(tables.IsDescription):

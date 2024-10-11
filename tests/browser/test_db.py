@@ -303,15 +303,51 @@ class DatabaseTests(TestWithDbInstance):
         s = self.db.get_sequence(enr)[ii:jj]
         return s, enr, ii, jj
 
+    def modify_sequence(self, seq: bytes, n: int = 5) -> bytes:
+        AAs = list(self.db.seq_search.DIGITS_AA)
+        for _ in range(n):
+            i = random.randint(0, len(seq))
+            b = random.choice(AAs)
+            seq = seq[:i] + b + seq[i + 1 :]
+        return seq
+
     def test_approx_search(self):
         # Test for random subsequence of 10 random sequences.
         for _ in range(10):
-            s, enr, start_idx, end_idx = self.get_random_subsequence()
+            s, enr, start_idx, end_idx = self.get_random_subsequence(minlen=20)
+            s = self.modify_sequence(s, n=3)
             approx_search_results = self.db.seq_search.approx_search(s, is_sanitised=True)
             self.assertIn(
                 enr,
                 {z[0] for z in approx_search_results},
                 "approx search for entry {}[{}:{}] failed.".format(enr - 1, start_idx, end_idx),
+            )
+
+    def test_approx_search_alignment_methods(self):
+        # Test for random subsequence of 10 random sequences.
+        for _ in range(3):
+            s, enr, start_idx, end_idx = self.get_random_subsequence(minlen=30)
+            # modify sequence slightly
+            s = self.modify_sequence(s)
+            approx_search_local = self.db.seq_search.approx_search(s, n=5, is_sanitised=True, alignment="local")
+            approx_search_global = self.db.seq_search.approx_search(s, n=5, is_sanitised=True, alignment="global")
+            self.assertEqual(
+                set(z[0] for z in approx_search_local),
+                set(z[0] for z in approx_search_global),
+                "not the same entries got returned for local and global alignment",
+            )
+            self.assertIn(enr, {z[0] for z in approx_search_local}, "missing query entry")
+            alignment_local = [z[1] for z in approx_search_local if z[0] == enr][0]
+            alignment_global = [z[1] for z in approx_search_global if z[0] == enr][0]
+            self.assertGreaterEqual(
+                alignment_local["score"],
+                alignment_global["score"],
+                "local alignment score must be larger than global alignment score",
+            )
+            self.assertLessEqual(
+                len(alignment_local["alignment"][0][0]),
+                len(alignment_global["alignment"][0][0]),
+                "local alignment must be shorter than global alignment",
             )
 
     def test_specific_approx_search_that_failed_on_jenkins(self):

@@ -2505,6 +2505,7 @@ class SequenceSearch(object):
         compute_distance=False,
         entrynr_range=None,
         return_kmer_hits=False,
+        alignment="local",
     ):
         """
         Performs an approximate match search using the kmer index.
@@ -2517,12 +2518,14 @@ class SequenceSearch(object):
         :param seq: the query sequence to be searched
         :type seq: str, bytes
         :param int n: number of maximum returned entries that match query
-        :param bool is_sanitised: whether or not the sequence is already sanitised. defaults to false.
+        :param bool is_sanitised: whether the sequence is already sanitised. defaults to false.
         :param float coverage: the minimum fraction of covered kmers by the target sequence
         :param entrynr_range: target entry number range as a tuple (min, max) or set for filtering
         :type entrynr_range: set[int], tuple[int, int]
         :param bool return_kmer_hits: whether or not the full list of matched kmer entries should be
         returned. if set to True, the return value will be a tuple instead of a single list
+        :param alignment: the type of alignment to be computed. needs to be either 'global' or 'local'.
+        :type alignment: str
 
         :returns: list of matched entries, each element is a tuple with the entry_nr and a dictionary
         containing the score, alignment and distance estimates.
@@ -2531,6 +2534,8 @@ class SequenceSearch(object):
         seq = seq if is_sanitised else self._sanitise_seq(seq)
         n = n if n is not None else 50
         coverage = 0.0 if coverage is None else coverage
+        if alignment not in ("global", "local"):
+            raise ValueError("alignment must be either 'global' or 'local'")
 
         kmer_hits = self.approx_search_no_align(seq, is_sanitised=True, coverage=coverage, entrynr_range=entrynr_range)
         c = sorted(kmer_hits, reverse=True, key=lambda x: x[1])
@@ -2552,7 +2557,7 @@ class SequenceSearch(object):
                             "distvar": a[3] if compute_distance else None,
                         },
                     )
-                    for (m, a) in self._align_entries(seq, c, compute_distance)
+                    for (m, a) in self._align_entries(seq, c, compute_distance, alignment == "global")
                 ],
                 key=lambda q: q[1]["score"],
                 reverse=True,
@@ -2562,12 +2567,12 @@ class SequenceSearch(object):
         else:
             return res
 
-    def _align_entries(self, seq, matches, compute_distance=False):
+    def _align_entries(self, seq, matches, compute_distance=False, global_alignment=False):
         # Does the alignment for the approximate search
-        def align(s1, s2s, env, aligned):
+        def align(s1, s2s, env, aligned, global_alignment):
             for s2 in s2s:
-                z = pyopa.align_double(s1, s2, env, False, False, True)
-                a = pyopa.align_strings(s1, s2, env, False, z)
+                z = pyopa.align_double(s1, s2, env, False, global_alignment, True)
+                a = pyopa.align_strings(s1, s2, env, global_alignment, z)
                 if compute_distance:
                     score, pam, pamvar = self.multienv_align.estimate_pam(*a[0:2])
                     res_ds = (
@@ -2602,7 +2607,7 @@ class SequenceSearch(object):
                 matches,
             )
         )
-        t = threading.Thread(target=align, args=(query, entries, self.PAM100, aligned))
+        t = threading.Thread(target=align, args=(query, entries, self.PAM100, aligned, global_alignment))
         t.start()
         t.join()
         assert len(aligned) > 0, "Alignment thread crashed."

@@ -110,7 +110,21 @@ def filter_and_split_xrefs(conf):
     ncbi_taxids = set(gs["OriginalNCBITaxonId"])
     relevant_taxids = xref_build.load_relevant_taxids(ncbi_taxids, omataxonomy.Taxonomy(conf.tax_sqlite))
     with xref_build.ChunkWriter(conf.out_prefix, 30_000) as writer:
-        xref_build.filter_records_on_taxids(conf.xref, writer, relevant_taxids, conf.format)
+        xref_build.filter_records_on_taxids(conf.xref, writer, set(relevant_taxids.keys()), conf.format)
+
+
+def map_xrefs(conf):
+    gs = pandas.read_csv(conf.gs_tsv, sep="\t")
+    ncbi_taxids = set(gs["OriginalNCBITaxonId"])
+    taxid_mapping = xref_build.load_relevant_taxids(ncbi_taxids, omataxonomy.Taxonomy(conf.tax_sqlite))
+    xref_build.map_xrefs(
+        fpath=conf.xref,
+        format=conf.format,
+        db=conf.db,
+        seq_idx=conf.seq_idx_db,
+        xref_db=conf.xref_source_db,
+        taxid_mapping=taxid_mapping,
+    )
 
 
 def parse_command_line_args():
@@ -259,6 +273,24 @@ def parse_command_line_args():
     )
     filter_xref_parser.add_argument("--gs-tsv", required=True, help="Path to GS tsv file")
     filter_xref_parser.add_argument("--tax-sqlite", required=False, help="Path to tax-sqlite file")
+
+    map_xref_parser = subparsers.add_parser("map-xref", help="Filtering xref files")
+    map_xref_parser.set_defaults(func=map_xrefs)
+    map_xref_parser.add_argument("--xref", required=True, help="Path to filtered input xref file")
+    map_xref_parser.add_argument(
+        "--format", required=True, choices=("swiss", "genbank"), help="Format of input xref file"
+    )
+    map_xref_parser.add_argument(
+        "--out",
+        default="./xref.h5",
+        required=False,
+        help="Output file with mapped xref data in hdf5 format",
+    )
+    map_xref_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
+    map_xref_parser.add_argument("--seq-idx-db", required=True, help="Path to sequence index database in hdf5 format")
+    map_xref_parser.add_argument("--xref-source-db", required=True, help="Path to xref source hdf5 database")
+    map_xref_parser.add_argument("--gs-tsv", required=True, help="Path to GS tsv file")
+    map_xref_parser.add_argument("--tax-sqlite", required=False, help="Path to tax-sqlite file")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

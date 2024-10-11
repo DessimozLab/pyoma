@@ -72,8 +72,8 @@ def fetch_file(filename, outdir, host, path, config, crcsums=None):
     if ftp is None:
         _threadLocal.ftp = ftp = ftp_connect(host, path, config)
     n_retries = 0
-    sucessful_download = False
-    while not sucessful_download:
+    successful_download = False
+    while not successful_download:
         try:
             with open("{}/{}".format(outdir, filename), "wb") as fp:
                 ftp.retrbinary("RETR {}".format(filename), fp.write)
@@ -81,19 +81,21 @@ def fetch_file(filename, outdir, host, path, config, crcsums=None):
                 cksum = compute_md5_checksum(os.path.join(outdir, filename))
                 if cksum != crcsums[filename]:
                     logger.error(
-                        "wrong md5 checksum for {}: expected {}, computed {}".format(
-                            filename, crcsums[filename], cksum.strip().split()[0].decode()
-                        )
+                        "wrong md5 checksum for {}: expected {}, computed {}".format(filename, crcsums[filename], cksum)
                     )
                     raise ValueError("wrong checksum for " + filename)
                 else:
                     logger.info("checked crc checksum for {}".format(filename))
-            sucessful_download = True
+            successful_download = True
         except all_errors + (ValueError,):
             n_retries += 1
             if n_retries > MAX_RETRIES:
                 logger.exception(f"persistent error for {filename}")
                 logger.error(f"failed retrieving {filename} {n_retries} times, giving up")
+                try:
+                    os.remove(os.path.join(outdir, filename))
+                except OSError:
+                    pass
                 return False
 
             logger.warning(f"failed retrieving {filename}, reconnecting and trying again")
@@ -104,7 +106,7 @@ def fetch_file(filename, outdir, host, path, config, crcsums=None):
                 pass
             time.sleep(2)
             _threadLocal.ftp = ftp_connect(host, path, config)
-    return sucessful_download
+    return successful_download
 
 
 def load_crc(host, path, pattern, config):

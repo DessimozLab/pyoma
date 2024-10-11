@@ -96,11 +96,14 @@ class XrefStorer:
         self.xref.append(self._buffer)
         self._buffer = []
 
-    def add_source_xref(self, enr, xref, typ):
-        src = self.source_enum["SourceID"] if typ == "id" else self.source_enum["SourceAC"]
-        self._buffer.append((enr, src, xref.encode("utf-8"), self.verify_enum["exact"]))
+    def add_xref(self, enr, xref, typ, verif):
+        self._buffer.append((enr, xref.encode("utf-8"), typ, verif))
         if len(self._buffer) > 500_000:
             self.flush()
+
+    def add_source_xref(self, enr, xref, typ):
+        src = self.source_enum["SourceID"] if typ == "id" else self.source_enum["SourceAC"]
+        self.add_xref(enr, xref, src, self.verify_enum["exact"])
 
 
 class DBBuilder(DarwinExporter):
@@ -198,7 +201,7 @@ class DBBuilder(DarwinExporter):
             if typeinfo.kind == "time":
                 gs.loc[:, col] = gs.loc[:, col].apply(parse_as_date_column)
             elif typeinfo.kind == "string":
-                gs.loc[:, col] = gs.loc[:, col].fillna('')
+                gs.loc[:, col] = gs.loc[:, col].fillna("")
         dt = {k: v.dtype for k, v in tablefmt.GenomeTable.columns.items()}
         gstab = self.h5.create_table(
             "/", "Genome", tablefmt.GenomeTable, obj=gs.to_records(index=False, column_dtypes=dt), expectedrows=len(gs)
@@ -457,8 +460,7 @@ class DBBuilder(DarwinExporter):
                 continue
 
             nr_vps = numpy.fromiter(
-                map(lambda enr: common.count_elements(vp_tab.where("EntryNr1 == enr")), ent["EntryNr"]), 
-                dtype="i4"
+                map(lambda enr: common.count_elements(vp_tab.where("EntryNr1 == enr")), ent["EntryNr"]), dtype="i4"
             )
             vp = numpy.nonzero(nr_vps)[0]
             if len(vp) > 1:

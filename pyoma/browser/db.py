@@ -2310,17 +2310,20 @@ class SequenceSearch(object):
     PROTEIN_CHARS = frozenset(map(lambda x: x.decode(), DIGITS_AA))
     PAM100 = pyopa.generate_env(pyopa.load_default_environments()["log_pam1"], 100)
 
-    def __init__(self, db):
+    def __init__(self, db: Database, seq_idx_fpath=None):
         # Backup reference to used DB method.
         self.get_sequence = db.get_sequence
-
-        # Assume the index is stored in the main DB if there is no .idx file
         self.db = db.get_hdf5_handle()
-        self.db_idx = (
-            self.db
-            if not os.path.isfile(self.db.filename + ".idx")
-            else tables.open_file(self.db.filename + ".idx", "r")
-        )
+
+        if seq_idx_fpath is None:
+            # Assume the index is stored in the main DB if there is no .idx file
+            self.db_idx = (
+                self.db
+                if not os.path.isfile(self.db.filename + ".idx")
+                else tables.open_file(self.db.filename + ".idx", "r")
+            )
+        else:
+            self.db_idx = tables.open_file(seq_idx_fpath, "r")
 
         # Protein search arrays.
         try:
@@ -2417,7 +2420,7 @@ class SequenceSearch(object):
         else:
             return "exact", m
 
-    def exact_search(self, seq, only_full_length=True, is_sanitised=None, entrynr_range=None):
+    def exact_search(self, seq, only_full_length=True, max_len_diff=0, is_sanitised=None, entrynr_range=None):
         """
         Performs an exact match search using the suffix array.
         """
@@ -2439,7 +2442,7 @@ class SequenceSearch(object):
                 return list(
                     filter(
                         lambda e: (
-                            ((not only_full_length) or self.get_entry_length(e) == nn)
+                            ((not only_full_length) or self.get_entry_length(e) - nn <= max_len_diff)
                             and (entrynr_range is None or filt(e, entrynr_range))
                         ),
                         self.get_entrynr(self.seq_idx[ii:jj]),

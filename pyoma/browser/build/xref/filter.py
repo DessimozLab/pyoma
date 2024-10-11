@@ -1,7 +1,9 @@
+import collections
 import logging
 import re
-from typing import Set, Union
+from typing import Set, List, Mapping, Union
 import ete3
+import omataxonomy
 
 from ....common import auto_open
 
@@ -83,10 +85,33 @@ def filter_records_on_taxids(fpath: str, writer, taxids: Set[int], format: str):
         parser.filter(chunk_writer=writer)
 
 
-def load_relevant_taxids(species_taxids, ncbi_taxonomy: ete3.NCBITaxa) -> Set[int]:
+def load_relevant_taxids(
+    species_taxids, ncbi_taxonomy: Union[ete3.NCBITaxa, omataxonomy.Taxonomy]
+) -> Mapping[int, Set[int]]:
+    """load relevant taxids for xref mapping for a given set of species.
+
+    relevant taxids are the sub-taxids of the species selected, and
+    also the parent taxids up to the genus rank (Higher parents are
+    left out, as they are likely too general)"""
     ranks = ncbi_taxonomy.get_rank(species_taxids)
-    relevant_taxids = set(species_taxids)
+    relevant_taxids = collections.defaultdict(set)
+    for taxid in species_taxids:
+        relevant_taxids[taxid].add(taxid)
+    # for every species (that has a limited rank), select all its children (recursively)
     for taxid in species_taxids:
         if ranks[taxid] in ("species", "genus", "varietas", "strain"):
-            relevant_taxids |= set(ncbi_taxonomy.get_descendant_taxa(taxid, intermediate_nodes=True))
+            sub_taxids = ncbi_taxonomy.get_descendant_taxa(taxid, intermediate_nodes=True)
+            for sub_taxid in sub_taxids:
+                relevant_taxids[sub_taxid].add(taxid)
+    # now, build a tree with the input species and select the genus rank nodes.
+    # for each of those, store in the mapping every subnode taxid to a all the
+    # species nodes in that clade.
+    tree = ncbi_taxonomy.get_topology(species_taxids, intermediate_nodes=True, annotate=True)
+    for genus_node in tree.iter_search_nodes(rank="genus"):
+        for nn in genus_node.traverse(strategy="postorder"):
+            if nn.is_leaf():
+                nn.add_feature("subtaxids", {nn.taxid})
+            else:
+                nn.add_feature("subtaxids", set.union(*list(x.subtaxids for x in nn.get_children())))
+                relevant_taxids[nn.taxid].update(nn.subtaxids)
     return relevant_taxids

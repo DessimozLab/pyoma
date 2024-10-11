@@ -559,6 +559,7 @@ class Database(object):
                     {
                         "chromosome": g["Chromosome"].decode(),
                         "start": int(g["LocusStart"]),
+                        "end": int(g["LocusEnd"]),
                         "strand": "+" if g["LocusStrand"] > 0 else "-",
                         "hog_id": g["OmaHOG"].decode(),
                     },
@@ -2493,6 +2494,7 @@ class SequenceSearch(object):
         compute_distance=False,
         entrynr_range=None,
         return_kmer_hits=False,
+        alignment="local",
     ):
         """
         Performs an approximate match search using the kmer index.
@@ -2505,12 +2507,14 @@ class SequenceSearch(object):
         :param seq: the query sequence to be searched
         :type seq: str, bytes
         :param int n: number of maximum returned entries that match query
-        :param bool is_sanitised: whether or not the sequence is already sanitised. defaults to false.
+        :param bool is_sanitised: whether the sequence is already sanitised. defaults to false.
         :param float coverage: the minimum fraction of covered kmers by the target sequence
         :param entrynr_range: target entry number range as a tuple (min, max) or set for filtering
         :type entrynr_range: set[int], tuple[int, int]
         :param bool return_kmer_hits: whether or not the full list of matched kmer entries should be
         returned. if set to True, the return value will be a tuple instead of a single list
+        :param alignment: the type of alignment to be computed. needs to be either 'global' or 'local'.
+        :type alignment: str
 
         :returns: list of matched entries, each element is a tuple with the entry_nr and a dictionary
         containing the score, alignment and distance estimates.
@@ -2519,6 +2523,8 @@ class SequenceSearch(object):
         seq = seq if is_sanitised else self._sanitise_seq(seq)
         n = n if n is not None else 50
         coverage = 0.0 if coverage is None else coverage
+        if alignment not in ("global", "local"):
+            raise ValueError("alignment must be either 'global' or 'local'")
 
         kmer_hits = self.approx_search_no_align(seq, is_sanitised=True, coverage=coverage, entrynr_range=entrynr_range)
         c = sorted(kmer_hits, reverse=True, key=lambda x: x[1])
@@ -2540,7 +2546,7 @@ class SequenceSearch(object):
                             "distvar": a[3] if compute_distance else None,
                         },
                     )
-                    for (m, a) in self._align_entries(seq, c, compute_distance)
+                    for (m, a) in self._align_entries(seq, c, compute_distance, alignment == "global")
                 ],
                 key=lambda q: q[1]["score"],
                 reverse=True,
@@ -2550,12 +2556,12 @@ class SequenceSearch(object):
         else:
             return res
 
-    def _align_entries(self, seq, matches, compute_distance=False):
+    def _align_entries(self, seq, matches, compute_distance=False, global_alignment=False):
         # Does the alignment for the approximate search
-        def align(s1, s2s, env, aligned):
+        def align(s1, s2s, env, aligned, global_alignment):
             for s2 in s2s:
-                z = pyopa.align_double(s1, s2, env, False, False, True)
-                a = pyopa.align_strings(s1, s2, env, False, z)
+                z = pyopa.align_double(s1, s2, env, False, global_alignment, True)
+                a = pyopa.align_strings(s1, s2, env, global_alignment, z)
                 if compute_distance:
                     score, pam, pamvar = self.multienv_align.estimate_pam(*a[0:2])
                     res_ds = (
@@ -2590,7 +2596,7 @@ class SequenceSearch(object):
                 matches,
             )
         )
-        t = threading.Thread(target=align, args=(query, entries, self.PAM100, aligned))
+        t = threading.Thread(target=align, args=(query, entries, self.PAM100, aligned, global_alignment))
         t.start()
         t.join()
         assert len(aligned) > 0, "Alignment thread crashed."
@@ -3174,7 +3180,7 @@ class Taxonomy(object):
                 if len(children) > 0:
                     to_visit.extend(reversed([c for c in children] + [(1, node)]))
 
-    def newick(self):
+    def newick(self, leaf=None, internal="name", quoted=False):
         """Get a Newick representation of the Taxonomy
 
         Note: as many newick parsers do not support quoted labels,
@@ -3183,29 +3189,68 @@ class Taxonomy(object):
         def newick_enc(s):
             return s.translate({ord(" "): "_", ord("("): "[", ord(")"): "]"})
 
+        def newick_quoted(s):
+            if re.search(r"[\s'()\[\]]", s):
+                return f'"{s}"'
+            return s
+
+        if leaf is None or leaf in ("sciname", "name"):
+
+            def leaf_fn(n):
+                return n["Name"].decode()
+
+        elif leaf in ("taxid", "ncbitaxonid", "taxonid"):
+
+            def leaf_fn(n):
+                return str(int(n["NCBITaxonId"]))
+
+        elif leaf in ("mnemonic", "uniprot_species_code", "species_code"):
+
+            def leaf_fn(node):
+                try:
+                    return self.genomes[int(node["NCBITaxonId"])].uniprot_species_code
+                except KeyError:
+                    return node["Name"].decode()
+
+        else:
+            raise ValueError(f"unknown leaf encoder method: {leaf}")
+
+        def internal_fn(node):
+            if internal is None:
+                return ""
+            elif internal in ("name", "sciname", "scientific_name"):
+                return node["Name"].decode()
+            elif internal in ("taxid", "ncbitaxonid", "taxonid"):
+                return str(int(node["NCBITaxonId"]))
+            else:
+                raise ValueError(f"unknown internal encoder method: {internal}")
+
+        encoder = newick_enc if not quoted else newick_quoted
+
         def _rec_newick(node):
             children = []
             for child in self._direct_children_taxa(node["NCBITaxonId"]):
                 children.append(_rec_newick(child))
 
             if len(children) == 0:
-                return newick_enc(node["Name"].decode())
-            else:
-                if int(node["NCBITaxonId"]) in self.genomes:
-                    # this is a special case where the current internal level is also
-                    # an extant species in OMA. we resolve this by adding the current
-                    # level also as an extra child
-                    children.append(
-                        newick_enc(
-                            "{:s} (disambiguate {:s})".format(
-                                node["Name"].decode(),
-                                self.genomes[int(node["NCBITaxonId"])].uniprot_species_code,
-                            )
-                        )
-                    )
+                # leaf. encode and done
+                return encoder(leaf_fn(node))
 
-                t = ",".join(children)
-                return "(" + t + ")" + newick_enc(node["Name"].decode())
+            if int(node["NCBITaxonId"]) in self.genomes:
+                # this is a special case where the current internal level is also
+                # an extant species in OMA. we resolve this by adding the current
+                # level also as an extra child
+                if leaf is None or leaf == "sciname":
+                    fix_leaf = "{:s} (disambiguate {:s})".format(
+                        node["Name"].decode(),
+                        self.genomes[int(node["NCBITaxonId"])].uniprot_species_code,
+                    )
+                else:
+                    fix_leaf = leaf_fn(node)
+
+                children.append(encoder(fix_leaf))
+            t = ",".join(children)
+            return "(" + t + ")" + encoder(internal_fn(node))
 
         return _rec_newick(self._get_root_taxon()) + ";"
 

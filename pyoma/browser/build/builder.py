@@ -96,14 +96,14 @@ class XrefStorer:
         self.xref.append(self._buffer)
         self._buffer = []
 
-    def add_xref(self, enr, xref, typ, verif):
-        self._buffer.append((enr, xref.encode("utf-8"), typ, verif))
+    def add_xref(self, enr, src, xref, verif):
+        self._buffer.append((enr, src, xref.encode("utf-8"), verif))
         if len(self._buffer) > 500_000:
             self.flush()
 
     def add_source_xref(self, enr, xref, typ):
         src = self.source_enum["SourceID"] if typ == "id" else self.source_enum["SourceAC"]
-        self.add_xref(enr, xref, src, self.verify_enum["exact"])
+        self.add_xref(enr, src, xref, self.verify_enum["exact"])
 
 
 class DBBuilder(DarwinExporter):

@@ -108,9 +108,10 @@ def fetch_refseq(conf):
 def filter_and_split_xrefs(conf):
     gs = pandas.read_csv(conf.gs_tsv, sep="\t")
     ncbi_taxids = set(gs["OriginalNCBITaxonId"])
-    relevant_taxids = xref_build.load_relevant_taxids(ncbi_taxids, omataxonomy.Taxonomy(conf.tax_sqlite))
+    relevant_taxids = set(xref_build.load_relevant_taxids(ncbi_taxids, omataxonomy.Taxonomy(conf.tax_sqlite)).keys())
     with xref_build.ChunkWriter(conf.out_prefix, 30_000) as writer:
-        xref_build.filter_records_on_taxids(conf.xref, writer, set(relevant_taxids.keys()), conf.format)
+        for xref_file in conf.xref:
+            xref_build.filter_records_on_taxids(xref_file, writer, relevant_taxids, conf.format)
 
 
 def map_xrefs(conf):
@@ -261,7 +262,7 @@ def parse_command_line_args():
 
     filter_xref_parser = subparsers.add_parser("filter-xref", help="Filtering xref files")
     filter_xref_parser.set_defaults(func=filter_and_split_xrefs)
-    filter_xref_parser.add_argument("--xref", required=True, help="Path to input xref file")
+    filter_xref_parser.add_argument("--xref", nargs="+", help="Path to input xref files")
     filter_xref_parser.add_argument(
         "--format", required=True, choices=("swiss", "genbank"), help="Format of input xref file"
     )

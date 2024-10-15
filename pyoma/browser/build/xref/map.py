@@ -42,11 +42,11 @@ class Mapper:
             ranges, genomes = [], []
             for taxid in target_taxids:
                 g = self.db.tax.genomes[taxid]
-                ranges.append((g.entry_nr_offset + 1, g.entry_nr_offset + g.nr_enties))
+                ranges.append((g.entry_nr_offset + 1, g.entry_nr_offset + g.nr_entries))
                 genomes.append(g)
             ranges = sorted(ranges, key=lambda x: x[0])
             for k in range(len(ranges) - 1):
-                assert ranges[k][1] == ranges[k + 1][0]
+                assert ranges[k][1] + 1 == ranges[k + 1][0], f"ranges not as expected for {src_taxid} -> {target_taxids}: {ranges}"
             res[src_taxid] = TaxRange(genomes, (ranges[0][0], ranges[-1][1]))
         return res
 
@@ -85,7 +85,7 @@ class Mapper:
             "AlphaFoldDB",
             "SMR",
         }
-        for xref in rec.dbxref:
+        for xref in rec.dbxrefs:
             prefix, id_ = xref.split(":", maxsplit=1)
             if prefix not in avoid_prefix:
                 if id_ in self.src_xrefs:
@@ -126,11 +126,12 @@ class Mapper:
         )
         logger.debug(f"computed global alignments for {len(approx_matches)} approx matches")
         if len(approx_matches) > 0:
-            s1, s2 = (approx_matches[0]["alignment"][0][0], approx_matches[0]["alignment"][1][0])
-            identity = sum(1 for b1, b2 in zip(s1, s1) if b1 == b2) / len(s1)
+            s1, s2 = (approx_matches[0][1]["alignment"][0][0], approx_matches[0][1]["alignment"][1][0])
+            identity = sum(1 for b1, b2 in zip(s1, s2) if b1 == b2) / len(s1)
             logger.info(
-                f"best approximate match of {rec.id} is entry_nr {approx_matches[0][0]}: {identity:.3f} identy, score {approx_matches[0]['score']:.3f} "
+                f"best approximate match of {rec.id} is entry_nr {approx_matches[0][0]}: {identity:.3f} identy, score {approx_matches[0][1]['score']:.3f}"
             )
+            logger.debug(f"Alignment:\n{s1}\n{s2}")
             if identity > 0.90:
                 return {approx_matches[0][0]}, "approx"
         return set([])
@@ -150,5 +151,5 @@ def map_xrefs(
         with open("xref.h5", "wt") as fout:
             for rec in rec_iter:
                 res = mapper.map_record(rec)
-                fout.write(res)
+                fout.write(str(res))
                 fout.write("\n")

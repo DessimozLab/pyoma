@@ -46,7 +46,9 @@ class Mapper:
                 genomes.append(g)
             ranges = sorted(ranges, key=lambda x: x[0])
             for k in range(len(ranges) - 1):
-                assert ranges[k][1] + 1 == ranges[k + 1][0], f"ranges not as expected for {src_taxid} -> {target_taxids}: {ranges}"
+                assert (
+                    ranges[k][1] + 1 == ranges[k + 1][0]
+                ), f"ranges not as expected for {src_taxid} -> {target_taxids}: {ranges}"
             res[src_taxid] = TaxRange(genomes, (ranges[0][0], ranges[-1][1]))
         return res
 
@@ -116,9 +118,9 @@ class Mapper:
                 f"{rec.id} contains {len(src_xref_match)} crossreferences, of which {len(seq_and_id_support)} are in the seq set."
             )
             if seq_and_id_support:
-                return seq_and_id_support, "exact"
+                return seq_and_id_support, "exact", 1
         if len(entry_nrs) > 0:
-            return entry_nrs, "exact"
+            return entry_nrs, "exact", 1
 
         # now, we try approximate search
         approx_matches = self.searcher.approx_search(
@@ -133,8 +135,8 @@ class Mapper:
             )
             logger.debug(f"Alignment:\n{s1}\n{s2}")
             if identity > 0.90:
-                return {approx_matches[0][0]}, "approx"
-        return set([])
+                return {approx_matches[0][0]}, "approx", identity
+        return set([]), None, 0
 
 
 def map_xrefs(

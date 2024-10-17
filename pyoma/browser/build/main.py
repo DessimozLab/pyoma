@@ -121,6 +121,8 @@ def map_xrefs(conf):
     xref_build.map_xrefs(
         fpath=conf.xref,
         format=conf.format,
+        source=conf.source,
+        out_fpath=conf.out,
         db=conf.db,
         seq_idx=conf.seq_idx_db,
         xref_db=conf.xref_source_db,
@@ -280,6 +282,9 @@ def parse_command_line_args():
     map_xref_parser.add_argument("--xref", required=True, help="Path to filtered input xref file")
     map_xref_parser.add_argument(
         "--format", required=True, choices=("swiss", "genbank"), help="Format of input xref file"
+    )
+    map_xref_parser.add_argument(
+        "--source", required=True, choices=("swissprot", "trembl", "refseq"), help="Source of xrefs"
     )
     map_xref_parser.add_argument(
         "--out",

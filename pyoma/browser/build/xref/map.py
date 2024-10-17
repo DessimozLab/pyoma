@@ -178,10 +178,13 @@ class GenbankFormatMapper(Mapper):
     def get_taxid(self, rec):
         try:
             db_xrefs = rec.features[0].qualifiers["db_xref"]
-            taxid = [val for el in db_xrefs for key, val in el.split(":", 1) if key == "taxon"]
-            return int(taxid[0])
-        except (KeyError, IndexError, AttributeError):
-            return 0
+            for ref in db_xrefs:
+                key, val = ref.split(":", 1)
+                if key == "taxon":
+                    return int(val)
+        except (KeyError, IndexError, AttributeError, ValueError):
+            logger.warning("cannot extract taxid from %s", rec)
+        return 0
 
 
 def map_xrefs(

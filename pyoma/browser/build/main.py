@@ -14,7 +14,7 @@ import omataxonomy
 
 from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
 from . import hogconvert
-from pyoma.browser.build import xref as xref_build
+from . import xref as xref_build
 from ..convert import (
     iter_domains,
     filter_duplicated_domains,
@@ -128,6 +128,10 @@ def map_xrefs(conf):
         xref_db=conf.xref_source_db,
         taxid_mapping=taxid_mapping,
     )
+
+
+def best_xref_match(conf):
+    xref_build.identify_best_matching(conf.xref, conf.out)
 
 
 def parse_command_line_args():
@@ -297,6 +301,15 @@ def parse_command_line_args():
     map_xref_parser.add_argument("--xref-source-db", required=True, help="Path to xref source hdf5 database")
     map_xref_parser.add_argument("--gs-tsv", required=True, help="Path to GS tsv file")
     map_xref_parser.add_argument("--tax-sqlite", required=False, help="Path to tax-sqlite file")
+
+    best_xref_match_parser = subparsers.add_parser(
+        "best-xref-match", help="Identify and filter best xrefs matches per source"
+    )
+    best_xref_match_parser.set_defaults(func=best_xref_match)
+    best_xref_match_parser.add_argument(
+        "--xref", nargs="+", help="Path to mapped xref pickle files (from map-xref phase)"
+    )
+    best_xref_match_parser.add_argument("--out", required=True, help="Output file with best xref matches per source")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

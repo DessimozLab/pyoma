@@ -2,9 +2,10 @@ import abc
 import collections
 import os
 import pickle
-from typing import Mapping, Set, Union
+from typing import Mapping, Set, Union, List
 import logging
 
+import networkx as nx
 import tables
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
@@ -211,3 +212,52 @@ def map_xrefs(
     with auto_open(out_fpath, "wb") as fh:
         pickle.dump(mapping_results, fh)
     logger.info(f"wrote {len(mapping_results)} records to {out_fpath}")
+
+
+def _filter_graph(G):
+    def graph_to_tuples(G):
+        for u, v, data in G.edges(data=True):
+            if isinstance(u, int):
+                u, v = v, u
+            yield u, v, data["weight"], data.get("propagate", True)
+
+    # Numeric nodes ==> entry nr in OMA; string nodes ==> source ids
+    for cc in nx.connected_components(G):
+        SG = G.subgraph(cc).copy()
+        if len(cc) <= 2:
+            yield from graph_to_tuples(SG)
+        else:
+            src = {n for n in SG.nodes() if isinstance(n, str)}
+            tar = {n for n in SG.nodes() if isinstance(n, int)}
+            if len(src) == 1 or len(tar) == 1:
+                # single source node maps to several sequences. We keep all of them
+                # (should all have the same maximal weight)
+                # several source ids map to only one oma entry. Keep only the top-matching
+                # # with propagation and for the other only the
+                max_sim = None
+                for u, v, data in sorted(SG.edges(data=True), key=lambda e: -e[2]["weight"]):
+                    if max_sim is None:
+                        max_sim = data["weight"]
+                    if data["weight"] < max_sim * 0.8:
+                        data["propagate"] = False
+                yield from graph_to_tuples(SG)
+            else:
+                # we have a NxM case. let's compute a maximal matching and keep only those links
+                max_matching = nx.max_weight_matching(SG, maxcardinality=True, weight="weight")
+                for x in max_matching:
+                    M = SG.subgraph(x).copy()
+                    yield from graph_to_tuples(M)
+
+
+def identify_best_matching(map_files: List[os.PathLike], out: os.PathLike):
+    G = nx.Graph()
+    for map_file in map_files:
+        with open(map_file, "rb") as fh:
+            matches = pickle.load(fh)
+        for match in matches:
+            edges = [(match.id, z, 2 if match.method == "exact" else match.identity) for z in match.entries]
+            G.add_weighted_edges_from(edges)
+
+    final_matches = [_filter_graph(G)]
+    with auto_open(out, "wb") as fh:
+        pickle.dump(final_matches, fh)

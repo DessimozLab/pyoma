@@ -138,6 +138,7 @@ class XRefTable(tables.IsDescription):
                 "Gene Name": 110,
                 "Synonym": 115,
                 "Protein Name": 120,
+                "Alternative Protein Name": 121,
                 "ORF Name": 125,
                 "Ordered Locus Name": 130,
                 "PDB": 148,
@@ -151,6 +152,8 @@ class XRefTable(tables.IsDescription):
                 "SwissPalm": 158,
                 "DisGeNET": 159,
                 "WikiGene": 160,
+                "KEGG": 170,
+                "AGR": 180,
                 "IPI": 240,
                 "GI": 241,
                 "n/a": 255,
@@ -167,6 +170,7 @@ class XRefTable(tables.IsDescription):
         base="uint8",
         pos=4,
     )
+    Identity = tables.Float16Col(pos=5, dflt=0)
 
 
 class GeneOntologyTable(tables.IsDescription):

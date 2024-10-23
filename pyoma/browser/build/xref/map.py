@@ -2,7 +2,8 @@ import abc
 import collections
 import os
 import pickle
-from typing import Mapping, Set, Union, List
+import re
+from typing import Mapping, Set, Union, List, Tuple
 import logging
 
 import networkx as nx
@@ -20,6 +21,7 @@ from ..builder import XrefStorer
 logger = logging.getLogger(__name__)
 TaxRange = collections.namedtuple("TaxRange", ["genomes", "entry_nr_range"])
 Match = collections.namedtuple("Match", ["id", "entries", "method", "identity"])
+BestMatch = collections.namedtuple("BestMatch", ["id", "entry", "identity", "propagate"])
 
 
 class Mapper(metaclass=abc.ABCMeta):
@@ -219,7 +221,7 @@ def _filter_graph(G):
         for u, v, data in G.edges(data=True):
             if isinstance(u, int):
                 u, v = v, u
-            yield u, v, data["weight"], data.get("propagate", True)
+            yield BestMatch(u, v, data["weight"], data.get("propagate", True))
 
     # Numeric nodes ==> entry nr in OMA; string nodes ==> source ids
     for cc in nx.connected_components(G):
@@ -249,7 +251,7 @@ def _filter_graph(G):
                     yield from graph_to_tuples(M)
 
 
-def identify_best_matching(map_files: List[os.PathLike], out: os.PathLike):
+def identify_best_matching(map_files: List[os.PathLike]) -> Mapping[str, List[BestMatch]]:
     G = nx.Graph()
     for map_file in map_files:
         with open(map_file, "rb") as fh:
@@ -258,6 +260,167 @@ def identify_best_matching(map_files: List[os.PathLike], out: os.PathLike):
             edges = [(match.id, z, 2 if match.method == "exact" else match.identity) for z in match.entries]
             G.add_weighted_edges_from(edges)
 
-    final_matches = [_filter_graph(G)]
-    with auto_open(out, "wb") as fh:
-        pickle.dump(final_matches, fh)
+    final_matches = collections.defaultdict(list)
+    for best_match in _filter_graph(G):
+        final_matches[best_match.id].append(best_match)
+    return final_matches
+
+
+class CrossRefsExtractor(metaclass=abc.ABCMeta):
+    def __init__(self, out_fpath: os.PathLike, match_lookup: Mapping[str, List[BestMatch]]):
+        self.storer = XrefStorer(out_fpath, index_cols=["EntryNr"])
+        self.match_lookup = match_lookup
+
+    @abc.abstractmethod
+    def extract_crossrefs(self, rec: SeqRecord) -> Tuple[List[Tuple[int, str]], List[Tuple[int, str]], List[str]]:
+        pass
+
+    def map_record(self, rec):
+        def score2verif(score):
+            if score < 1:
+                return self.storer.verify_enum["modified"]
+            return self.storer.verify_enum["exact"]
+
+        if rec.id in self.match_lookup:
+            crossrefs, propagated_crossrefs, ec = self.extract_crossrefs(rec)
+            for match in self.match_lookup[rec.id]:
+                verif = score2verif(match.identity)
+                ident = min(match.identity, 1)
+                for src, xrefid in crossrefs:
+                    self.storer.add_xref(match.entry, src, xrefid, verif, ident)
+                if match.propagate:
+                    verif_prop = max(verif, self.storer.verify_enum["unchecked"])
+                    for src, xrefid in propagated_crossrefs:
+                        self.storer.add_xref(match.entry, src, xrefid, verif_prop, ident)
+                    for ec_term in ec:
+                        self.storer.add_ec(match.entry, ec_term)
+
+
+class UniProtKBCrossRefsExtractor(CrossRefsExtractor):
+    SRC_ENUM_KEY = "UniProtKB/TrEMBL"
+    PROT_NAME_RE = re.compile(r"^(?P<typ>((Rec)|(Alt)|(Sub))Name): Full=(?P<name>[^{]*)")
+    ENS_RE = re.compile(r"ENS(?P<species>[A-Z]{0,3})(?P<typ>[GTP])(?P<num>\d{11})")
+
+    def __init__(self, out_fpath: os.PathLike, match_lookup: Mapping[str, List[BestMatch]]):
+        super().__init__(out_fpath, match_lookup)
+        self.src_enum_val = self.storer.source_enum[self.SRC_ENUM_KEY]
+        key_map = {
+            "Name": "Gene Name",
+            "Synonyms": "Synonym",
+            "OrderedLocusNames": "Ordered Locus Name",
+            "ORFNames": "ORF Name",
+            "HGNC": "HGNC",
+            "RecName": "Protein Name",
+            "SubName": "Protein Name",
+            "AltName": "Alternative Protein Name",
+            "EnsemblPlants": "EnsemblGenomes",
+            "EnsemblFungi": "EnsemblGenomes",
+            "EnsemblMetazoa": "EnsemblGenomes",
+            "EnsemblProtists": "EnsemblGenomes",
+            "EnsemblBacteria": "EnsemblGenomes",
+            "Bgee": "Bgee",
+            "SMR": "Swiss Model",
+            "PDB": "PDB",
+            "STRING": "STRING",
+            "neXtProt": "neXtProt",
+            "EPD": "EPD",
+            "GlyConnect": "GlyConnect",
+            "GeneID": "EntrezGene",
+            "WikiGene": "WikiGene",
+            "RefSeq": "RefSeq",
+            "KEGG": "KEGG",
+            "AGR": "AGR",
+        }
+        self.key_map = {k: self.src_enum_val[v] for k, v in key_map.items()}
+
+    def iter_gene_names(self, annotations: Mapping) -> List[Tuple[int, str]]:
+        """extract the gene names (Name, Synonyms, OrderedLocusNames, ORFNames)"""
+        try:
+            gene_names = annotations["gene_name"]
+        except KeyError:
+            return
+        for elem in gene_names:
+            for typ, value in elem.items():
+                try:
+                    typ = self.key_map[typ]
+                except KeyError:
+                    continue
+                value = [value] if isinstance(value, str) else value
+                for val in value:
+                    yield typ, val
+
+    def iter_parsed_description(self, desc: str):
+        chunks = desc.split("; ")
+        for chunk in chunks:
+            if m := self.PROT_NAME_RE.match(chunk):
+                typ = self.key_map[m.group("typ")]
+                val = m.group("name").strip()
+                yield typ, val
+            elif chunk.startswith("EC="):
+                ec = chunk[3:].split(" ")[0]
+                yield "ec", ec
+
+    def iter_crossrefs(self, xrefs):
+        for xref in xrefs:
+            db, ref = xref.split(":", count=1)
+            try:
+                typ = self.key_map[db]
+                yield typ, ref
+            except KeyError:
+                if db == "Ensembl":
+                    m = self.ENS_RE.match(ref)
+                    if m:
+                        if m.group("typ") == "P":
+                            typ = self.storer.source_enum["Ensembl Protein"]
+                        elif m.group("typ") == "G":
+                            typ = self.storer.source_enum["Ensembl Gene"]
+                        else:
+                            typ = self.storer.source_enum["Ensembl Transcript"]
+                        yield typ, ref
+
+    def extract_crossrefs(self, rec):
+        stable, projected, ec = [], [], []
+        stable.append((self.src_enum_val, rec.id))
+        try:
+            stable.append((self.src_enum_val, rec.name))
+        except AttributeError:
+            pass
+        # extract gene names
+        stable.extend(self.iter_gene_names(rec.annotations))
+        # extract protein names and ec
+        for typ, val in self.iter_parsed_description(rec.description):
+            if typ == "ec":
+                ec.append(val)
+            else:
+                stable.append((typ, val))
+        # add crossreferences (as projected)
+        projected.extend(self.iter_crossrefs(rec.dbxrefs))
+        return stable, projected, ec
+
+
+class SwissProtCrossRefsExtractor(UniProtKBCrossRefsExtractor):
+    SRC_ENUM_KEY = "UniProtKB/SwissProt"
+
+
+class RefSeqCrossRefsExtractor(CrossRefsExtractor):
+    def extract_crossrefs(self, rec):
+        pass
+
+
+def collect_crossrefs(
+    xrefs: List[os.PathLike], source: str, format: str, map_files: List[os.PathLike], out: os.PathLike
+):
+    best_matches = identify_best_matching(map_files)
+    collector_cls = (
+        SwissProtCrossRefsExtractor
+        if source == "swissprot"
+        else UniProtKBCrossRefsExtractor
+        if source == "trembl"
+        else RefSeqCrossRefsExtractor
+    )
+    collector = collector_cls(out, best_matches)
+    for fpath in xrefs:
+        with auto_open(fpath, "rt") as fh:
+            rec_iter = SeqIO.parse(fh, format)
+            for rec in rec_iter:
+                collector.map_record(rec)

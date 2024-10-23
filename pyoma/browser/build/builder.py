@@ -13,7 +13,7 @@ import operator
 import os
 import re
 import time
-from typing import Union
+from typing import Union, Optional, List
 
 import numpy
 import numpy.lib.recfunctions
@@ -72,9 +72,14 @@ class OmaGroupsProvider:
 
 
 class XrefStorer:
-    def __init__(self, path, mode="w"):
+    def __init__(self, path, mode: str = "w", index_cols: Optional[List] = None):
         self.path = path
         self.mode = mode
+        if index_cols is not None:
+            unknown_cols = set(index_cols) - set(tablefmt.XRefTable.columns.keys())
+            if unknown_cols:
+                raise ValueError("Unknown columns for indexing: {}".format(unknown_cols))
+        self.index_cols = index_cols
 
     def __enter__(self):
         self.h5 = tables.open_file(
@@ -82,28 +87,43 @@ class XrefStorer:
         )
         if self.mode == "w":
             self.xref = self.h5.create_table("/", "XRef", tablefmt.XRefTable, expectedrows=1e7)
+            self.ec = self.h5.create_table("/Annotations", "EC", tablefmt.ECTable, expectedrows=1e6, createparents=True)
         self.source_enum = self.xref.get_enum("XRefSource")
         self.verify_enum = self.xref.get_enum("Verification")
         self._buffer = []
+        self._ecbuffer = []
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.flush()
         self.h5.flush()
+        if self.index_cols is not None:
+            create_index_for_columns(self.xref, *self.index_cols)
+            if "EntryNr" in self.index_cols:
+                create_index_for_columns(self.ec, "EntryNr")
+            if "XRefId" in self.index_cols:
+                create_index_for_columns(self.ec, "ECacc")
         self.h5.close()
 
     def flush(self):
         self.xref.append(self._buffer)
+        self.ec.append(self._ecbuffer)
         self._buffer = []
+        self._ecbuffer = []
 
-    def add_xref(self, enr, src, xref, verif):
-        self._buffer.append((enr, src, xref.encode("utf-8"), verif))
+    def add_xref(self, enr, src, xref, verif, ident=0):
+        self._buffer.append((enr, src, xref.encode("utf-8"), verif, ident))
         if len(self._buffer) > 500_000:
+            self.flush()
+
+    def add_ec(self, enr, ec):
+        self._ecbuffer.append((enr, ec.encode("utf-8")))
+        if len(self._ecbuffer) > 50_000:
             self.flush()
 
     def add_source_xref(self, enr, xref, typ):
         src = self.source_enum["SourceID"] if typ == "id" else self.source_enum["SourceAC"]
-        self.add_xref(enr, src, xref, self.verify_enum["exact"])
+        self.add_xref(enr, src, xref, self.verify_enum["exact"], 1)
 
 
 class DBBuilder(DarwinExporter):

@@ -130,8 +130,10 @@ def map_xrefs(conf):
     )
 
 
-def best_xref_match(conf):
-    xref_build.identify_best_matching(conf.xref, conf.out)
+def collect_xrefs(conf):
+    xref_build.collect_crossrefs(
+        xrefs=conf.xrefs, map_files=conf.map_results, format=conf.format, source=conf.source, out=conf.out
+    )
 
 
 def parse_command_line_args():
@@ -292,9 +294,9 @@ def parse_command_line_args():
     )
     map_xref_parser.add_argument(
         "--out",
-        default="./xref.h5",
+        default="./xref.pkl",
         required=False,
-        help="Output file with mapped xref data in hdf5 format",
+        help="Output file with map results in pickle format",
     )
     map_xref_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
     map_xref_parser.add_argument("--seq-idx-db", required=True, help="Path to sequence index database in hdf5 format")
@@ -302,14 +304,21 @@ def parse_command_line_args():
     map_xref_parser.add_argument("--gs-tsv", required=True, help="Path to GS tsv file")
     map_xref_parser.add_argument("--tax-sqlite", required=False, help="Path to tax-sqlite file")
 
-    best_xref_match_parser = subparsers.add_parser(
-        "best-xref-match", help="Identify and filter best xrefs matches per source"
+    collect_xref_parser = subparsers.add_parser(
+        "collect-xrefs", help="Identify and filter best xrefs matches per source and collect their crossreferences"
     )
-    best_xref_match_parser.set_defaults(func=best_xref_match)
-    best_xref_match_parser.add_argument(
-        "--xref", nargs="+", help="Path to mapped xref pickle files (from map-xref phase)"
+    collect_xref_parser.set_defaults(func=collect_xrefs)
+    collect_xref_parser.add_argument(
+        "--map-results", nargs="+", help="Path to mapped xref pickle files (from map-xref phase)"
     )
-    best_xref_match_parser.add_argument("--out", required=True, help="Output file with best xref matches per source")
+    collect_xref_parser.add_argument("--xrefs", nargs="+", help="Path to filtered input xref file")
+    collect_xref_parser.add_argument(
+        "--format", required=True, choices=("swiss", "genbank"), help="Format of input xref file"
+    )
+    collect_xref_parser.add_argument(
+        "--source", required=True, choices=("swissprot", "trembl", "refseq"), help="Source of xrefs"
+    )
+    collect_xref_parser.add_argument("--out", required=True, help="Output file with best xref matches per source")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

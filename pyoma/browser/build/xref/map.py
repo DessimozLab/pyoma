@@ -3,7 +3,7 @@ import collections
 import os
 import pickle
 import re
-from typing import Mapping, Set, Union, List, Tuple
+from typing import Mapping, Set, Union, List, Tuple, Iterable
 import logging
 
 import networkx as nx
@@ -271,11 +271,18 @@ class CrossRefsExtractor(metaclass=abc.ABCMeta):
         self.storer = XrefStorer(out_fpath, index_cols=["EntryNr"])
         self.match_lookup = match_lookup
 
+    def __enter__(self):
+        self.storer.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.storer.__exit__(exc_type, exc_val, exc_tb)
+
     @abc.abstractmethod
     def extract_crossrefs(self, rec: SeqRecord) -> Tuple[List[Tuple[int, str]], List[Tuple[int, str]], List[str]]:
         pass
 
-    def map_record(self, rec):
+    def map_record(self, rec: SeqRecord) -> None:
         def score2verif(score):
             if score < 1:
                 return self.storer.verify_enum["modified"]
@@ -418,9 +425,9 @@ def collect_crossrefs(
         if source == "trembl"
         else RefSeqCrossRefsExtractor
     )
-    collector = collector_cls(out, best_matches)
-    for fpath in xrefs:
-        with auto_open(fpath, "rt") as fh:
-            rec_iter = SeqIO.parse(fh, format)
-            for rec in rec_iter:
-                collector.map_record(rec)
+    with collector_cls(out, best_matches) as collector:
+        for fpath in xrefs:
+            with auto_open(fpath, "rt") as fh:
+                rec_iter = SeqIO.parse(fh, format)
+                for rec in rec_iter:
+                    collector.map_record(rec)

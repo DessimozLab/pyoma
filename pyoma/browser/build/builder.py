@@ -106,8 +106,10 @@ class XrefStorer:
         self.h5.close()
 
     def flush(self):
-        self.xref.append(self._buffer)
-        self.ec.append(self._ecbuffer)
+        if len(self._buffer) > 0:
+            self.xref.append(self._buffer)
+        if len(self._ecbuffer) > 0:
+            self.ec.append(self._ecbuffer)
         self._buffer = []
         self._ecbuffer = []
 

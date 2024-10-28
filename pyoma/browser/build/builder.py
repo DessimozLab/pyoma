@@ -13,7 +13,7 @@ import operator
 import os
 import re
 import time
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Iterable, Tuple
 
 import numpy
 import numpy.lib.recfunctions
@@ -113,9 +113,21 @@ class XrefStorer:
         self._buffer = []
         self._ecbuffer = []
 
-    def add_xref(self, enr, src, xref, verif, ident=0):
+    def add_xrefs(self, it: Iterable[Tuple]):
+        """adds a bunch of xrefs from it. The tuple must be in the correct format (no checks performed)"""
+        self._buffer.extend(it)
+        if len(self._buffer) > 500_000:
+            self.flush()
+
+    def add_xref(self, enr: int, src: int, xref: str, verif: int, ident: float = 0):
+        """adds an xref entry. src and verif need to be already mapped to their numeric enum value"""
         self._buffer.append((enr, src, xref.encode("utf-8"), verif, ident))
         if len(self._buffer) > 500_000:
+            self.flush()
+
+    def add_ecs(self, it: Iterable[Tuple[int, bytes]]):
+        self._ecbuffer.extend(it)
+        if len(self._ecbuffer) > 50_000:
             self.flush()
 
     def add_ec(self, enr, ec):
@@ -123,7 +135,8 @@ class XrefStorer:
         if len(self._ecbuffer) > 50_000:
             self.flush()
 
-    def add_source_xref(self, enr, xref, typ):
+    def add_source_xref(self, enr: int, xref: str, typ: str):
+        """Adds a source xref entry. type needs to be either 'id' or 'ac'."""
         src = self.source_enum["SourceID"] if typ == "id" else self.source_enum["SourceAC"]
         self.add_xref(enr, src, xref, self.verify_enum["exact"], 1)
 

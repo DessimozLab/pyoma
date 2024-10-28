@@ -136,6 +136,10 @@ def collect_xrefs(conf):
     )
 
 
+def combine_xrefs(conf):
+    xref_build.combine_xrefs(xrefs=conf.xrefs, out=conf.out)
+
+
 def parse_command_line_args():
     parser = ArgumentParser(description="Builder for OMA Browser hdf5")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
@@ -319,6 +323,13 @@ def parse_command_line_args():
         "--source", required=True, choices=("swissprot", "trembl", "refseq"), help="Source of xrefs"
     )
     collect_xref_parser.add_argument("--out", required=True, help="Output file with best xref matches per source")
+
+    combine_xref_parser = subparsers.add_parser(
+        "combine-xrefs", help="Combine all xref h5 databases into the a single, deduplicated one"
+    )
+    combine_xref_parser.set_defaults(func=combine_xrefs)
+    combine_xref_parser.add_argument("--xrefs", nargs="+", help="Path to input xref files in hdf5 format")
+    combine_xref_parser.add_argument("--out", required=True, help="Output path for the combined hdf5 file")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

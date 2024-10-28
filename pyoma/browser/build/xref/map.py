@@ -1,18 +1,20 @@
 import abc
 import collections
+import heapq
+import itertools
 import os
 import pickle
 import re
-from typing import Mapping, Set, Union, List, Tuple, Iterable
+from typing import Mapping, Set, Union, List, Tuple
 import logging
 
 import networkx as nx
+import pandas as pd
 import tables
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 
 
-from ...tablefmt import XRefTable
 from ...db import SequenceSearch
 from ...db import Database, OmaIdMapper
 from ....common import auto_open
@@ -431,3 +433,41 @@ def collect_crossrefs(
                 rec_iter = SeqIO.parse(fh, format)
                 for rec in rec_iter:
                     collector.map_record(rec)
+
+
+def _fetch_combine_and_reduce_input_data(h5_handles, table_path, sort_columns, dupl_subset_columns, storer_callback):
+    dt = h5_handles[0].get_node(table_path).dtype
+    dt = {c: dt[c] for c in dt.names}
+    iters = [
+        map(lambda row: row.fetch_all_fields(), h5.get_node(table_path).itersorted(sortby="EntryNr"))
+        for h5 in h5_handles
+    ]
+    queue = heapq.merge(*iters, key=lambda row: row["EntryNr"])
+    for enr, data_per_enr_it in itertools.groupby(queue, key=lambda row: row["EntryNr"]):
+        df = pd.DataFrame.from_records(data_per_enr_it)
+        df.sort_values(by=sort_columns, inplace=True)
+        df.drop_duplicates(subset=dupl_subset_columns, keep="first", inplace=True)
+        storer_callback(df.to_records(index=False, column_dtypes=dt).tolist())
+
+
+def combine_xrefs(xrefs: List[os.PathLike], out: os.PathLike):
+    with XrefStorer(out, index_cols=["EntryNr", "XRefId", "XRefSource"]) as storer:
+        h5hs = [tables.open_file(fn, mode="r") for fn in xrefs]
+        try:
+            _fetch_combine_and_reduce_input_data(
+                h5hs,
+                "/XRef",
+                sort_columns=["XRefSource", "XRefId", "Verification"],
+                dupl_subset_columns=["XRefSource", "XRefId"],
+                storer_callback=storer.add_xrefs,
+            )
+            _fetch_combine_and_reduce_input_data(
+                h5hs,
+                "/Annotations/EC",
+                sort_columns=["XRefId"],
+                dupl_subset_columns=["XRefId"],
+                storer_callback=storer.add_ecs,
+            )
+        finally:
+            for h5h in h5hs:
+                h5h.close()

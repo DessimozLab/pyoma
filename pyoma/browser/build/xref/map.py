@@ -269,12 +269,16 @@ def identify_best_matching(map_files: List[os.PathLike]) -> Mapping[str, List[Be
 
 
 class CrossRefsExtractor(metaclass=abc.ABCMeta):
+    SRC_ENUM_KEY = "SourceID"
+
     def __init__(self, out_fpath: os.PathLike, match_lookup: Mapping[str, List[BestMatch]]):
         self.storer = XrefStorer(out_fpath, index_cols=["EntryNr"])
         self.match_lookup = match_lookup
+        self.src_enum_val = None
 
     def __enter__(self):
         self.storer.__enter__()
+        self.src_enum_val = self.storer.source_enum[self.SRC_ENUM_KEY]
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -310,9 +314,8 @@ class UniProtKBCrossRefsExtractor(CrossRefsExtractor):
     PROT_NAME_RE = re.compile(r"^(?P<typ>((Rec)|(Alt)|(Sub))Name): Full=(?P<name>[^{]*)")
     ENS_RE = re.compile(r"ENS(?P<species>[A-Z]{0,3})(?P<typ>[GTP])(?P<num>\d{11})")
 
-    def __init__(self, out_fpath: os.PathLike, match_lookup: Mapping[str, List[BestMatch]]):
-        super().__init__(out_fpath, match_lookup)
-        self.src_enum_val = self.storer.source_enum[self.SRC_ENUM_KEY]
+    def __enter__(self):
+        super().__enter__()
         key_map = {
             "Name": "Gene Name",
             "Synonyms": "Synonym",
@@ -340,7 +343,8 @@ class UniProtKBCrossRefsExtractor(CrossRefsExtractor):
             "KEGG": "KEGG",
             "AGR": "AGR",
         }
-        self.key_map = {k: self.src_enum_val[v] for k, v in key_map.items()}
+        self.key_map = {k: self.storer.source_enum[v] for k, v in key_map.items()}
+        return self
 
     def iter_gene_names(self, annotations: Mapping) -> List[Tuple[int, str]]:
         """extract the gene names (Name, Synonyms, OrderedLocusNames, ORFNames)"""
@@ -412,8 +416,26 @@ class SwissProtCrossRefsExtractor(UniProtKBCrossRefsExtractor):
 
 
 class RefSeqCrossRefsExtractor(CrossRefsExtractor):
+    SRC_ENUM_KEY = "RefSeq"
+    GENEID_RE = re.compile(r"^GeneID:(?P<id>\d+)$")
+
+    def __enter__(self):
+        super().__enter__()
+        self.geneid_val = self.storer.source_enum["EntrezGene"]
+
     def extract_crossrefs(self, rec):
-        pass
+        crossrefs = []
+        crossrefs.append((self.src_enum_val, rec.id))
+        for f in rec.features:
+            if f.type == "CDS":
+                try:
+                    gene_id = f.qualifiers["db_xref"][0]
+                    m = self.GENEID_RE.match(gene_id)
+                    if m:
+                        crossrefs.append((self.geneid_val, m.group("id")))
+                except (KeyError, AttributeError, IndexError):
+                    pass
+        return crossrefs, [], []
 
 
 def collect_crossrefs(

@@ -375,7 +375,7 @@ class UniProtKBCrossRefsExtractor(CrossRefsExtractor):
 
     def iter_crossrefs(self, xrefs):
         for xref in xrefs:
-            db, ref = xref.split(":", count=1)
+            db, ref = xref.split(":", maxsplit=1)
             try:
                 typ = self.key_map[db]
                 yield typ, ref
@@ -442,13 +442,14 @@ def collect_crossrefs(
     xrefs: List[os.PathLike], source: str, format: str, map_files: List[os.PathLike], out: os.PathLike
 ):
     best_matches = identify_best_matching(map_files)
-    collector_cls = (
-        SwissProtCrossRefsExtractor
-        if source == "swissprot"
-        else UniProtKBCrossRefsExtractor
-        if source == "trembl"
-        else RefSeqCrossRefsExtractor
-    )
+    if source == "swissprot":
+        collector_cls = SwissProtCrossRefsExtractor
+    elif source == "trembl":
+        collector_cls = UniProtKBCrossRefsExtractor
+    elif source == "refseq":
+        collector_cls = RefSeqCrossRefsExtractor
+    else:
+        raise ValueError(f"Unknown source: {source}")
     with collector_cls(out, best_matches) as collector:
         for fpath in xrefs:
             with auto_open(fpath, "rt") as fh:

@@ -422,6 +422,7 @@ class RefSeqCrossRefsExtractor(CrossRefsExtractor):
     def __enter__(self):
         super().__enter__()
         self.geneid_val = self.storer.source_enum["EntrezGene"]
+        return self
 
     def extract_crossrefs(self, rec):
         crossrefs = []

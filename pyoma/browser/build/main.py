@@ -1,6 +1,7 @@
 import collections
 import itertools
 import logging
+import pickle
 import sys
 import warnings
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -22,6 +23,7 @@ from ..convert import (
     CathDomainNameParser,
     PfamDomainNameParser,
 )
+from ...common import auto_open
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ def phase_genomes(conf):
         db.add_version(conf.rel_char)
         db.add_taxonomy(conf.tax_tsv)
         db.add_species_data(conf.gs_tsv)
-        with XrefStorer(conf.xref_db) as xref_storer:
+        with XrefStorer(conf.xref_db, index_cols=["EntryNr"]) as xref_storer:
             db.add_proteins(conf.genomes, OmaGroupsProvider(conf.oma_groups), xref_collector=xref_storer)
 
 
@@ -105,19 +107,30 @@ def fetch_refseq(conf):
     )
 
 
-def filter_and_split_xrefs(conf):
+def build_relevant_taxid_mapping(conf):
     gs = pandas.read_csv(conf.gs_tsv, sep="\t")
     ncbi_taxids = set(gs["OriginalNCBITaxonId"])
-    relevant_taxids = set(xref_build.load_relevant_taxids(ncbi_taxids, omataxonomy.Taxonomy(conf.tax_sqlite)).keys())
+    relevant_taxids = xref_build.load_relevant_taxids(ncbi_taxids, omataxonomy.Taxonomy(conf.tax_sqlite))
+    ncbi2oma = dict(zip(gs["OriginalNCBITaxonId"], gs["NCBITaxonId"]))
+    mapped = {}
+    for ncbi, rel_genome_ncbi_tax in relevant_taxids.items():
+        mapped[ncbi] = set(ncbi2oma[k] for k in rel_genome_ncbi_tax)
+    with auto_open(conf.out, "wb") as fh:
+        pickle.dump(mapped, fh)
+
+
+def filter_and_split_xrefs(conf):
+    with auto_open(conf.tax_map, "rb") as fh:
+        relevant_taxid_map = pickle.load(fh)
+    relevant_taxids = set(relevant_taxid_map.keys())
     with xref_build.ChunkWriter(conf.out_prefix, 30_000) as writer:
         for xref_file in conf.xref:
             xref_build.filter_records_on_taxids(xref_file, writer, relevant_taxids, conf.format)
 
 
 def map_xrefs(conf):
-    gs = pandas.read_csv(conf.gs_tsv, sep="\t")
-    ncbi_taxids = set(gs["OriginalNCBITaxonId"])
-    taxid_mapping = xref_build.load_relevant_taxids(ncbi_taxids, omataxonomy.Taxonomy(conf.tax_sqlite))
+    with auto_open(conf.tax_map, "rb") as fh:
+        relevant_taxid_map = pickle.load(fh)
     xref_build.map_xrefs(
         fpath=conf.xref,
         format=conf.format,
@@ -126,7 +139,7 @@ def map_xrefs(conf):
         db=conf.db,
         seq_idx=conf.seq_idx_db,
         xref_db=conf.xref_source_db,
-        taxid_mapping=taxid_mapping,
+        taxid_mapping=relevant_taxid_map,
     )
 
 
@@ -138,6 +151,13 @@ def collect_xrefs(conf):
 
 def combine_xrefs(conf):
     xref_build.combine_xrefs(xrefs=conf.xrefs, out=conf.out)
+
+
+def import_go(conf):
+    with auto_open(conf.tax_map, "rb") as fh:
+        relevant_taxid_map = pickle.load(fh)
+    rel_taxids = set(relevant_taxid_map.keys())
+    xref_build.import_go(obo=conf.obo, gafs=conf.gaf, xref_db=conf.xref_db, relevant_taxid=rel_taxids, out=conf.out)
 
 
 def parse_command_line_args():
@@ -272,6 +292,16 @@ def parse_command_line_args():
         help="output directory where the remote files are written to. Defaults to the " "current working directory",
     )
 
+    relevant_taxid_map_parser = subparsers.add_parser(
+        "build-taxid-map",
+        help="Build taxid mapping to map xrefs with ncbi-taxids information. Includes also subspecies information "
+        "and super-species information up to genus level.",
+    )
+    relevant_taxid_map_parser.set_defaults(build_relevant_taxid_mapping)
+    relevant_taxid_map_parser.add_argument("--gs-tsv", required=True, help="Path to GS tsv file")
+    relevant_taxid_map_parser.add_argument("--tax-sqlite", required=False, help="Path to tax-sqlite file")
+    relevant_taxid_map_parser.add_argument("--out", required=True, help="Path to output pickle file")
+
     filter_xref_parser = subparsers.add_parser("filter-xref", help="Filtering xref files")
     filter_xref_parser.set_defaults(func=filter_and_split_xrefs)
     filter_xref_parser.add_argument("--xref", nargs="+", help="Path to input xref files")
@@ -284,8 +314,7 @@ def parse_command_line_args():
         required=False,
         help="Prefix of output xref file. Output files will contain < 30k records, " "all named {prefix}-{03d}.gz",
     )
-    filter_xref_parser.add_argument("--gs-tsv", required=True, help="Path to GS tsv file")
-    filter_xref_parser.add_argument("--tax-sqlite", required=False, help="Path to tax-sqlite file")
+    filter_xref_parser.add_argument("--tax-map", required=True, help="Path to taxid map file (pickle)")
 
     map_xref_parser = subparsers.add_parser("map-xref", help="Filtering xref files")
     map_xref_parser.set_defaults(func=map_xrefs)
@@ -305,8 +334,7 @@ def parse_command_line_args():
     map_xref_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
     map_xref_parser.add_argument("--seq-idx-db", required=True, help="Path to sequence index database in hdf5 format")
     map_xref_parser.add_argument("--xref-source-db", required=True, help="Path to xref source hdf5 database")
-    map_xref_parser.add_argument("--gs-tsv", required=True, help="Path to GS tsv file")
-    map_xref_parser.add_argument("--tax-sqlite", required=False, help="Path to tax-sqlite file")
+    map_xref_parser.add_argument("--tax-map", required=True, help="Path to taxid map file (pickle)")
 
     collect_xref_parser = subparsers.add_parser(
         "collect-xrefs", help="Identify and filter best xrefs matches per source and collect their crossreferences"
@@ -330,6 +358,16 @@ def parse_command_line_args():
     combine_xref_parser.set_defaults(func=combine_xrefs)
     combine_xref_parser.add_argument("--xrefs", nargs="+", help="Path to input xref files in hdf5 format")
     combine_xref_parser.add_argument("--out", required=True, help="Output path for the combined hdf5 file")
+
+    go_import_parser = subparsers.add_parser(
+        "import-go", help="Import Gene Ontology ontology (obo file) and annotations (gaf file)"
+    )
+    go_import_parser.set_defaults(func=import_go)
+    go_import_parser.add_argument("--xref-db", required=True, help="Path to xref database in hdf5 format")
+    go_import_parser.add_argument("--tax-map", required=True, help="Path to taxid map file (pickle)")
+    go_import_parser.add_argument("--obo", required=True, help="Path to input obo file defining gene ontology")
+    go_import_parser.add_argument("--gaf", nargs="+", help="Path to one or more gene annotations gaf files")
+    go_import_parser.add_argument("--out", required=True, help="Output path for the hdf5 file")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

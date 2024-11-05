@@ -297,7 +297,7 @@ def parse_command_line_args():
         help="Build taxid mapping to map xrefs with ncbi-taxids information. Includes also subspecies information "
         "and super-species information up to genus level.",
     )
-    relevant_taxid_map_parser.set_defaults(build_relevant_taxid_mapping)
+    relevant_taxid_map_parser.set_defaults(func=build_relevant_taxid_mapping)
     relevant_taxid_map_parser.add_argument("--gs-tsv", required=True, help="Path to GS tsv file")
     relevant_taxid_map_parser.add_argument("--tax-sqlite", required=False, help="Path to tax-sqlite file")
     relevant_taxid_map_parser.add_argument("--out", required=True, help="Path to output pickle file")

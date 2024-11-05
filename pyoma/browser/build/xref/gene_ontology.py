@@ -7,6 +7,9 @@ from typing import List, Set
 import re
 import numpy
 import tables
+
+from ..builder import DBBuilder
+from ...convert import create_index_for_columns, sort_table
 from ...tablefmt import GeneOntologyTable
 from ...geneontology import GeneOntology, OntologyParser, AnnotationParser, GOA_Annotation, AnnotationFilter
 
@@ -50,6 +53,8 @@ class GeneOntologyManager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._flush_buffers()
         self.go_tab.flush()
+        create_index_for_columns(self.go_tab, "EntryNr", "TermNr")
+        sort_table(self.go_tab, col_order=["EntryNr", "TermNr", "Evidence"])
 
     def _get_obo_version(self, obo_arr):
         header = obo_arr[0:1000].tobytes()
@@ -161,3 +166,5 @@ def import_go(
                         go_man.add_annotations(enr, annotation)
                     stats.log(taxid, len(enrs))
     stats.summary()
+    with DBBuilder(path=out, mode="append", logger=logger) as builder:
+        builder.add_gene_ontology_term_cnts()

@@ -334,6 +334,41 @@ def create_index_for_columns(tab, *cols):
             tab.colinstances[col].reindex_dirty()
 
 
+def sort_table(tab: tables.Table, col_order: Union[List[str], str]):
+    if isinstance(col_order, List):
+        main_col, *cols = col_order
+    else:
+        main_col, cols = col_order, None
+    if not tab.colindexed[main_col]:
+        create_index_for_columns(tab, main_col)
+    parent, name = tab._v_parent, tab.name
+    tmpname = tab.name + "_not_sorted"
+    tab.rename(tmpname)
+    new_tab = tab._v_file.create_table(
+        parent,
+        name,
+        tab.description,
+        tab.title,
+        expectedrows=len(tab),
+    )
+    dtype = tab.dtype
+    it = map(lambda row: row.fetch_all_fields(), tab.itersorted(sortby=main_col))
+    buf, cnt = [], 0
+    for pivot, row_iter in itertools.groupby(it, key=lambda row: row[main_col]):
+        arr = numpy.fromiter(row_iter, dtype=dtype)
+        if cols:
+            arr.sort(order=cols)
+        buf.append(arr)
+        cnt += len(arr)
+        if cnt > 1_000_000:
+            new_tab.append(numpy.concatenate(buf))
+            buf, cnt = [], 0
+    new_tab.append(numpy.concatenate(buf))
+    create_index_for_columns(new_tab, *col_order)
+    tab.remove()
+    return new_tab
+
+
 def create_fast_famhoglevel_lookup(hoglevtab):
     max_fam_nr = hoglevtab[hoglevtab.colindexes["Fam"][-1]]["Fam"]
     lookup = numpy.zeros(max_fam_nr + 1, dtype=[("start", "i4"), ("stop", "i4")])

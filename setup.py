@@ -20,9 +20,6 @@ req_packages = [
 
 cur_dir = os.path.abspath(os.path.dirname(__file__))
 
-# Create oma2hdf to install
-shutil.copyfile("bin/importdata.py", "bin/oma2hdf")
-
 __version__ = "Undefined"
 for line in open("{}/__init__.py".format(name)):
     if line.startswith("__version__"):

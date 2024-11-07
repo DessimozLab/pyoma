@@ -16,6 +16,7 @@ import omataxonomy
 from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
 from . import hogconvert
 from . import xref as xref_build
+from .cachebuilder import create_job_files, CacheBuilder, combine_results
 from ..convert import (
     iter_domains,
     filter_duplicated_domains,
@@ -93,6 +94,24 @@ def phase_select_alt_splice_variants(conf):
         db.add_protein_hog_ids(hogids)
         prot_hogid_arr.remove()
         db.identify_and_store_splice_variants(conf.splice_json)
+
+
+def cache_build_job_generator(conf):
+    create_job_files(conf.db, conf.out_prefix)
+
+
+def cache_build_process_job(conf):
+    with open(conf.job_file, "rb") as fh:
+        jobdata = pickle.load(fh)
+    job, payload = jobdata
+    with CacheBuilder(conf.db, conf.out) as builder:
+        func = getattr(builder, job)
+        for args in payload:
+            func(*args)
+
+
+def cache_build_combine(conf):
+    combine_results(job_results=conf.jobs, out=conf.out)
 
 
 def fetch_refseq(conf):
@@ -247,6 +266,23 @@ def parse_command_line_args():
     splice_parser.set_defaults(func=phase_select_alt_splice_variants)
     splice_parser.add_argument("--db", required=True, help="Path to database - will be modified")
     splice_parser.add_argument("--splice-json", required=True, help="Path to splice json file")
+
+    # cache builder commands
+    cache_job_parser = subparsers.add_parser("cache-job", help="Generate job files for cache building")
+    cache_job_parser.set_defaults(func=cache_build_job_generator)
+    cache_job_parser.add_argument("--db", required=True, help="Path to database")
+    cache_job_parser.add_argument("--out-prefix", default="cache-job", help="prefix for the job files path")
+
+    cache_build_parser = subparsers.add_parser("cache-build", help="Runs cache building for a job-file")
+    cache_build_parser.set_defaults(func=cache_build_process_job)
+    cache_build_parser.add_argument("--db", required=True, help="Path to database")
+    cache_build_parser.add_argument("--job-file", required=True, help="job file to be processed")
+    cache_build_parser.add_argument("--out", required=True, help="output filename")
+
+    cache_combine_parser = subparsers.add_parser("cache-combine", help="Combines all cache jobs in a single hdf5")
+    cache_combine_parser.set_defaults(func=cache_build_combine)
+    cache_combine_parser.add_argument("--jobs", nargs="+", help="job result files to combine")
+    cache_combine_parser.add_argument("--out", required=True, help="output path of combined results")
 
     # refseq subparser
     refseq_fetch_parser = subparsers.add_parser(

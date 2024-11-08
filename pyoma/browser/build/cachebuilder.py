@@ -187,7 +187,8 @@ class CacheBuilder:
     def compute_familydata_json(self, fam, fam_members):
         famhog_id = self.db.format_hogid(fam)
         logger.debug("family data for %s with %d members", fam, len(fam_members))
-        if len(fam_members) > 10000:
+        # TODO: enable this again once it's clear if still needed and how to access GO at the time of cache building
+        if len(fam_members) > 0:
             # this will likely fail to compute the MDS for so many points
             # let's skip it for now.
             genes_null_similarity = set(p.entry_nr for p in fam_members)

@@ -384,7 +384,7 @@ class DBBuilder(DarwinExporter):
                     self.logger.info(
                         "worte %s: compression ratio %3f%%" % (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory)
                     )
-        create_index_for_columns(prot_tab, "EntryNr", "MD5ProteinHash")
+        create_index_for_columns(prot_tab, "EntryNr", "MD5ProteinHash", "OmaGroup")
 
     def add_sequence_index(self, seqs: bytes, nr_entries: int, k: int = 6):
         """compute the suffix array and Kmer lookup index and store in the hdf5 under /Protein
@@ -453,6 +453,7 @@ class DBBuilder(DarwinExporter):
         entries_tab = self.h5.get_node("/Protein/Entries")
         assert len(hog_ids) == len(entries_tab)
         entries_tab.modify_column(0, len(entries_tab), 1, column=hog_ids, colname="OmaHOG")
+        create_index_for_columns(entries_tab, "OmaHOG")
 
     def identify_and_store_splice_variants(self, splice_json):
         with open(splice_json, "rt") as f:

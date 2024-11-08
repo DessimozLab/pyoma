@@ -14,6 +14,7 @@ import lxml.etree as etree
 from ete3 import TreeNode
 
 from .. import tablefmt
+from ..convert import create_index_for_columns
 
 HOGID_RE = re.compile(r"HOG:(?P<rel>[A-Z])?(?P<fam>\d+)(?:\.(?P<subhog>[a-z0-9.]*))?(?:_(?P<taxid>-?\d+))?")
 logger = logging.getLogger(__name__)
@@ -661,6 +662,7 @@ class HOGtoHDF5(HogObserver):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.orthoxml_index.append(numpy.stack(list(self.index.values())))
         self.h5.create_carray("/", "OmaHOG", obj=self.hogid)
+        create_index_for_columns(self.leveltab, "Fam", "ID", "Level", "CompletenessScore", "NrMemberGenes", "IsRoot")
         self.h5.flush()
         self.h5.close()
 

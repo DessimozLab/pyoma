@@ -1,6 +1,7 @@
 import collections
 import logging
 import itertools
+import os
 import pickle
 import re
 import json
@@ -69,6 +70,19 @@ def create_job_files(db_path, out_prefix):
         with open(f"{out_prefix}_fam-{job:03d}.pkl", "wb") as fh:
             pickle.dump(["process_family", bucket], fh)
     logger.info("wrote %d family job-files and 1 singleton file", job)
+
+
+def process_job_file(job_file: os.PathLike, db_fpath: os.PathLike, out: os.PathLike):
+    with open(job_file, "rb") as fh:
+        jobdata = pickle.load(fh)
+    job, payload = jobdata
+    with CacheBuilder(db_fpath, out) as builder:
+        func = getattr(builder, job)
+        if job == "process_singletons":
+            func(payload)
+        else:
+            for args in payload:
+                func(*args)
 
 
 class CacheBuilder:
@@ -231,7 +245,10 @@ class CacheBuilder:
                 off = numpy.zeros(0, dtype=self._offset_dtype)
             h5.create_table("/family_json", "offset", obj=off)
 
-            cnts = numpy.concatenate(self.cnts)
+            if len(self.cnts) > 0:
+                cnts = numpy.concatenate(self.cnts)
+            else:
+                cnts = numpy.zeros(0, dtype=tables.dtype_from_descr(ProteinCacheInfo))
             h5.create_table("/", "ortholog_counts", ProteinCacheInfo, obj=cnts)
             logger.info("finished writing output file")
 

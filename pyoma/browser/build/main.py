@@ -16,7 +16,7 @@ import omataxonomy
 from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
 from . import hogconvert
 from . import xref as xref_build
-from .cachebuilder import create_job_files, CacheBuilder, combine_results
+from .cachebuilder import create_job_files, combine_results, process_job_file
 from ..convert import (
     iter_domains,
     filter_duplicated_domains,
@@ -101,13 +101,7 @@ def cache_build_job_generator(conf):
 
 
 def cache_build_process_job(conf):
-    with open(conf.job_file, "rb") as fh:
-        jobdata = pickle.load(fh)
-    job, payload = jobdata
-    with CacheBuilder(conf.db, conf.out) as builder:
-        func = getattr(builder, job)
-        for args in payload:
-            func(*args)
+    process_job_file(conf.job_file, conf.db, conf.out)
 
 
 def cache_build_combine(conf):

@@ -56,7 +56,7 @@ def create_job_files(db_path, out_prefix):
             if size**2 > target:
                 for rng in range(0, size, nr_elem):
                     yield [(fam, (rng, rng + nr_elem))]
-            elif cur_size + size**2 < target:
+            elif cur_size + size**2 < target and len(cur_bucket) < 2 * nr_elem:
                 cur_bucket.append((fam,))
                 cur_size += size**2
             else:
@@ -64,7 +64,8 @@ def create_job_files(db_path, out_prefix):
                     yield cur_bucket
                 cur_bucket = [(fam,)]
                 cur_size = size**2
-        yield cur_bucket
+        if cur_bucket:
+            yield cur_bucket
 
     for job, bucket in enumerate(yield_buckets(fam_sizes)):
         with open(f"{out_prefix}_fam-{job:03d}.pkl", "wb") as fh:

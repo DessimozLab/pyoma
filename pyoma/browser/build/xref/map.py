@@ -488,8 +488,8 @@ def combine_xrefs(xrefs: List[os.PathLike], out: os.PathLike):
             _fetch_combine_and_reduce_input_data(
                 h5hs,
                 "/Annotations/EC",
-                sort_columns=["XRefId"],
-                dupl_subset_columns=["XRefId"],
+                sort_columns=["ECacc"],
+                dupl_subset_columns=["ECacc"],
                 storer_callback=storer.add_ecs,
             )
         finally:

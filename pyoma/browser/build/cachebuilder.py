@@ -278,7 +278,7 @@ def combine_results(job_results, out):
             raise DBConsistencyError("Cached json seems broken")
         off.sort(order="Fam")
         rhog_meta = numpy.zeros(len(off), dtype=tables.dtype_from_descr(RootHOGMetaTable))
-        rhog_meta["Fam"] = off["Fam"]
+        rhog_meta["FamNr"] = off["Fam"]
         rhog_meta["FamDataJsonOffset"] = off["offset"]
         rhog_meta["FamDataJsonLength"] = off["length"]
         roothog_meta = fout.create_table("/RootHOG", "MetaData", RootHOGMetaTable, obj=rhog_meta)

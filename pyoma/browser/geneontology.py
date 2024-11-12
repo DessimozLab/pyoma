@@ -9,6 +9,7 @@ from collections import deque
 
 import numpy
 
+from ..common import auto_open
 
 """
 IMPORTANT NOTE:
@@ -475,13 +476,8 @@ class AnnotationParser(object):
     def __init__(self, fp, factory=GOA_Annotation._make):
         self._needs_close = False
         if isinstance(fp, str):
-            if fp.endswith(".gz"):
-                from gzip import GzipFile
-
-                fp = GzipFile(fp, "rt")
-                self._needs_close = True
-            else:
-                fp = open(fp, "rt")
+            fp = auto_open(fp, "rt")
+            self._needs_close = True
         self.fp = fp
         self.factory = factory
 

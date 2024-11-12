@@ -478,10 +478,10 @@ class AnnotationParser(object):
             if fp.endswith(".gz"):
                 from gzip import GzipFile
 
-                fp = GzipFile(fp, "rb")
+                fp = GzipFile(fp, "rt")
                 self._needs_close = True
             else:
-                fp = open(fp, "rb")
+                fp = open(fp, "rt")
         self.fp = fp
         self.factory = factory
 

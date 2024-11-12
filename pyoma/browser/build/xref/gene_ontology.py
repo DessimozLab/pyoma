@@ -112,6 +112,8 @@ class XRefBasedMapper:
             (row.fetch_all_fields() for row in itertools.islice(it, 100)),
             dtype=self.xrefs.dtype,
         )
+        if len(xrefs) == 0:
+            return set([])
         xrefs.sort(order=["Verification", "EntryNr"])
         index = numpy.searchsorted(xrefs["Verification"], xrefs[0]["Verification"], side="right")
         return set(xrefs["EntryNr"][:index])

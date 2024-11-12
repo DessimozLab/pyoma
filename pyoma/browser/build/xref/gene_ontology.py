@@ -102,7 +102,7 @@ class XRefBasedMapper:
 
     @lru_cache(maxsize=65536)
     def find_id(self, id_):
-        if m := re.match(r"(.*)\.\d{1,3}$", id):
+        if m := re.match(r"(.*)\.\d{1,3}$", id_):
             id_ = m.group(1)
         query = id_.encode("utf-8")
         condvals = {"low": query, "high": query[:-1] + bytes([query[-1] + 1])}

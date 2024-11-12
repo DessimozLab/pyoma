@@ -282,7 +282,7 @@ def combine_results(job_results, out):
         rhog_meta["FamDataJsonOffset"] = off["offset"]
         rhog_meta["FamDataJsonLength"] = off["length"]
         roothog_meta = fout.create_table("/RootHOG", "MetaData", RootHOGMetaTable, obj=rhog_meta)
-        roothog_meta.colinstances["Fam"].create_csindex()
+        roothog_meta.colinstances["FamNr"].create_csindex()
 
         cnts = numpy.concatenate(cnts)
         cnts.sort(order="EntryNr")

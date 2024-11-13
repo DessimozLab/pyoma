@@ -74,6 +74,8 @@ class GeneOntologyManager:
 
     def add_annotations(self, enrs: Set[int], anno: GOA_Annotation):
         """parse go annotations and add them to the go buffer"""
+        if len(enrs) == 0:
+            return
         try:
             term = self.go.term_by_id(anno.term_id)
         except ValueError:
@@ -116,7 +118,7 @@ class XRefBasedMapper:
             return set([])
         xrefs.sort(order=["Verification", "EntryNr"])
         index = numpy.searchsorted(xrefs["Verification"], xrefs[0]["Verification"], side="right")
-        return set(int(z) for z in xrefs["EntryNr"][:index])
+        return set(xrefs["EntryNr"][:index])
 
 
 class Stats:
@@ -164,8 +166,7 @@ def import_go(
                         stats.log(taxid, -1)
                         continue
                     enrs = mapper.find_id(annotation.db_obj_id)
-                    for enr in enrs:
-                        go_man.add_annotations(enr, annotation)
+                    go_man.add_annotations(enrs, annotation)
                     stats.log(taxid, len(enrs))
     stats.summary()
     with DBBuilder(path=out, mode="append", logger=logger) as builder:

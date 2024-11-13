@@ -116,7 +116,7 @@ class XRefBasedMapper:
             return set([])
         xrefs.sort(order=["Verification", "EntryNr"])
         index = numpy.searchsorted(xrefs["Verification"], xrefs[0]["Verification"], side="right")
-        return set(xrefs["EntryNr"][:index])
+        return set(int(z) for z in xrefs["EntryNr"][:index])
 
 
 class Stats:

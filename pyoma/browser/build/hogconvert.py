@@ -662,8 +662,12 @@ class HOGtoHDF5(HogObserver):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.orthoxml_index.append(numpy.stack(list(self.index.values())))
         self.h5.create_carray("/", "OmaHOG", obj=self.hogid)
-        create_index_for_columns(self.leveltab, "Fam", "ID", "Level", "CompletenessScore", "NrMemberGenes", "IsRoot")
         self.h5.flush()
+        if exc_type is None:
+            # no exception happend. we build index and also per_level_tables
+            create_index_for_columns(
+                self.leveltab, "Fam", "ID", "Level", "CompletenessScore", "NrMemberGenes", "IsRoot"
+            )
         self.h5.close()
 
     def process_augmented_hog(self, node: etree.Element):

@@ -134,7 +134,6 @@ class Stats:
             self.counts[taxid][2] += 1
         if kind > 1:
             self.counts[taxid][3] += 1
-            logger.info("mapped to more than one enr")
 
     def summary(self):
         print("Mapping statistics")
@@ -168,6 +167,8 @@ def import_go(
                     enrs = mapper.find_id(annotation.db_obj_id)
                     go_man.add_annotations(enrs, annotation)
                     stats.log(taxid, len(enrs))
+                    if len(enrs) > 1:
+                        logger.info(f"{annotation.db_obj_id} mapped to {len(enrs)} entries: {enrs}")
     stats.summary()
     with DBBuilder(path=out, mode="append", logger=logger) as builder:
         builder.add_gene_ontology_term_cnts()

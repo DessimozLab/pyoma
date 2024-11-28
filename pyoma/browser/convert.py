@@ -25,12 +25,14 @@ from tempfile import NamedTemporaryFile
 
 import familyanalyzer
 import lxml.html
+import networkx as nx
 import numpy
 import numpy.lib.recfunctions
 import pandas
 import tables
 from PySAIS import sais
 from future.standard_library import hooks
+from tables import NoSuchNodeError
 from tqdm import tqdm
 
 from . import locus_parser
@@ -2593,12 +2595,14 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
     with open(fpath, "rt") as fh:
         genomes = json.load(fh)
     os.rename(fpath, fpath + ".bak")
+    from .db import Database
 
-    def traverse(node, parent_hogs=None, parent_hogs_support=None):
+    db = Database(h5.filename)
+    completeness_cutoffs = numpy.linspace(0, 1, 10, endpoint=False)
+
+    def traverse(node, parent_hogs=None):
         if parent_hogs is None:
-            parent_hogs = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
-        if parent_hogs_support is None:
-            parent_hogs_support = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
+            parent_hogs = [numpy.array([], dtype=h5.get_node("/HogLevel").dtype) for _ in completeness_cutoffs]
 
         try:
             n = node["name"].encode("utf-8")
@@ -2615,20 +2619,23 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
                 node["nr_hogs"] = 0
                 raise ValueError("not in taxonomy: {}".format(n))
 
-            for modif, completeness, parent in zip(["", "_support"], [0.0, 0.2], [parent_hogs, parent_hogs_support]):
+            hog_level = []
+            hog_data_by_completeness = {}
+            try:
+                syn_graph = db.get_syntenic_hogs(level=n, evidence="linearized")
+            except NoSuchNodeError:
+                syn_graph = None
+
+            for completeness, parent in zip(completeness_cutoffs, parent_hogs):
                 hogs = h5.get_node(f"/AncestralGenomes/tax{taxid}/Hogs").read_where("CompletenessScore > completeness")
-                if modif == "":
-                    hog_level = hogs
-                else:
-                    hog_level_support = hogs
-                node["nr_hogs{}".format(modif)] = len(hogs)
+                hog_level.append(hogs)
                 diff_parent, dupl_events = hoghelper.compare_levels(parent, hogs, return_duplication_events=True)
                 changes = collections.defaultdict(int)
                 for x in diff_parent["Event"]:
                     changes[x.decode()] += 1
                 changes["duplications"] = dupl_events
-                if "children" not in node and modif != "_support":
-                    # dealing with an extend species, special way to assess gains, based on
+                if "children" not in node and completeness < 0.001:
+                    # dealing with an extent species, special way to assess gains, based on
                     # HOG singletons that are main isoforms
                     assert changes["gained"] == 0
                     g = numpy.extract(gs["UniProtSpeciesCode"] == node["id"].encode("utf-8"), gs)[0]
@@ -2641,8 +2648,33 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
                         if p["OmaHOG"] == b"":
                             nr_gains += 1
                     changes["gained"] = nr_gains
-                    node["nr_genes{}".format(modif)] = nr_genes
-                node["evolutionaryEvents{}".format(modif)] = changes
+                    node["nr_genes"] = nr_genes
+                if syn_graph is not None:
+                    # Filter nodes with completeness_score >= alpha
+                    filtered_nodes = [
+                        node
+                        for node, data in syn_graph.nodes(data=True)
+                        if data.get("completeness_score", 0) > completeness
+                    ]
+                    # Create a subgraph with these filtered nodes
+                    subgraph = syn_graph.subgraph(filtered_nodes)
+                    # Find the connected components of the subgraph with > 1 protein (no singletons)
+                    contigs = [comp for comp in nx.connected_components(subgraph) if len(comp) > 1]
+                else:
+                    contigs = [[]]
+                hog_data_by_completeness[f"{completeness:.1f}"] = {
+                    "nr_hogs": len(hogs),
+                    "evolutionaryEvents": changes,
+                    "nr_contigs": len(contigs),
+                    "hogs_on_contigs": sum(len(z) for z in contigs),
+                }
+            node["hogs_by_completeness"] = hog_data_by_completeness
+            # backward compatible lookup
+            node["nr_hogs"] = hog_data_by_completeness["0.0"]["nr_hogs"]
+            node["evolutionaryEvents"] = hog_data_by_completeness["0.0"]["evolutionaryEvents"]
+            node["nr_hogs_support"] = hog_data_by_completeness["0.2"]["nr_hogs"]
+            node["evolutionaryEvents_support"] = hog_data_by_completeness["0.2"]["evolutionaryEvents"]
+
             common.package_logger.info(
                 "node: {}: events: {}; events_support: {}".format(
                     n, node["evolutionaryEvents"], node["evolutionaryEvents_support"]
@@ -2651,11 +2683,10 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
         except Exception:
             common.package_logger.exception("Cannot identify taxonomy id")
             hog_level = parent_hogs.copy()
-            hog_level_support = parent_hogs_support.copy()
 
         if "children" in node:
             for child in node["children"]:
-                traverse(child, parent_hogs=hog_level, parent_hogs_support=hog_level_support)
+                traverse(child, parent_hogs=hog_level)
 
     traverse(genomes)
     with open(fpath, "wt") as fh:

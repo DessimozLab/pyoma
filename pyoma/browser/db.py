@@ -28,6 +28,7 @@ import tables
 import tables.file as _tables_file
 from Bio.UniProt import GOA
 from datasketch import MinHash
+from property_manager import lazy_property
 from tqdm import tqdm
 
 from .KmerEncoder import KmerEncoder
@@ -1526,7 +1527,18 @@ class Database(object):
         except KeyError:
             raise ValueError(f"Invalid evidence value {evidence}")
         edge_data = read_table_where(ancestral_node.Synteny, "Evidence <= {}".format(evidence))
-        edges = ((e[0], e[1], {"weight": int(e[2]), "evidence": evidence_enum(e[3])}) for e in edge_data)
+        edges = (
+            (
+                e[0],
+                e[1],
+                {
+                    "weight": int(e[2]),
+                    "evidence": evidence_enum(e["Evidence"]),
+                    "age": float(self.tax.taxid_to_age.get(e["LCA_taxid"], -1)),
+                },
+            )
+            for e in edge_data
+        )
         if hog_id is not None:
             hog_row = self.get_hog(hog_id, tab=ancestral_node.Hogs, field="_NROW")
             hogs = ancestral_node.Hogs
@@ -2998,6 +3010,10 @@ class Taxonomy(object):
             idx.append(self.parent_key[i])
             i += 1
         return self.tax_table.take(idx)
+
+    @lazy_property
+    def taxid_to_age(self):
+        return {r["NCBITaxonId"]: r["Age"] for r in self.tax_table}
 
     def approx_search(self, pattern):
         if self._approx_matcher is None:

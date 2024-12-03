@@ -33,9 +33,7 @@ class OrthoXmlHogTable(tables.IsDescription):
     HogAugmentedBufferLength = tables.UInt32Col(pos=4)
 
 
-class AncestralSyntenyRels(tables.IsDescription):
-    HogRow1 = tables.UInt32Col(pos=0)
-    HogRow2 = tables.UInt32Col(pos=1)
+class AbstractSyntenyRels(tables.IsDescription):
     Weight = tables.Float16Col(pos=2)
     Evidence = tables.EnumCol(
         tables.Enum({"linearized": 1, "parsimonious": 2, "any": 4}),
@@ -51,6 +49,16 @@ class AncestralSyntenyRels(tables.IsDescription):
         base="int8",
     )
     OrientationScore = tables.Float16Col(pos=6, dflt=-1)
+
+
+class AncestralSyntenyRels(AbstractSyntenyRels):
+    HogRow1 = tables.UInt32Col(pos=0)
+    HogRow2 = tables.UInt32Col(pos=1)
+
+
+class ExtantSyntenyRels(AbstractSyntenyRels):
+    EntryNr1 = tables.UInt32Col(pos=0)
+    EntryNr2 = tables.UInt32Col(pos=1)
 
 
 class ProteinTable(tables.IsDescription):

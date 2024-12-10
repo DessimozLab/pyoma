@@ -1,10 +1,11 @@
 import collections
 import itertools
+import json
 import logging
 import pickle
 import sys
 import warnings
-from os.path import exists, getsize
+from os.path import exists, getsize, join
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from shutil import copy
 
@@ -25,6 +26,7 @@ from ..convert import (
     only_pfam_or_cath_domains,
     CathDomainNameParser,
     PfamDomainNameParser,
+    augment_genomes_json_download_file,
 )
 from ...common import auto_open
 
@@ -173,6 +175,20 @@ def import_go(conf):
         relevant_taxid_map = pickle.load(fh)
     rel_taxids = set(relevant_taxid_map.keys())
     xref_build.import_go(obo=conf.obo, gafs=conf.gaf, xref_db=conf.xref_db, relevant_taxid=rel_taxids, out=conf.out)
+
+
+def gen_aux_files(conf):
+    from ..db import Database
+
+    with Database(conf.db) as db:
+        with auto_open(join(conf.out_dir, "genomes.json"), "wt") as fh:
+            genomes = db.tax.as_dict()
+            json.dump(genomes, fh)
+        augment_genomes_json_download_file(join(conf.out_dir, "genomes.json"), db.get_hdf5_handle())
+        with auto_open(join(conf.out_dir, "speciestree.nwk"), "wt") as fh:
+            fh.write(db.tax.newick(leaf="sciname", internal="sciname", quoted=True))
+        with auto_open(join(conf.out_dir, "specicestree.phyloxml"), "wt") as fh:
+            fh.write(db.tax.as_phyloxml())
 
 
 def parse_command_line_args():
@@ -400,6 +416,11 @@ def parse_command_line_args():
     go_import_parser.add_argument("--obo", required=True, help="Path to input obo file defining gene ontology")
     go_import_parser.add_argument("--gaf", nargs="+", help="Path to one or more gene annotations gaf files")
     go_import_parser.add_argument("--out", required=True, help="Output path for the hdf5 file")
+
+    gen_aux_file_parser = subparsers.add_parser("generate-aux-files", help="Generate auxiliary files")
+    gen_aux_file_parser.set_defaults(func=gen_aux_files)
+    gen_aux_file_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
+    gen_aux_file_parser.add_argument("--out-dir", default="./", help="Path to output directory")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

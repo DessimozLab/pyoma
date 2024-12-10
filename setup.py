@@ -83,6 +83,3 @@ setup(
     test_require=["nose"],
     python_requires=">=3.8",
 )
-
-# Remove local copy of oma2hdf (installed)
-os.remove("bin/oma2hdf")

@@ -583,8 +583,8 @@ class Database(object):
         if synteny_rels is not None:
             synteny_rels = synteny_rels[
                 numpy.logical_and(
-                    synteny_rels["EntryNr1"].isin(all_genes["EntryNr"]),
-                    synteny_rels["EntryNr2"].isin(all_genes["EntryNr"]),
+                    numpy.isin(synteny_rels["EntryNr1"], all_genes["EntryNr"]),
+                    numpy.isin(synteny_rels["EntryNr2"], all_genes["EntryNr"]),
                 )
             ]
             for rel in synteny_rels:

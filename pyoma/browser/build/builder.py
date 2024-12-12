@@ -175,7 +175,7 @@ class DBBuilder(DarwinExporter):
         return "Test"
 
     def add_taxonomy(self, tax_tsv):
-        col_names = list(tablefmt.TaxonomyTable.columns)[:3]
+        col_names = list(tablefmt.TaxonomyTable.columns)[:4]
         tax_data = pandas.read_csv(tax_tsv, sep="\t", names=col_names)
         dflt_cols = set(tablefmt.TaxonomyTable.columns) - set(tax_data.columns)
         for col in dflt_cols:
@@ -218,7 +218,10 @@ class DBBuilder(DarwinExporter):
 
         data = pandas.read_csv(gs_tsv, sep="\t")
         data["order"] = data["NCBITaxonId"].map(taxid_order)
-        data.sort_values(by="order", inplace=True)
+        data.sort_values(by=["order", "GenomeId"], inplace=True)
+        data["NCBITaxonId"] = numpy.where(
+            (data["NCBITaxonId"].duplicated(keep=False)), data["GenomeId"], data["NCBITaxonId"]
+        )
         data.reset_index(drop=True, inplace=True)
 
         cols = list(tablefmt.GenomeTable.columns)

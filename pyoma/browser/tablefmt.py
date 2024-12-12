@@ -218,7 +218,8 @@ class TaxonomyTable(tables.IsDescription):
     NCBITaxonId = tables.Int32Col(pos=0)
     ParentTaxonId = tables.Int32Col(pos=1)
     Name = tables.StringCol(255, pos=2)
-    Age = tables.Float16Col(pos=3, dflt=numpy.nan)
+    IsGenome = tables.BoolCol(pos=3, dflt=False)
+    Age = tables.Float16Col(pos=4, dflt=numpy.nan)
 
 
 class DomainTable(tables.IsDescription):

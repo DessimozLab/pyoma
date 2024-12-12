@@ -38,7 +38,7 @@ GetGenomeData := proc(outdir)
         taxid := parse(GS[g,'TAXONID']);
         ncbi_taxid := GS[g,'NCBITAXONID'];
         ncbi_taxid := If(ncbi_taxid = '', taxid,  parse(ncbi_taxid));
-        genome_id  := -9 - gNr   # numeric id starting at -10 and decreasing
+        genome_id  := -9 - gNr;   # numeric id starting at -10 and decreasing
         gs := append(gs, [taxid, g, GS[g,TotEntries],
             GS[g,TotAA], Goff[gNr],
             GS[g,SCINAME], GS[g,COMMONNAME], GS[g, SYNNAME],

@@ -32,7 +32,6 @@ from future.standard_library import hooks
 from tables import NoSuchNodeError
 from tqdm import tqdm
 
-from . import locus_parser
 from . import suffixsearch
 from . import tablefmt
 from .KmerEncoder import KmerEncoder
@@ -691,108 +690,6 @@ class DarwinExporter(object):
         if typ == "Seq":
             row["MD5ProteinHash"] = hashlib.md5(sequence.encode("utf-8")).hexdigest()
         return seqLen
-
-    def add_proteins(self):
-        gsNode = self.h5.get_node("/Genome")
-        nrProt = sum(gsNode.cols.TotEntries)
-        nrAA = sum(gsNode.cols.TotAA)
-        protGrp = self._get_or_create_node("/Protein", "Root node for protein (oma entries) information")
-        protTab = self.h5.create_table(protGrp, "Entries", tablefmt.ProteinTable, expectedrows=nrProt)
-        seqArr = self.h5.create_earray(
-            protGrp,
-            "SequenceBuffer",
-            tables.StringAtom(1),
-            (0,),
-            "concatenated protein sequences",
-            expectedrows=nrAA + nrProt,
-        )
-        cdnaArr = self.h5.create_earray(
-            protGrp,
-            "CDNABuffer",
-            tables.StringAtom(1),
-            (0,),
-            "concatenated cDNA sequences",
-            expectedrows=3 * nrAA + nrProt,
-        )
-        seqOff = cdnaOff = 0
-        loc_parser = locus_parser.LocusParser()
-        for gs in gsNode.iterrows():
-            genome = gs["UniProtSpeciesCode"].decode()
-            cache_file = os.path.join(
-                os.getenv("DARWIN_NETWORK_SCRATCH_PATH", ""),
-                "pyoma",
-                "prots",
-                "{}.json".format(genome),
-            )
-            if os.path.exists(cache_file):
-                with open(cache_file, "r") as fd:
-                    data = json.load(fd)
-            else:
-                data = self.call_darwin_export("GetProteinsForGenome({})".format(genome))
-
-            if len(data["seqs"]) != gs["TotEntries"]:
-                raise DataImportError(
-                    "number of entries ({:d}) does "
-                    "not match number of seqs ({:d}) for {}".format(len(data["seqs"]), gs["TotEntries"], genome)
-                )
-
-            locTab = self.h5.create_table(
-                "/Protein/Locus",
-                genome,
-                tablefmt.LocusTable,
-                createparents=True,
-                expectedrows=gs["TotEntries"] * 4,
-            )
-
-            cnt_missmatch_locus = 0
-            cnt_genes = 0
-            for nr in range(gs["TotEntries"]):
-                eNr = data["off"] + nr + 1
-                protTab.row["EntryNr"] = eNr
-                protTab.row["OmaGroup"] = data["ogs"][nr]
-
-                seqOff += self._add_sequence(data["seqs"][nr], protTab.row, seqArr, seqOff)
-                cdnaOff += self._add_sequence(data["cdna"][nr], protTab.row, cdnaArr, cdnaOff, "CDNA")
-
-                protTab.row["Chromosome"] = data["chrs"][nr]
-                protTab.row["AltSpliceVariant"] = data["alts"][nr]
-                protTab.row["OmaHOG"] = b" "  # will be assigned later
-                protTab.row["CanonicalId"] = b" "  # will be assigned later
-                if protTab.row["AltSpliceVariant"] == 0 or protTab.row["AltSpliceVariant"] == protTab.row["EntryNr"]:
-                    cnt_genes += 1  # main isoforms of gene
-
-                locus_str = data["locs"][nr]
-                try:
-                    locus_tab = loc_parser.parse(locus_str, eNr)
-                    locTab.append(locus_tab)
-                    len_cds = sum(z["End"] - z["Start"] + 1 for z in locus_tab)
-                    if len_cds != protTab.row["CDNABufferLength"] - 1:
-                        self.logger.debug(
-                            "sum of exon lengths differ with cdna sequence for {}: {} vs {}".format(
-                                eNr, len_cds, protTab.row["CDNABufferLength"] - 1
-                            )
-                        )
-                        cnt_missmatch_locus += 1
-
-                    protTab.row["LocusStart"] = locus_tab["Start"].min()
-                    protTab.row["LocusEnd"] = locus_tab["End"].max()
-                    protTab.row["LocusStrand"] = locus_tab[0]["Strand"]
-                except ValueError as e:
-                    self.logger.warning(e)
-                protTab.row["SubGenome"] = data["subgenome"][nr].encode("ascii")
-                protTab.row.append()
-            protTab.flush()
-            seqArr.flush()
-            gs["TotGenes"] = cnt_genes
-            gs.update()
-            if cnt_missmatch_locus > 0:
-                self.logger.warning("{} missmatches in exon-lengths compared to locus info".format(cnt_missmatch_locus))
-            for n in (protTab, seqArr, locTab):
-                if n.size_in_memory != 0:
-                    self.logger.info(
-                        "worte %s: compression ratio %3f%%" % (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory)
-                    )
-        create_index_for_columns(protTab, "EntryNr", "MD5ProteinHash")
 
     def _write_to_table(self, tab, data):
         if len(data) > 0:

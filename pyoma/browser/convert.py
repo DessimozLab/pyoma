@@ -729,18 +729,20 @@ class DarwinExporter(object):
             row["HogAugmentedBufferLength"] = length["augmented"]
             row.append()
 
-    def add_cache_of_hogs_by_level(self, nr_procs=None):
+    def add_cache_of_hogs_by_level(self, lev2tax=None, nr_procs=None):
         self.logger.info("createing cached HogLevel table per level")
         hl_tab = self.h5.get_node("/HogLevel")
-        temp_hoglevel_file = os.path.join(os.getenv("DARWIN_NETWORK_SCRATCH_PATH"), "tmp-hoglevel.h5")
+        temp_hoglevel_file = os.path.join(os.getenv("DARWIN_NETWORK_SCRATCH_PATH", "./"), "tmp-hoglevel.h5")
         with tables.open_file(temp_hoglevel_file, "w") as hlfh:
             hl_tab._f_copy(hlfh.root)
             create_index_for_columns(hlfh.get_node("/HogLevel"), "Level")
 
         rel_levels = set(hl_tab.read(field="Level"))
         self.logger.info("found {} levels, start extracting hogs in parallel".format(len(rel_levels)))
-        lev2tax = {row["Name"]: int(row["NCBITaxonId"]) for row in self.h5.get_node("/Taxonomy").read()}
-        lev2tax[b"LUCA"] = 0
+
+        if lev2tax is None:
+            lev2tax = {row["Name"]: int(row["NCBITaxonId"]) for row in self.h5.get_node("/Taxonomy").read()}
+            lev2tax[b"LUCA"] = 0
         idx_per_level = numpy.zeros(len(hl_tab), "i4")
         with concurrent.futures.ProcessPoolExecutor(max_workers=nr_procs) as pool:
             future_to_level = {

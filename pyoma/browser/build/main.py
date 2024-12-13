@@ -61,6 +61,11 @@ def phase_convert_hogs(conf):
         annotator = hogconvert.Annotator(parser)
         hogconvert.PerFamilyHOGObserver(parser, hog_h5.store_orthoxml, hog_h5.store_orthoxml_augmented)
         hogconvert.parse_orthoxml(conf.orthoxml, parser)
+    # add the per-level HOG tables to the HDF5
+    with DBBuilder(conf.hdf5_out, mode="append", logger=logger) as builder:
+        with tables.open_file(conf.db) as taxdb:
+            lev2tax = {row["Name"]: int(row["NCBITaxonId"]) for row in taxdb.get_node("/Taxonomy").read()}
+        builder.add_cache_of_hogs_by_level(lev2tax=lev2tax, nr_procs=4)
 
 
 def phase_vps(conf):

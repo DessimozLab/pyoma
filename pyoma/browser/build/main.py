@@ -187,12 +187,13 @@ def gen_aux_files(conf):
 
     with Database(conf.db) as db:
         with auto_open(join(conf.out_dir, "genomes.json"), "wt") as fh:
-            genomes = db.tax.as_dict()
+            tax_without_skiplevel = db.tax.get_subtaxonomy_rooted_at(db.tax.root["NCBITaxonId"], collapse=True)
+            genomes = tax_without_skiplevel.as_dict()
             json.dump(genomes, fh)
         augment_genomes_json_download_file(join(conf.out_dir, "genomes.json"), db.get_hdf5_handle())
         with auto_open(join(conf.out_dir, "speciestree.nwk"), "wt") as fh:
             fh.write(db.tax.newick(leaf="sciname", internal="sciname", quoted=True))
-        with auto_open(join(conf.out_dir, "specicestree.phyloxml"), "wt") as fh:
+        with auto_open(join(conf.out_dir, "speciestree.phyloxml"), "wb") as fh:
             fh.write(db.tax.as_phyloxml())
 
 

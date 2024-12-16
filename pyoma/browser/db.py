@@ -2965,8 +2965,17 @@ class Taxonomy(object):
             tax_json = json.loads(("[" + taxStr[14:-3] + "]").replace("'", '"'))
             self.all_hog_levels = frozenset([t.encode("ascii") for t in tax_json if forbidden_chars.search(t) is None])
         except (IOError, KeyError):
+            # load all levels that have at least two children
+            nr_children = collections.defaultdict(int)
+            for p in self.tax_table["ParentTaxonId"]:
+                nr_children[p] += 1
+            remove = set(p for (p, cnt) in nr_children.items() if cnt == 1 and p != 0 and p not in self.genomes)
             self.all_hog_levels = frozenset(
-                [l for l in self.tax_table["Name"] if forbidden_chars.search(l.decode()) is None]
+                [
+                    l["Name"]
+                    for l in self.tax_table
+                    if l["NCBITaxonId"] not in remove and forbidden_chars.search(l["Name"].decode()) is None
+                ]
             )
 
     def _table_idx_from_numeric(self, tids):
@@ -3016,6 +3025,10 @@ class Taxonomy(object):
     @lazy_property
     def taxid_to_age(self):
         return {r["NCBITaxonId"]: r["Age"] for r in self.tax_table}
+
+    @property
+    def root(self):
+        return self._get_root_taxon()
 
     def approx_search(self, pattern):
         if self._approx_matcher is None:

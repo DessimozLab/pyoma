@@ -133,10 +133,20 @@ def build_relevant_taxid_mapping(conf):
     gs = pandas.read_csv(conf.gs_tsv, sep="\t")
     ncbi_taxids = set(gs["OriginalNCBITaxonId"])
     relevant_taxids = xref_build.load_relevant_taxids(ncbi_taxids, omataxonomy.Taxonomy(conf.tax_sqlite))
-    ncbi2oma = dict(zip(gs["OriginalNCBITaxonId"], gs["NCBITaxonId"]))
+    with tables.open_file(conf.db, "r") as db:
+        genome = pandas.DataFrame(db.get_node("/Genome").read())
+        genome["UniProtSpeciesCode"] = genome["UniProtSpeciesCode"].apply(bytes.decode)
+    gs = gs.set_index("UniProtSpeciesCode").join(genome.set_index("UniProtSpeciesCode"), how="inner", rsuffix="_db")
+    ncbi2oma = collections.defaultdict(set)
+    for ncbi, oma in zip(gs["OriginalNCBITaxonId"], gs["NCBITaxonId_db"]):
+        ncbi2oma[ncbi].add(oma)
+
     mapped = {}
     for ncbi, rel_genome_ncbi_tax in relevant_taxids.items():
-        mapped[ncbi] = set(ncbi2oma[k] for k in rel_genome_ncbi_tax)
+        genome_ncbis = set()
+        for k in rel_genome_ncbi_tax:
+            genome_ncbis |= ncbi2oma[k]
+        mapped[ncbi] = genome_ncbis
     with auto_open(conf.out, "wb") as fh:
         pickle.dump(mapped, fh)
 
@@ -353,6 +363,7 @@ def parse_command_line_args():
     )
     relevant_taxid_map_parser.set_defaults(func=build_relevant_taxid_mapping)
     relevant_taxid_map_parser.add_argument("--gs-tsv", required=True, help="Path to GS tsv file")
+    relevant_taxid_map_parser.add_argument("--db", required=True, help="Path to database in hdf5 format")
     relevant_taxid_map_parser.add_argument("--tax-sqlite", required=False, help="Path to tax-sqlite file")
     relevant_taxid_map_parser.add_argument("--out", required=True, help="Path to output pickle file")
 

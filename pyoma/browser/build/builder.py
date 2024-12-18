@@ -72,7 +72,7 @@ class OmaGroupsProvider:
 
 
 class XrefStorer:
-    def __init__(self, path, mode: str = "w", index_cols: Optional[List] = None):
+    def __init__(self, path, mode: str = "w", index_cols: Optional[List] = None, suffix_col: Optional[str] = None):
         self.path = path
         self.mode = mode
         if index_cols is not None:
@@ -80,6 +80,10 @@ class XrefStorer:
             if unknown_cols:
                 raise ValueError("Unknown columns for indexing: {}".format(unknown_cols))
         self.index_cols = index_cols
+        if suffix_col is not None:
+            if suffix_col not in tablefmt.XRefTable.columns.keys():
+                raise ValueError("Unknown columns building suffix index: {}".format(suffix_col))
+        self.suffix_col = suffix_col
 
     def __enter__(self):
         self.h5 = tables.open_file(
@@ -103,6 +107,8 @@ class XrefStorer:
                 create_index_for_columns(self.ec, "EntryNr")
             if "XRefId" in self.index_cols:
                 create_index_for_columns(self.ec, "ECacc")
+        if self.suffix_cols is not None:
+            suffixsearch.create_suffix_index(self.xref, self.suffix_col)
         self.h5.close()
 
     def flush(self):

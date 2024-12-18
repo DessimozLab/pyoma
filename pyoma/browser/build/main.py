@@ -28,6 +28,7 @@ from ..convert import (
     PfamDomainNameParser,
     augment_genomes_json_download_file,
 )
+from ..xref_contrib import reduce_xrefs
 from ...common import auto_open
 
 logger = logging.getLogger(__name__)
@@ -183,6 +184,10 @@ def collect_xrefs(conf):
 
 def combine_xrefs(conf):
     xref_build.combine_xrefs(xrefs=conf.xrefs, out=conf.out)
+
+
+def build_reduced_xrefs(conf):
+    reduce_xrefs(conf.db, conf.xrefs, conf.out, nr_procs=conf.nr_procs)
 
 
 def import_go(conf):
@@ -423,6 +428,15 @@ def parse_command_line_args():
     combine_xref_parser.set_defaults(func=combine_xrefs)
     combine_xref_parser.add_argument("--xrefs", nargs="+", help="Path to input xref files in hdf5 format")
     combine_xref_parser.add_argument("--out", required=True, help="Output path for the combined hdf5 file")
+
+    reduced_xref_parser = subparsers.add_parser(
+        "reduced-xrefs", help="Build a reduced set of xrefs for quick search and lookup"
+    )
+    reduced_xref_parser.set_defaults(func=build_reduced_xrefs)
+    reduced_xref_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
+    reduced_xref_parser.add_argument("--xrefs", required=True, help="Path to the hdf5 file containing all xrefs")
+    reduced_xref_parser.add_argument("--out", required=True, help="Output path for the reduced hdf5 file")
+    reduced_xref_parser.add_argument("--nr-procs", type=int, help="Number of processes to use")
 
     go_import_parser = subparsers.add_parser(
         "import-go", help="Import Gene Ontology ontology (obo file) and annotations (gaf file)"

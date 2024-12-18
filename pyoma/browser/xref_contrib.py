@@ -294,13 +294,15 @@ class XRefReducer(BaseProfileBuilderProcess):
         return res, desc
 
 
-def reduce_xrefs(h5_path, outpath=None, nr_procs=None):
+def reduce_xrefs(h5_path, xref_path=None, outpath=None, nr_procs=None):
     pipeline = Pipeline()
     if nr_procs is None:
         nr_procs = multiprocessing.cpu_count()
 
+    if xref_path is None:
+        xref_path = h5_path
     pipeline.add_stage(Stage(GeneGenerator, nr_procs=1, h5_path=h5_path))
-    pipeline.add_stage(Stage(XRefReducer, nr_procs=nr_procs, h5_path=h5_path))
+    pipeline.add_stage(Stage(XRefReducer, nr_procs=nr_procs, h5_path=xref_path))
     pipeline.add_stage(Stage(XRefIndexHandler, nr_procs=1, outfile=outpath))
     print("setup pipeline, about to start it")
     pipeline.run()

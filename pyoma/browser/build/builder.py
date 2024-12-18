@@ -277,6 +277,27 @@ class DBBuilder(DarwinExporter):
                     compute_ortholog_types(data, genome_offs)
                 self._write_to_table(vp_tab, data)
                 create_index_for_columns(vp_tab, "EntryNr1")
+            if "within" not in rel_node_for_genome:
+                df = pandas.DataFrame(self.h5.get_node(rel_node_for_genome, "VPairs").read())
+                df_with_ss_paralogs = df.loc[df["RelType"] > 1, ["EntryNr1", "EntryNr2"]].set_index("EntryNr2")
+                cp = df_with_ss_paralogs.join(df_with_ss_paralogs, rsuffix="_2")
+                cp = cp[cp["EntryNr1"] < cp["EntryNr1_2"]].reset_index()
+                cp["EntryNr2"] = cp["EntryNr1_2"]
+                cp["RelType"] = tablefmt.PairwiseRelationTable.columns.get("RelType").enum["close_paralog"]
+                cols = list(tablefmt.PairwiseRelationTable.columns)
+                dflt_cols = set(cols) - set(cp.columns)
+                for col in dflt_cols:
+                    cp[col] = tablefmt.PairwiseRelationTable.columns[col].dflt
+                cp = cp[cols]
+                dt = {k: v.dtype for k, v in tablefmt.PairwiseRelationTable.columns.items()}
+                within_tab = self.h5.create_table(
+                    rel_node_for_genome,
+                    "within",
+                    tablefmt.PairwiseRelationTable,
+                    obj=cp.to_records(index=False, column_dtypes=dt),
+                    expectedrows=len(cp),
+                )
+                create_index_for_columns(within_tab, "EntryNr1")
 
     def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):
         # add ' ' after each sequence (Ascii is smaller than

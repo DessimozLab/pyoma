@@ -283,7 +283,7 @@ class DBBuilder(DarwinExporter):
                 cp = df_with_ss_paralogs.join(df_with_ss_paralogs, rsuffix="_2")
                 cp = cp[cp["EntryNr1"] < cp["EntryNr1_2"]].reset_index()
                 cp["EntryNr2"] = cp["EntryNr1_2"]
-                cp["RelType"] = tablefmt.PairwiseRelationTable.columns.get("RelType").enum["close_paralog"]
+                cp["RelType"] = tablefmt.PairwiseRelationTable.columns.get("RelType").enum["close paralog"]
                 cols = list(tablefmt.PairwiseRelationTable.columns)
                 dflt_cols = set(cols) - set(cp.columns)
                 for col in dflt_cols:

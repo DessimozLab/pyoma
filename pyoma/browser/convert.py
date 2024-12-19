@@ -672,12 +672,12 @@ class DarwinExporter(object):
             tab.modify_column(column=merged[source].to_numpy(), colname=target)
         tab.flush()
 
-    def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):
+    def _add_sequence(self, sequence, row, sequence_array, typ="Seq"):
         # add ' ' after each sequence (Ascii is smaller than
         # any AA, allows to build PAT array with split between
         # sequences.
         seqLen = len(sequence) + 1
-        row[typ + "BufferOffset"] = off
+        row[typ + "BufferOffset"] = len(sequence_array)
         row[typ + "BufferLength"] = seqLen
         if typ == "CDNA":
             sequence = sequence.replace("X", "N")
@@ -689,7 +689,6 @@ class DarwinExporter(object):
         sequence_array.append(seqNumpyObj)
         if typ == "Seq":
             row["MD5ProteinHash"] = hashlib.md5(sequence.encode("utf-8")).hexdigest()
-        return seqLen
 
     def _write_to_table(self, tab, data):
         if len(data) > 0:

@@ -299,24 +299,11 @@ class DBBuilder(DarwinExporter):
                 )
                 create_index_for_columns(within_tab, "EntryNr1")
 
-    def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):
-        # add ' ' after each sequence (Ascii is smaller than
-        # any AA, allows to build PAT array with split between
-        # sequences.
-        seq_len = len(sequence) + 1
-        row[typ + "BufferOffset"] = off
-        row[typ + "BufferLength"] = seq_len
-        if typ == "CDNA":
-            sequence = sequence.replace("X", "N")
-        seq_numpy_obj = numpy.ndarray(
-            (seq_len,),
-            buffer=(sequence + " ").encode("utf-8"),
-            dtype=tables.StringAtom(1),
-        )
-        sequence_array.append(seq_numpy_obj)
-        if typ == "Seq":
-            row["MD5ProteinHash"] = hashlib.md5(sequence.encode("utf-8")).hexdigest()
-        return seq_len
+    def _add_desc(self, desc, row, array):
+        row["DescriptionOffset"] = len(array)
+        row["DescriptionLength"] = len(desc)
+        desc_arr = numpy.ndarray((len(desc),), buffer=desc.encode("utf-8"), dtype=tables.StringAtom(1))
+        array.append(desc_arr)
 
     def add_proteins(self, genome_files, oma_group_provider, xref_collector):
         code_to_file = {os.path.basename(f).split(".")[0]: f for f in genome_files}
@@ -345,7 +332,15 @@ class DBBuilder(DarwinExporter):
             "concatenated cDNA sequences",
             expectedrows=3 * nr_aa + nr_prot,
         )
-        seq_off, cdna_off = 0, 0
+        desc_arr = self.h5.create_earray(
+            prot_grp,
+            "DescriptionBuffer",
+            tables.StringAtom(1),
+            (0,),
+            "concatenated protein descriptions",
+            expectedrows=100 * nr_prot,
+        )
+
         for gs in gs_node.iterrows():
             genome = gs["UniProtSpeciesCode"].decode()
             with open(code_to_file[genome], "r") as fd:
@@ -370,8 +365,9 @@ class DBBuilder(DarwinExporter):
                 prot_tab.row["EntryNr"] = e_nr
                 prot_tab.row["OmaGroup"] = oma_group_provider.get_oma_group(genome, nr + 1)
 
-                seq_off += self._add_sequence(data["seqs"][nr], prot_tab.row, seq_arr, seq_off)
-                cdna_off += self._add_sequence(data["cdna"][nr], prot_tab.row, cdna_arr, cdna_off, "CDNA")
+                self._add_sequence(data["seqs"][nr], prot_tab.row, seq_arr)
+                self._add_sequence(data["cdna"][nr], prot_tab.row, cdna_arr, "CDNA")
+                self._add_desc(data["de"][nr], prot_tab.row, desc_arr)
 
                 prot_tab.row["Chromosome"] = data["chrs"][nr]
                 prot_tab.row["OmaHOG"] = b""  # will be assigned later

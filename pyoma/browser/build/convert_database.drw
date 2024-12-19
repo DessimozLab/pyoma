@@ -53,13 +53,20 @@ od:
 tab['locs'] := locs:
 tab['ids'] := [seq(SearchDelim('; ', SearchTag('ID', Entry(i)))[1], i=1..tot_entries)];
 tab['acs'] := [seq(SearchDelim('; ', SearchTag('AC', Entry(i))), i=1..tot_entries)];
+tab['de'] := [seq(SearchTag('DE', Entry(i)), i=1..tot_entries)];
 
-#TODO: fix thses things!
-    #if SubGenome[g]<>0 then
-    #    tab['subgenome'] := [seq(SubGenome[g,i], i=1..GS[g,tot_entries])]
-    #else
-    #    tab['subgenome'] := [seq('', GS[g,tot_entries])]
-    #fi:
+if is_polyploid = 'true' then
+    err := traperror(ReadProgram(subgenome_path));
+    if err=lasterror then
+        error('cannot load subgenome file from '.subgenome_path);
+    fi:
+    subg := SubGenome[genome]: nams := SubNames[genome]:
+    dat := CreateString(tot_entries):
+    for k to length(subg) do for sg in subg[k] do
+        dat[sg[1]] := nams[k]:
+    od od:
+    tab['subgenome'] := dat:
+fi:
 
 Set(printgc=false);
 OpenWriting(outdir.'/'.genome.'.json');

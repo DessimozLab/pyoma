@@ -99,7 +99,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         self.genenames = collections.defaultdict(list)
         self.spids = collections.defaultdict(list)
         self._buffer = []
-        self.kwi = KeywordIndexer()
+        self.kwi = KeywordIndexer(stopwords=set([]))
 
     def _sort_and_store_xrefs(self):
         data = self.xref_idx.read()

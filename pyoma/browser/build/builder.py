@@ -107,7 +107,7 @@ class XrefStorer:
                 create_index_for_columns(self.ec, "EntryNr")
             if "XRefId" in self.index_cols:
                 create_index_for_columns(self.ec, "ECacc")
-        if self.suffix_cols is not None:
+        if self.suffix_col is not None:
             suffixsearch.create_suffix_index(self.xref, self.suffix_col)
         self.h5.close()
 

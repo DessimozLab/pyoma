@@ -213,23 +213,31 @@ class GeneGenerator(SourceProcess):
 
 
 class XRefReducer(BaseProfileBuilderProcess):
-    def __init__(self, h5_path, **kwargs):
+    def __init__(self, xref_path, db_path=None, **kwargs):
         super().__init__(**kwargs)
-        self.h5_path = h5_path
-        self.h5 = None
+        self.xref_path = xref_path
+        self.db_path = db_path
+        self.xref = None
+        self.db = None
         self.xref_tab = None
         self.xref_eof = None
 
     def setup(self):
-        self.h5 = tables.open_file(self.h5_path)
-        self.xref_tab = self.h5.get_node("/XRef")
+        self.xref = tables.open_file(self.xref_path)
+        self.xref_tab = self.xref.get_node("/XRef")
         try:
-            self.xref_eof = self.h5.get_node("/XRef_EntryNr_offset").read()
+            self.xref_eof = self.xref.get_node("/XRef_EntryNr_offset").read()
         except tables.NoSuchNodeError:
             pass
+        if self.db_path is not None and self.db_path != self.xref_path:
+            self.db = tables.open_file(self.db_path)
+        else:
+            self.db = self.xref
 
     def finalize(self):
-        self.h5.close()
+        if self.db != self.xref:
+            self.db.close()
+        self.xref.close()
 
     def _load_xrefs_with_entry_offset(self, gene):
         xrefs = pandas.DataFrame(
@@ -267,8 +275,8 @@ class XRefReducer(BaseProfileBuilderProcess):
     def _load_descriptions(self, gene):
         query = " | ".join([f"((EntryNr >= {s.start}) & (EntryNr < {s.stop}))" for s in gene.entrynr_slices()])
         descriptions = []
-        desc_buf = self.h5.get_node("/Protein/DescriptionBuffer")
-        for row in self.h5.get_node("/Protein/Entries").where(query):
+        desc_buf = self.db.get_node("/Protein/DescriptionBuffer")
+        for row in self.db.get_node("/Protein/Entries").where(query):
             desc = (
                 desc_buf[row["DescriptionOffset"] : row["DescriptionOffset"] + row["DescriptionLength"]]
                 .tobytes()
@@ -302,7 +310,7 @@ def reduce_xrefs(h5_path, xref_path=None, outpath=None, nr_procs=None):
     if xref_path is None:
         xref_path = h5_path
     pipeline.add_stage(Stage(GeneGenerator, nr_procs=1, h5_path=h5_path))
-    pipeline.add_stage(Stage(XRefReducer, nr_procs=nr_procs, h5_path=xref_path))
+    pipeline.add_stage(Stage(XRefReducer, nr_procs=nr_procs, xref_path=xref_path, db_path=h5_path))
     pipeline.add_stage(Stage(XRefIndexHandler, nr_procs=1, outfile=outpath))
     print("setup pipeline, about to start it")
     pipeline.run()

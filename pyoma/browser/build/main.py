@@ -197,6 +197,11 @@ def import_go(conf):
     xref_build.import_go(obo=conf.obo, gafs=conf.gaf, xref_db=conf.xref_db, relevant_taxid=rel_taxids, out=conf.out)
 
 
+def store_summary_info(conf):
+    with DBBuilder(conf.db) as db:
+        db.update_summary_stats()
+
+
 def gen_aux_files(conf):
     from ..db import Database
 
@@ -452,6 +457,12 @@ def parse_command_line_args():
     gen_aux_file_parser.set_defaults(func=gen_aux_files)
     gen_aux_file_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
     gen_aux_file_parser.add_argument("--out-dir", default="./", help="Path to output directory")
+
+    update_summary_parser = subparsers.add_parser("update-summary", help="Update summary table")
+    update_summary_parser.set_defaults(func=store_summary_info)
+    update_summary_parser.add_argument(
+        "--db", required=True, help="Path to database hdf5 database. This file will be modified!"
+    )
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

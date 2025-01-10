@@ -475,7 +475,7 @@ def _fetch_combine_and_reduce_input_data(h5_handles, table_path, sort_columns, d
 
 
 def combine_xrefs(xrefs: List[os.PathLike], out: os.PathLike):
-    with XrefStorer(out, index_cols=["EntryNr", "XRefId", "XRefSource"]) as storer:
+    with XrefStorer(out, index_cols=["EntryNr", "XRefId", "XRefSource"], suffix_col="XRefId") as storer:
         h5hs = [tables.open_file(fn, mode="r") for fn in xrefs]
         try:
             _fetch_combine_and_reduce_input_data(

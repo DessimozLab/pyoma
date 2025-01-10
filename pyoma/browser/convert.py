@@ -1522,12 +1522,18 @@ def only_pfam_or_cath_domains(iterable):
 def filter_duplicated_domains(iterable):
     """filter duplicated domain annotations that come from different proteins
     with the exact same sequence."""
-    seen = set([])
+    max_cache_size = 2**20 - 100
+    seen_set = set()
+    seen = collections.deque(maxlen=max_cache_size)  # Fixed-size cache
     ignored = 0
     for dom in iterable:
-        if not dom in seen:
-            seen.add(dom)
+        if not dom in seen_set:
             yield dom
+            seen.append(dom)
+            seen_set.add(dom)
+            if len(seen) > max_cache_size:
+                removed = seen.popleft()
+                seen_set.remove(removed)
         else:
             ignored += 1
     common.package_logger.info("skipped {} duplicated domains. {} distinct domains yielded".format(ignored, len(seen)))

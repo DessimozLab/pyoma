@@ -204,7 +204,6 @@ def store_summary_info(conf):
         db.add_hog_domain_prevalence()
         db.add_group_metadata()
         db.add_roothog_metadata()
-        db.add_hog_domain_prevalence()
 
 
 def gen_aux_files(conf):

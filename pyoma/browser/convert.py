@@ -1524,7 +1524,7 @@ def filter_duplicated_domains(iterable):
     with the exact same sequence."""
     max_cache_size = 2**20 - 100
     seen_set = set()
-    seen = collections.deque(maxlen=max_cache_size)  # Fixed-size cache
+    seen = collections.deque(maxlen=max_cache_size + 100)  # Fixed-size cache
     ignored = 0
     for dom in iterable:
         if not dom in seen_set:

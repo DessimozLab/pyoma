@@ -28,6 +28,7 @@ from ..convert import (
     PfamDomainNameParser,
     augment_genomes_json_download_file,
 )
+from ..models import Genome
 from ..xref_contrib import reduce_xrefs
 from ...common import auto_open
 
@@ -200,10 +201,24 @@ def import_go(conf):
 def store_summary_info(conf):
     with DBBuilder(conf.db) as db:
         db.update_summary_stats()
+        db.add_hog_domain_prevalence()
+        db.add_group_metadata()
+        db.add_roothog_metadata()
+        db.add_hog_domain_prevalence()
 
 
 def gen_aux_files(conf):
     from ..db import Database
+
+    def genome_2_flatgenome_json_dict(g: Genome):
+        return {
+            "id": g.uniprot_species_code,
+            "name": g.sciname,
+            "last_updated": g.modification_date("%b %d, %Y"),
+            "nr_proteins": g.nr_entries,
+            "source": g.release,
+            "taxid": g.ncbi_taxon_id,
+        }
 
     with Database(conf.db) as db:
         with auto_open(join(conf.out_dir, "genomes.json"), "wt") as fh:
@@ -215,6 +230,9 @@ def gen_aux_files(conf):
             fh.write(db.tax.newick(leaf="sciname", internal="sciname", quoted=True))
         with auto_open(join(conf.out_dir, "speciestree.phyloxml"), "wb") as fh:
             fh.write(db.tax.as_phyloxml())
+        with auto_open(join(conf.out_dir, "flatgenomes.json"), "wt") as fh:
+            genomes_list = [genome_2_flatgenome_json_dict(g) for g in db.tax.genomes.values()]
+            json.dump(genomes_list, fh)
 
 
 def parse_command_line_args():

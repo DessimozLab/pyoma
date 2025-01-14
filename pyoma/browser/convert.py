@@ -1583,14 +1583,12 @@ class RootHOGMetaDataLoader(object):
 
     def _create_db_objects(self, nrows):
         key_path = os.path.join(os.path.dirname(self.meta_data_path), "KeywordBuffer")
-        try:
-            self.db.get_node(self.meta_data_path)
-            self.db.remove_node(self.meta_data_path)
-            self.db.remove_node(key_path)
-        except tables.NoSuchNodeError:
-            pass
         root, name = self.meta_data_path.rsplit("/", 1)
-        grptab = self.db.create_table(root, name, self.tab_description, expectedrows=nrows, createparents=True)
+        try:
+            self.db.remove_node(key_path)
+            grptab = self.db.get_node(self.meta_data_path)
+        except tables.NoSuchNodeError:
+            grptab = self.db.create_table(root, name, self.tab_description, expectedrows=nrows, createparents=True)
         buffer = self.db.create_earray(
             root,
             "KeywordBuffer",
@@ -1602,19 +1600,34 @@ class RootHOGMetaDataLoader(object):
         return grptab, buffer
 
     def _fill_data_into_db(self, encoded_data, grp_tab, key_buf):
-        row = grp_tab.row
-        buf_pos = 0
-        keywords = encoded_data["Keywords"]
-        for i in range(len(keywords)):
-            row["FamNr"] = i + 1
-            row["KeywordOffset"] = buf_pos
-            row["KeywordLength"] = len(keywords[i])
-            row.append()
-            key = numpy.ndarray((len(keywords[i]),), buffer=keywords[i], dtype=tables.StringAtom(1))
-            key_buf.append(key)
-            buf_pos += len(keywords[i])
-        grp_tab.flush()
+        assert len(key_buf) == 0
+        nr_groups = len(encoded_data["Keywords"])
+        famnr = numpy.arange(1, nr_groups + 1)
+        kwoff = numpy.zeros(nr_groups, dtype=numpy.int32)
+        kwlen = numpy.zeros(nr_groups, dtype=numpy.int32)
+        for i, kw in enumerate(encoded_data["Keywords"]):
+            kwoff[i] = len(key_buf)
+            kwlen[i] = len(kw)
+            kwa = numpy.ndarray((len(kw),), buffer=kw, dtype=tables.StringAtom(1))
+            key_buf.append(kwa)
         key_buf.flush()
+
+        if len(grp_tab) > 0:
+            assert (
+                len(grp_tab) == nr_groups
+            ), f"existing {grp_tab} table has unexpected number of rows: {len(grp_tab)} vs {nr_groups}"
+            fam_nr_col = grp_tab.read(field="FamNr")
+            assert numpy.all(fam_nr_col == famnr), f"{grp_tab} is not sorted by FamNr"
+            grp_tab.modify_column(column=kwoff, colname="KeywordOffset")
+            grp_tab.modify_column(column=kwlen, colname="KeywordLength")
+        else:
+            row = grp_tab.row
+            for i in range(nr_groups):
+                row["FamNr"] = i + 1
+                row["KeywordOffset"] = kwoff[i]
+                row["KeywordLength"] = kwlen[i]
+                row.append()
+            grp_tab.flush()
 
     def _create_indexes(self, grp_tab):
         create_index_for_columns(grp_tab, "FamNr")

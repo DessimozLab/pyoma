@@ -502,6 +502,7 @@ class DBBuilder(DarwinExporter):
             )
         entry_tab.modify_column(0, len(entry_tab), 1, column=alt_splice, colname="AltSpliceVariant")
         entry_tab.flush()
+        self.update_nr_genes()
 
     def _identify_main_variants(self, splice_groups, splice_arr, entries, offset, vp_tab):
         for grp in splice_groups:
@@ -532,3 +533,13 @@ class DBBuilder(DarwinExporter):
 
             # no orthologs for any variant. choose the longest variant as main one.
             splice_arr[idx + offset] = ent["EntryNr"][numpy.argmax(ent["SeqBufferLength"])]
+
+    def update_nr_genes(self):
+        etab = self.h5.get_node("/Protein/Entries")
+        for row in self.h5.get_node("/Genome"):
+            rng = slice(row["EntryOff"], row["EntryOff"] + row["TotEntries"], 1)
+            row["TotGenes"] = common.count_elements(
+                etab.where("(EntryNr == AltSpliceVariant) | (AltSpliceVariant == 0)", start=rng.start, stop=rng.stop)
+            )
+            row.update()
+        etab.flush()

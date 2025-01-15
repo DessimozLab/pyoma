@@ -1585,10 +1585,14 @@ class RootHOGMetaDataLoader(object):
         key_path = os.path.join(os.path.dirname(self.meta_data_path), "KeywordBuffer")
         root, name = self.meta_data_path.rsplit("/", 1)
         try:
-            self.db.remove_node(key_path)
             grptab = self.db.get_node(self.meta_data_path)
         except tables.NoSuchNodeError:
             grptab = self.db.create_table(root, name, self.tab_description, expectedrows=nrows, createparents=True)
+        else:
+            try:
+                self.db.remove_node(key_path)
+            except tables.NoSuchNodeError:
+                pass
         buffer = self.db.create_earray(
             root,
             "KeywordBuffer",

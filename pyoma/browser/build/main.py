@@ -289,7 +289,7 @@ def parse_command_line_args():
     vp_parser = subparsers.add_parser("vps", help="Adding pairwise orthologs")
     vp_parser.set_defaults(func=phase_vps)
     vp_parser.add_argument("--db", required=True, help="Path to hdf5 database containing genomes")
-    vp_parser.add_argument("--vps-base", required=True, help="Folder where all the pairwise orthologs are stored")
+    vp_parser.add_argument("--vps-base", required=False, help="Folder where all the pairwise orthologs are stored")
     vp_parser.add_argument("--hdf5-out", required=True, help="Path to store pairwise orthologs in HDF5")
 
     domain_parser = subparsers.add_parser(

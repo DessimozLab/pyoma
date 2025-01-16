@@ -300,8 +300,8 @@ def parse_command_line_args():
     domain_parser.add_argument("--hdf5-out", required=True, help="Path to store domain annotations in HDF5")
     domain_parser.add_argument(
         "--domains",
-        required=True,
-        nargs="+",
+        nargs="*",
+        default=[],
         help="List filenames containing domain annotations for protein sequence hashes",
     )
     domain_parser.add_argument(

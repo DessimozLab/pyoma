@@ -66,7 +66,7 @@ class OmaGroupsProvider:
 
     def get_oma_group(self, genome, nr):
         try:
-            return self.data[str(genome)][str(nr)]
+            per_genome = self.data[str(genome)]
         except KeyError:
             return 0
 

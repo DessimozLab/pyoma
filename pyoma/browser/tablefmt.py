@@ -64,7 +64,7 @@ class ProteinTable(tables.IsDescription):
     LocusEnd = tables.UInt32Col(pos=8)
     LocusStrand = tables.Int8Col(pos=9, dflt=1)
     AltSpliceVariant = tables.Int32Col(pos=10, dflt=0)
-    CanonicalId = tables.StringCol(20, pos=11, dflt=b"")
+    CanonicalId = tables.StringCol(255, pos=11, dflt=b"")
     CDNABufferOffset = tables.UInt64Col(pos=12)
     CDNABufferLength = tables.UInt32Col(pos=13)
     MD5ProteinHash = tables.StringCol(32, pos=14)

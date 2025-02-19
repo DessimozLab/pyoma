@@ -472,6 +472,52 @@ class OrthoXMLGeneIdParserGeneralProtID(OrthoXMLGeneIdParserWithOmaProtId):
         super()._read_from_h5(h5)
         self._prot_ids = h5.get_node("/Protein/Entries").read(field="CanonicalId")
 
+    def process_species(self, node):
+        assert node.tag == "{http://orthoXML.org/2011/}species"
+        sp_name = node.get("name").encode("utf-8")
+        try:
+            sp = self._gstab[self._gstab["SciName"] == sp_name][0]
+        except IndexError:
+            try:
+                sp = self._gstab[self._gstab["UniProtSpeciesCode"] == sp_name][0]
+            except IndexError:
+                logger.error(
+                    f"no species found for {sp_name.decode()} in species table using SciName nor UniProtSpeciesCode"
+                )
+                raise RuntimeError(f"species {sp_name.decode()} not found.")
+        sp_code = sp["UniProtSpeciesCode"].decode()
+        xml_taxonId = int(node.get("taxonId"))
+
+        genes = []
+        sp_genes = {
+            gene.get("id"): gene.get("protId").encode("utf-8")
+            for gene in node.findall(".//{http://orthoXML.org/2011/}gene")
+        }
+        max_prot_id_len = min(max(len(z) for z in sp_genes.values()), max(len(z) for z in self._prot_ids))
+        prot_ids = numpy.fromiter(sp_genes.values(), dtype=f"S{max_prot_id_len}")
+        idx = numpy.searchsorted(self._prot_ids, prot_ids, side="left", sorter=self._protkey)
+        if not numpy.all(self._prot_ids[self._protkey[idx]] == prot_ids):
+            not_found = prot_ids[self._prot_ids[self._protkey[idx]] != prot_ids]
+            logger.error(f"Couldn't find {len(not_found)} protId from {sp_name.decode()}: e.g {not_found[:3]}")
+            raise RuntimeError(f"not all IDs in OrthoXML file found in species {sp_name.decode()}")
+        enrs = self._protkey[idx] + 1
+        if not sp["EntryOff"] < enrs.min() < enrs.max() <= sp["EntryOff"] + sp["TotEntries"]:
+            logger.error(f"Not all protein map to {sp_name.decode()}")
+            raise RuntimeError(f"not all protein map to {sp_name.decode()}")
+
+        genes = []
+        for id_, prot_id, e_nr in zip(sp_genes.keys(), sp_genes.values(), enrs):
+            oma_id = f"{sp_code}{e_nr-sp['EntryOff']:05d}"
+            genes.append(Gene(id_, e_nr, prot_id, oma_id, xml_taxonId))
+
+        for genes_node in node.findall(".//{http://orthoXML.org/2011/}genes"):
+            genes_node.clear()
+        species = Species(
+            sp_code, xml_taxonId, sp["EntryOff"], sp["EntryOff"] + sp["TotEntries"], strip_namespace(node)
+        )
+        self.gene_helper.add_species(species, genes)
+        logger.info(f"added {len(enrs)} genes for species {sp_code}")
+
 
 def get_orthoxml_parser(h5path: Union[str, os.PathLike], is_oma_protId: bool = False) -> AbstractOrthoXMLParser:
     if is_oma_protId:
@@ -766,8 +812,8 @@ def parse_orthoxml(xml, handler):
             elif elem.tag == "{http://orthoXML.org/2011/}taxonomy":
                 handler.process_taxonomy(elem)
                 elem.clear()
-            elif elem.tag == "{http://orthoXML.org/2011/}scoreDef":
-                handler.process_score_def(elem)
+            elif elem.tag == "{http://orthoXML.org/2011/}scores":
+                handler.process_scores(elem)
             elif elem.tag == "{http://orthoXML.org/2011/}orthoXML":
                 logger.info(f"Finished parsing orthoxml file. processed {nr_roothogs_parsed} roothogs.")
     handler.finish()

@@ -506,6 +506,10 @@ def copy_hdf5_recursive(source_group, target_group, stats=None):
     Recursively merge the contents of source_file into target_file using PyTables.
     Groups with the same name are merged, but datasets (leaves) with the same path are skipped.
     """
+    # Copy attributes of the root node
+    for attr in source_group._v_attrs._f_list():
+        target_group._v_attrs[attr] = source_group._v_attrs[attr]
+
     for node in source_group._v_children.values():
         if node._v_name in target_group:
             # Node exists in target, check if it's a group

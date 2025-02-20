@@ -477,19 +477,26 @@ class DBBuilder(DarwinExporter):
         self.h5.set_node_attr(kmer_lookup_arr, "k", k)
 
         # Now find the split points and construct lookup ragged array.
-        ii = 0
-        for kk in tqdm(range(len(kmers)), desc="Constructing kmer lookup"):
-            kmer = kmers.encode(kk)
-            if (ii < len(sa)) and (seqs[sa[ii] : (sa[ii] + k)] == kmer):
-                jj = ii + 1
-                while (jj < len(sa)) and (seqs[sa[jj] : (sa[jj] + k)] == kmer):
-                    jj += 1
-                kmer_lookup_arr.append(idx[ii:jj])
-                # New start
-                ii = jj
-            else:
-                # End or not found
+        t = tqdm(total=len(sa) - k, desc="Building Kmer lookup")
+        ii, tot_kmers = 0, len(kmers)
+        while ii < len(sa) - k:
+            kmer = seqs[sa[ii] : (sa[ii] + k)]
+            kk = kmers.decode(kmer)
+            # assert kk >= len(kmer_lookup_arr)
+            nr_empty_kmers = kk - len(kmer_lookup_arr)
+            for _ in range(nr_empty_kmers):
                 kmer_lookup_arr.append([])
+            jj = ii + 1
+            while (jj < len(sa)) and (seqs[sa[jj] : (sa[jj] + k)] == kmer):
+                jj += 1
+            kmer_lookup_arr.append(idx[ii:jj])
+            t.update(jj - ii)
+            # New start at next different kmer
+            ii = jj
+        # add remaining ones
+        nr_empty_kmers = tot_kmers - len(kmer_lookup_arr)
+        for _ in range(nr_empty_kmers):
+            kmer_lookup_arr.append([])
         kmer_lookup_arr.flush()
 
     def add_protein_hog_ids(self, hog_ids: numpy.array) -> None:

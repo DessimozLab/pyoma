@@ -554,3 +554,7 @@ def merge_hdf5():
             with tables.open_file(db, "r") as fin:
                 copy_hdf5_recursive(fin.root, fout.root, stats=stats)
     logger.info(stats)
+
+
+if __name__ == "__main__":
+    build_database()

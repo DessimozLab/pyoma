@@ -69,6 +69,13 @@ class OmaGroupsProvider:
             per_genome = self.data[str(genome)]
         except KeyError:
             return 0
+        try:
+            return per_genome[str(nr)]
+        except KeyError:
+            try:
+                return per_genome[nr]
+            except KeyError:
+                return 0
 
 
 class XrefStorer:

@@ -53,7 +53,6 @@ setup(
     entry_points={
         "console_scripts": [
             "oma-build=pyoma.browser.build.main:build_database",
-            "h5-merge=pyoma.browser.build.main:merge_hdf5",
         ]
     },
     package_data={"pyoma": ["browser/*.drw"]},

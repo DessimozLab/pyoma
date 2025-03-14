@@ -15,7 +15,8 @@ import tables
 from tables import PerformanceWarning
 import omataxonomy
 
-
+from .fingerprints import find_fingerprints
+from .keyword import collect_keywords
 from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
 from . import hogconvert
 from . import xref as xref_build
@@ -196,6 +197,29 @@ def import_go(conf):
         relevant_taxid_map = pickle.load(fh)
     rel_taxids = set(relevant_taxid_map.keys())
     xref_build.import_go(obo=conf.obo, gafs=conf.gaf, xref_db=conf.xref_db, relevant_taxid=rel_taxids, out=conf.out)
+
+
+def phase_keywords(conf):
+    with tables.open_file(conf.db) as h5db:
+        xref_db = None
+        if conf.xref_db is not None:
+            xref_db = tables.open_file(conf.xref_db)
+        kw_og, kw_hog = collect_keywords(h5db, xref_db)
+        if xref_db is not None:
+            xref_db.close()
+
+        with auto_open(conf.out_oma_group, "wt") as fh:
+            for grp, kw in kw_og.items():
+                fh.write(f"{grp}\t{kw}\n")
+        with auto_open(conf.out_hog, "wt") as fh:
+            for hog, kw in kw_hog.items():
+                fh.write(f"{hog}\t{kw}\n")
+
+
+def build_fingerprints(conf):
+    with auto_open(conf.out, "wt") as fh:
+        for og, fp in find_fingerprints(conf.db, conf.suffix_db).items():
+            fh.write(f"{og}\t{fp}\n")
 
 
 def store_summary_info(conf):
@@ -474,6 +498,24 @@ def parse_command_line_args():
     gen_aux_file_parser.set_defaults(func=gen_aux_files)
     gen_aux_file_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
     gen_aux_file_parser.add_argument("--out-dir", default="./", help="Path to output directory")
+
+    keyword_parser = subparsers.add_parser("keywords", help="Infer keywords for OMA Groups and HOGs")
+    keyword_parser.set_defaults(func=phase_keywords)
+    keyword_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
+    keyword_parser.add_argument("--xref-db", help="Path to xref database. If not provided, the main database is used.")
+    keyword_parser.add_argument(
+        "--out-oma-group", default="Keywords.txt", help="Path to the output oma groups keywords file"
+    )
+    keyword_parser.add_argument(
+        "--out-hog", default="RootHOG_Keywords.txt", help="Path to the output root hog keywords file"
+    )
+
+    fingerprint_parser = subparsers.add_parser("fingerprint", help="Generate fingerprint for OMA Groups")
+    fingerprint_parser.set_defaults(func=build_fingerprints)
+    fingerprint_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
+    fingerprint_parser.add_argument("--suffix-db", required=False, help="Path to suffix array file")
+    # fingerprint_parser.add_argument("--ogs", required=False, help="List of oma groups to process")
+    fingerprint_parser.add_argument("--out", required=True, help="Path to output file")
 
     update_summary_parser = subparsers.add_parser("update-summary", help="Update summary table")
     update_summary_parser.set_defaults(func=store_summary_info)

@@ -4,8 +4,11 @@ import logging
 import re
 import collections
 import numpy
+import pandas as pd
 from tqdm import tqdm
 import tables
+
+from ..decorators import timethis
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +33,8 @@ SKIPWORDS = {
 }
 
 
-def get_descriptions_for_entries(h5db: tables.File, entries: numpy.ndarray) -> Dict[int, str]:
+@timethis(logging.INFO)
+def get_descriptions_for_entries(h5db: tables.File, entries: Union[numpy.ndarray, pd.DataFrame]) -> Dict[int, str]:
     """
     Get descriptions for a numpy array of protein entries.
 
@@ -47,22 +51,34 @@ def get_descriptions_for_entries(h5db: tables.File, entries: numpy.ndarray) -> D
     """
     descriptions = {}
     desc_arr = h5db.get_node("/Protein/DescriptionBuffer")
-    for entry in entries:
-        desc = (
-            desc_arr[entry["DescriptionOffset"] : entry["DescriptionOffset"] + entry["DescriptionLength"]]
-            .tobytes()
-            .decode()
-        )
+
+    # Check if entries is a NumPy array or a DataFrame
+    if isinstance(entries, numpy.ndarray):
+        iterable = entries
+        get_value = lambda entry, key: entry[key]  # Direct access for NumPy structured array
+    elif isinstance(entries, pd.DataFrame):
+        iterable = entries.itertuples(index=False)
+        get_value = lambda entry, key: getattr(entry, key)  # Attribute access for DataFrame rows
+    else:
+        raise TypeError("entries must be a NumPy structured array or a pandas DataFrame")
+
+    for entry in tqdm(iterable, "Loading Descriptions"):
+        entry_nr = get_value(entry, "EntryNr")
+        offset = get_value(entry, "DescriptionOffset")
+        length = get_value(entry, "DescriptionLength")
+
+        desc = desc_arr[offset : offset + length].tobytes().decode()
         desc = re.split(r"\[Source:|\(ec|GO:| COG]", desc)[0]
         desc = re.sub(r"\(ec[0-9.-]+\)", " #ec# ", desc)
         desc = re.sub(r"GO:[0-9]+", " #go# ", desc)
         desc = re.sub(r" COG[0-9]+", " #cog# ", desc)
         desc = re.sub(r"transcript_id=[^ ]+", " #transcript# ", desc)
-        descriptions[entry["EntryNr"]] = desc
+        descriptions[entry_nr] = desc
     return descriptions
 
 
-def get_xrefs_for_entries(h5db: tables.File, entries: numpy.ndarray) -> Dict[int, Dict[str, str]]:
+@timethis(logging.INFO)
+def get_xrefs_for_entries(h5db: tables.File, entries: Union[numpy.ndarray, pd.DataFrame]) -> Dict[int, Dict[str, str]]:
     """
     Get cross-references for a numpy array of protein entries.
 
@@ -148,6 +164,7 @@ def clean_descriptions(descriptions: Dict[int, str], xrefs: Dict[int, Dict[str, 
         de = re.sub(r"(?<!\d)[.,()\[\]:](?!\d)", "", de)
         de = re.sub(r"\s{2,}", " ", de)
 
+        de = " ".join([x for x in de.split(" ") if x.lower() not in SKIPWORDS])
         original_descs.append(de)
         de = de.lower()
         descs.append(de)
@@ -254,6 +271,10 @@ def collect_keywords_from_entries(h5db: tables.File, entries: numpy.ndarray) -> 
     """
     descriptions = get_descriptions_for_entries(h5db, entries)
     xrefs = get_xrefs_for_entries(h5db, entries)
+    return collect_keywords_from_desc_and_xrefs(descriptions, xrefs)
+
+
+def collect_keywords_from_desc_and_xrefs(descriptions: Dict[int, str], xrefs: Dict[int, Dict[str, str]]) -> str:
     idc = collections.Counter(x["SourceID"] for x in xrefs.values() if len(x["SourceID"]) > 0)
     best_id = "-"
     if len(idc) > 0 and idc.most_common(1)[0][1] > 1:
@@ -266,3 +287,64 @@ def collect_keywords_from_entries(h5db: tables.File, entries: numpy.ndarray) -> 
     else:
         kw = get_most_common_caps(kw, orig_desc)
     return kw
+
+
+@timethis(logging.INFO)
+def load_all_entries(h5db: tables.File) -> pd.DataFrame:
+    """
+    Load all protein entries from the HDF5 database.
+
+    This function loads all protein entries from the HDF5 database.
+    It returns a numpy array of protein entries.
+
+    Parameters:
+    h5db (tables.File): The HDF5 database file.
+
+    Returns:
+    pd.DataFrame: A pandas dataframe with minimal information on protein entries.
+    """
+    cols = ["EntryNr", "DescriptionOffset", "DescriptionLength", "OmaGroup", "RootHOG"]
+    tab: tables.Table = h5db.get_node("/Protein/Entries")
+    stack = []
+    step = 50 * tab.chunkshape[0]
+
+    def parse_hog(h):
+        return int(re.search(rb"HOG:[A-Z]?(\d+)", h).group(1)) if h else 0
+
+    for i in tqdm(range(0, len(tab), step), "Loading Entries chunks"):
+        chunk = pd.DataFrame(tab[i : i + step])
+        chunk["RootHOG"] = chunk["OmaHOG"].apply(parse_hog)
+        subchunk = chunk.loc[(chunk["RootHOG"] > 0) | (chunk["OmaGroup"] > 0), cols]
+        stack.append(subchunk)
+    entries_df = pd.concat(stack, ignore_index=True, copy=False)
+    return entries_df
+
+
+def collect_keywords(h5db: tables.File, xref_db: tables.File = None) -> Tuple[Dict[int, str], Dict[int, str]]:
+    """
+    Collect keywords for all OMA Groups or OMA HOGs.
+
+    This function collects keywords for all OMA Groups or OMA HOGs from the HDF5 database.
+    """
+    if xref_db is None:
+        xref_db = h5db
+    entries = load_all_entries(h5db)
+    descriptions = get_descriptions_for_entries(xref_db, entries)
+    xrefs = get_xrefs_for_entries(xref_db, entries)
+
+    def get_keywords_for_group(group):
+        res = {}
+        entries.sort_values(by=[group, "EntryNr"], inplace=True)
+        for grp, gdf in tqdm(entries.groupby(by=group)):
+            if grp == 0:
+                continue
+            kw = collect_keywords_from_desc_and_xrefs(
+                {en: descriptions[en] for en in gdf["EntryNr"]},
+                {en: xrefs.get(en, collections.defaultdict(str)) for en in gdf["EntryNr"]},
+            )
+            res[int(grp)] = kw
+        return res
+
+    oma_group_keywords = get_keywords_for_group("OmaGroup")
+    hog_keywords = get_keywords_for_group("RootHOG")
+    return oma_group_keywords, hog_keywords

@@ -17,7 +17,7 @@ import re
 import resource
 import subprocess
 import time
-from typing import List, Iterable, Tuple, Union, Mapping
+from typing import List, Iterable, Tuple, Union, Mapping, Dict
 from builtins import str, chr, range, object, super, bytes
 from tempfile import NamedTemporaryFile
 
@@ -1540,20 +1540,20 @@ def filter_duplicated_domains(iterable):
 
 
 class RootHOGMetaDataLoader(object):
-    """RootHOG Meta data extractor.
+    """RootHOG metadata extractor.
 
     This class provides the means to import the Keywords of the RootHOGs
     into the hdf5 database. The data is stored under in the node defined
     by :attr:`meta_data_path`, which defaults to /RootHOG/MetaData.
     """
 
-    keyword_name = "RootHOG_Keywords.drw"
-    expected_keys = ["Keywords"]
+    expected_keys: dict[str, str] = {"Keywords": "RootHOG_Keywords.txt"}
     tab_description = tablefmt.RootHOGMetaTable
     meta_data_path = "/RootHOG/MetaData"
 
-    def __init__(self, db):
+    def __init__(self, db, src_path=None):
         self.db = db
+        self.src_path = src_path if src_path is not None else "./"
 
     def add_data(self):
         common.package_logger.info("adding %s", self.meta_data_path)
@@ -1637,7 +1637,22 @@ class RootHOGMetaDataLoader(object):
         create_index_for_columns(grp_tab, "FamNr")
 
     def _load_data(self):
-        return callDarwinExport("GetRootHOGData()")
+        all_data = {}
+        for key, fn in self.expected_keys.items():
+            data = []
+            with open(fn, "rt") as fh:
+                reader = csv.reader(fh, dialect="excel-tab")
+                row = next(reader)
+                try:
+                    grp = int(row[0])
+                    data.append((grp, row[1]))
+                except ValueError:
+                    pass  # skip header
+                for row in reader:
+                    grp = int(row[0])
+                    data.append((grp, row[1]))
+            all_data[key] = [x[1] for x in sorted(data)]
+        return all_data
 
     def _get_nr_of_groups(self):
         tab = self.db.get_node("/HogLevel")
@@ -1650,13 +1665,12 @@ class RootHOGMetaDataLoader(object):
         pass
 
     def _check_textfiles_avail(self):
-        rootdir = os.getenv("DARWIN_BROWSERDATA_PATH", "")
-        fn = os.path.join(rootdir, self.keyword_name)
-        return os.path.exists(fn)
+        expected_files = [os.path.join(self.src_path, fn) for fn in self.expected_keys.values()]
+        return all(os.path.exists(fn) for fn in expected_files)
 
 
 class OmaGroupMetadataLoader(RootHOGMetaDataLoader):
-    """OMA Group Meta data extractor.
+    """OMA Group metadata extractor.
 
     This class provides the means to import the Keywords and Fingerprints
     of the OMA Groups into the hdf5 database. The data is stored under
@@ -1664,9 +1678,7 @@ class OmaGroupMetadataLoader(RootHOGMetaDataLoader):
     /OmaGroups/MetaData.
     """
 
-    keyword_name = "Keywords.drw"
-    finger_name = "Fingerprints"
-    expected_keys = ["Keywords", "Fingerprints"]
+    expected_keys = {"Keywords": "Keywords.txt", "Fingerprints": "Fingerprints.txt"}
     tab_description = tablefmt.OmaGroupTable
     meta_data_path = "/OmaGroups/MetaData"
 
@@ -1690,9 +1702,6 @@ class OmaGroupMetadataLoader(RootHOGMetaDataLoader):
     def _create_indexes(self, grp_tab):
         create_index_for_columns(grp_tab, "Fingerprint", "GroupNr")
 
-    def _load_data(self):
-        return callDarwinExport("GetGroupData()")
-
     def _get_nr_of_groups(self):
         etab = self.db.get_node("/Protein/Entries")
         try:
@@ -1706,12 +1715,6 @@ class OmaGroupMetadataLoader(RootHOGMetaDataLoader):
             cnts = cnts[1:]
         assert len(cnts) == self._get_nr_of_groups()
         return cnts
-
-    def _check_textfiles_avail(self):
-        rootdir = os.getenv("DARWIN_BROWSERDATA_PATH", "")
-        fn1 = os.path.join(rootdir, self.keyword_name)
-        fn2 = os.path.join(rootdir, self.finger_name)
-        return os.path.exists(fn1) and os.path.exists(fn2)
 
 
 class DescriptionManager(object):

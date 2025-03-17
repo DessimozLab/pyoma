@@ -329,7 +329,7 @@ def collect_keywords(h5db: tables.File, xref_db: tables.File = None) -> Tuple[Di
     if xref_db is None:
         xref_db = h5db
     entries = load_all_entries(h5db)
-    descriptions = get_descriptions_for_entries(xref_db, entries)
+    descriptions = get_descriptions_for_entries(h5db, entries)
     xrefs = get_xrefs_for_entries(xref_db, entries)
 
     def get_keywords_for_group(group):

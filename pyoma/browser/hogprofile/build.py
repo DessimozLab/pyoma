@@ -465,28 +465,49 @@ class Pipeline(object):
         print("successfully joined all processes")
 
 
-def compute_profiles(db_path, min_hogsize=100, max_hogsize=None, nr_procs=None):
-    pipeline = Pipeline()
-    with tempfile.NamedTemporaryFile(suffix=".h5", delete=False) as h5_tmp:
-        tmp_file = h5_tmp.name
+def compute_profiles(db_path, out_h5=None, min_hogsize=100, max_hogsize=None, nr_procs=None):
+    """computes HOG profiles for all HOGs in the database
+
+    Note that if out_h5 is not provided, the profiles are written back to the input database.
+
+    Arguments:
+    :params str db_path: path to the database containing the HOGs and Taxonomy information
+    :params str out_h5: path to the output file. If None, the profiles are written back to the input database
+    :params int min_hogsize: minimum number of species in a HOG to be considered
+    :params int max_hogsize: maximum number of species in a HOG to be considered
+    :params int nr_procs: number of processes to use for parallel computation
+    """
+
     if nr_procs is None:
         nr_procs = mp.cpu_count()
 
-    pipeline.add_stage(
-        Stage(
-            HogGenerator,
-            nr_procs=1,
-            db_path=db_path,
-            min_hogsize=min_hogsize,
-            max_hogsize=max_hogsize,
-        )
-    )
-    pipeline.add_stage(Stage(ProfileBuilder, nr_procs=nr_procs, db_path=db_path))
-    pipeline.add_stage(Stage(Collector, nr_procs=1, db_path=db_path, tmp_file=tmp_file))
-    print("generated pipeline. about to starting it")
-    pipeline.run()
-    print("finished computing profiles")
+    def run_pipeline(output):
+        pipeline = Pipeline()
+        with tempfile.NamedTemporaryFile(suffix=".h5", delete=False) as h5_tmp:
+            tmp_file = h5_tmp.name
 
-    with tables.open_file(db_path, "a") as db, tables.open_file(tmp_file, "r") as tmp:
-        tmp.root._f_copy_children(db.root, recursive=True, overwrite=True)
-    print("Finished writing everything")
+        pipeline.add_stage(
+            Stage(
+                HogGenerator,
+                nr_procs=1,
+                db_path=db_path,
+                min_hogsize=min_hogsize,
+                max_hogsize=max_hogsize,
+            )
+        )
+        pipeline.add_stage(Stage(ProfileBuilder, nr_procs=nr_procs, db_path=db_path))
+        pipeline.add_stage(Stage(Collector, nr_procs=1, db_path=db_path, tmp_file=tmp_file))
+        print("generated pipeline. about to starting it")
+        pipeline.run()
+        print("finished computing profiles")
+
+    if out_h5 is None:
+        with tempfile.NamedTemporaryFile(suffix=".h5") as h5_tmp:
+            run_pipeline(h5_tmp.name)
+
+        with tables.open_file(db_path, "a") as db, tables.open_file(h5_tmp.name, "r") as tmp:
+            tmp.root._f_copy_children(db.root, recursive=True, overwrite=True)
+        print(f"Finished writing everything back to {db_path}")
+    else:
+        run_pipeline(out_h5)
+        print(f"Finished writing profiles to {out_h5}")

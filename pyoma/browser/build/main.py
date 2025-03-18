@@ -15,6 +15,7 @@ import tables
 from tables import PerformanceWarning
 import omataxonomy
 
+from ..hogprofile.build import compute_profiles
 from .fingerprints import find_fingerprints
 from .keyword import collect_keywords
 from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
@@ -220,6 +221,10 @@ def build_fingerprints(conf):
     with auto_open(conf.out, "wt") as fh:
         for og, fp in find_fingerprints(conf.db, conf.suffix_db).items():
             fh.write(f"{og}\t{fp}\n")
+
+
+def build_profiles(conf):
+    compute_profiles(conf.db, conf.out, min_hogsize=conf.min_hog_size, nr_procs=conf.nr_procs)
 
 
 def store_summary_info(conf):
@@ -516,6 +521,13 @@ def parse_command_line_args():
     fingerprint_parser.add_argument("--suffix-db", required=False, help="Path to suffix array file")
     # fingerprint_parser.add_argument("--ogs", required=False, help="List of oma groups to process")
     fingerprint_parser.add_argument("--out", required=True, help="Path to output file")
+
+    profile_parser = subparsers.add_parser("profile", help="Generate profiles for HOGs")
+    profile_parser.set_defaults(func=build_profiles)
+    profile_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
+    profile_parser.add_argument("--out", required=True, help="Path to output file in hdf5 format")
+    profile_parser.add_argument("--min-hog-size", default=None, type=int, help="Minimum size of HOGs to consider")
+    profile_parser.add_argument("--nr-procs", default=None, type=int, help="Number of processes to use")
 
     update_summary_parser = subparsers.add_parser("update-summary", help="Update summary table")
     update_summary_parser.set_defaults(func=store_summary_info)

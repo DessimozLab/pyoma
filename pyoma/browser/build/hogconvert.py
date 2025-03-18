@@ -645,7 +645,8 @@ class PerFamilyHOGObserver(HogObserver):
         pass
 
     def _build_orthoxml(self, node):
-        root = etree.Element("orthoXML", self._parser.get_orthoxml_attribs())
+        root_attribs = {"xmlns": "http://orthoXML.org/2011/", **self._parser.get_orthoxml_attribs()}
+        root = etree.Element("orthoXML", attrib=root_attribs)
         genes = [int(n.get("id")) for n in node.findall(".//geneRef")]
         for sp in self._parser.gene_helper.iter_species_with_genes_nodes(genes):
             root.append(sp)

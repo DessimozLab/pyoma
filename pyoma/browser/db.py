@@ -272,7 +272,7 @@ class Database(object):
         try:
             self.seq_search = SequenceSearch(self)
         except DBConsistencyError as e:
-            logger.exception("Cannot load SequenceSearch. Any future call to seq_search will fail!")
+            logger.warning("Cannot load SequenceSearch. Any future call to seq_search will fail!")
             self.seq_search = None
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
@@ -1788,8 +1788,13 @@ class Database(object):
 
     def get_nr_toplevel_hogs(self):
         """returns the number of toplevel hogs, i.e. roothogs"""
-        hist = self.group_size_histogram("hog")
-        return int(hist["Count"].sum())
+        try:
+            hist = self.group_size_histogram("hog")
+            cnt = int(hist["Count"].sum())
+        except tables.NoSuchNodeError:
+            hl: tables.Table = self.db.get_node("/HogLevel")
+            cnt = int(hl[hl.colindexes["Fam"][-1]]["Fam"])
+        return cnt
 
     def group_size_histogram(self, typ=None):
         """returns a table with two columns, e.g. Size and Count.

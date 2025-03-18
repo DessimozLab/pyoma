@@ -192,7 +192,7 @@ class Collector(BaseProfileBuilderProcess):
                 self.builder.db.get_nr_toplevel_hogs() + 1,
                 self.builder.numperm * 2,
             ),
-            filters=tables.Filters(complevel=3, complib="blosc"),
+            filters=tables.Filters(complevel=6, complib="blosc"),
         )
         species = self.h5.create_carray(
             root,
@@ -483,9 +483,6 @@ def compute_profiles(db_path, out_h5=None, min_hogsize=100, max_hogsize=None, nr
 
     def run_pipeline(output):
         pipeline = Pipeline()
-        with tempfile.NamedTemporaryFile(suffix=".h5", delete=False) as h5_tmp:
-            tmp_file = h5_tmp.name
-
         pipeline.add_stage(
             Stage(
                 HogGenerator,
@@ -496,7 +493,7 @@ def compute_profiles(db_path, out_h5=None, min_hogsize=100, max_hogsize=None, nr
             )
         )
         pipeline.add_stage(Stage(ProfileBuilder, nr_procs=nr_procs, db_path=db_path))
-        pipeline.add_stage(Stage(Collector, nr_procs=1, db_path=db_path, tmp_file=tmp_file))
+        pipeline.add_stage(Stage(Collector, nr_procs=1, db_path=db_path, tmp_file=output))
         print("generated pipeline. about to starting it")
         pipeline.run()
         print("finished computing profiles")

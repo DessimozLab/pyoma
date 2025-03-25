@@ -5,7 +5,7 @@ import logging
 import pickle
 import sys
 import warnings
-from os.path import exists, getsize, join
+from os.path import exists, getsize, join, basename
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from shutil import copy
 
@@ -41,9 +41,10 @@ def phase_genomes(conf):
     with DBBuilder(conf.db, mode="write", logger=logger) as db:
         db.add_version(conf.rel_char)
         db.add_taxonomy(conf.tax_tsv)
-        db.add_species_data(conf.gs_tsv)
+        name2code = db.add_species_data(conf.gs_tsv)
+        code_to_file = {name2code[basename(f).split(".")[0]]: f for f in conf.genomes}
         with XrefStorer(conf.xref_db, index_cols=["EntryNr"]) as xref_storer:
-            db.add_proteins(conf.genomes, OmaGroupsProvider(conf.oma_groups), xref_collector=xref_storer)
+            db.add_proteins(code_to_file, OmaGroupsProvider(conf.oma_groups), xref_collector=xref_storer)
 
 
 def phase_build_seq_indexes(conf):

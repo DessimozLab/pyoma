@@ -236,6 +236,7 @@ class DBBuilder(DarwinExporter):
             (data["NCBITaxonId"].duplicated(keep=False)), data["GenomeId"], data["NCBITaxonId"]
         )
         data.reset_index(drop=True, inplace=True)
+        name2code = {str(row.Name): str(row.UniProtSpeciesCode) for row in data.itertuples(index=False)}
 
         cols = list(tablefmt.GenomeTable.columns)
         dflt_cols = set(cols) - set(data.columns)
@@ -258,6 +259,7 @@ class DBBuilder(DarwinExporter):
             "/", "Genome", tablefmt.GenomeTable, obj=gs.to_records(index=False, column_dtypes=dt), expectedrows=len(gs)
         )
         create_index_for_columns(gstab, "NCBITaxonId", "UniProtSpeciesCode", "EntryOff")
+        return name2code
 
     def add_orthologs(self, basedir: Optional[Union[str, os.PathLike]], genomes: tables.Table):
         genome_offs = genomes.col("EntryOff")
@@ -322,8 +324,7 @@ class DBBuilder(DarwinExporter):
         desc_arr = numpy.ndarray((len(desc),), buffer=desc.encode("utf-8"), dtype=tables.StringAtom(1))
         array.append(desc_arr)
 
-    def add_proteins(self, genome_files, oma_group_provider, xref_collector):
-        code_to_file = {os.path.basename(f).split(".")[0]: f for f in genome_files}
+    def add_proteins(self, code_to_file, oma_group_provider, xref_collector):
         gs_node = self.h5.get_node("/Genome")
         if len(code_to_file) < len(gs_node):
             raise ValueError(

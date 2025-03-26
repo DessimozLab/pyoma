@@ -503,6 +503,9 @@ class OrthoXMLGeneIdParserGeneralProtID(OrthoXMLGeneIdParserWithOmaProtId):
         enrs = self._protkey[idx] + 1
         if not sp["EntryOff"] < enrs.min() < enrs.max() <= sp["EntryOff"] + sp["TotEntries"]:
             logger.error(f"Not all protein map to {sp_name.decode()}")
+            bogus = numpy.argwhere(numpy.logical_or(enrs <= sp["EntryOff"], enrs > sp["EntryOff"] + sp["TotEntries"]))
+            logger.error(f"Unexpected entry numbers: {enrs[bogus]}")
+            logger.error(f" -> ids: {self._protkey[enrs[bogus]-1]}")
             raise RuntimeError(f"not all protein map to {sp_name.decode()}")
 
         genes = []

@@ -476,7 +476,7 @@ class OrthoXMLGeneIdParserGeneralProtID(OrthoXMLGeneIdParserWithOmaProtId):
         en_min, en_max = sp["EntryOff"], sp["EntryOff"] + sp["TotEntries"]
         idx = numpy.searchsorted(self._prot_ids, ids, side="left", sorter=self._protkey)
         idy = numpy.searchsorted(self._prot_ids, ids, side="right", sorter=self._protkey)
-        res = numpy.zeros(len(ids), dtype=numpy.int)
+        res = numpy.zeros(len(ids), dtype=int)
         for i, (low, high) in enumerate(zip(idx, idy)):
             sec = self._protkey[low:high]
             mask = (sec >= en_min) & (sec <= en_max)

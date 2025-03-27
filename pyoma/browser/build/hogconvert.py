@@ -472,6 +472,23 @@ class OrthoXMLGeneIdParserGeneralProtID(OrthoXMLGeneIdParserWithOmaProtId):
         super()._read_from_h5(h5)
         self._prot_ids = h5.get_node("/Protein/Entries").read(field="CanonicalId")
 
+    def _search_entry_nrs_of_ids_within_species(self, ids: numpy.array, sp: numpy.ndarray):
+        en_min, en_max = sp["EntryOff"], sp["EntryOff"] + sp["TotEntries"]
+        idx = numpy.searchsorted(self._prot_ids, ids, side="left", sorter=self._protkey)
+        idy = numpy.searchsorted(self._prot_ids, ids, side="right", sorter=self._protkey)
+        res = numpy.zeros(len(ids), dtype=numpy.int)
+        for i, (low, high) in enumerate(zip(idx, idy)):
+            sec = self._protkey[low:high]
+            mask = (sec >= en_min) & (sec <= en_max)
+            match = numpy.where(mask)[0]
+            if match.size != 1:
+                logger.error(f"ID '{ids[i]}' not found or is not unique in the entry range [{en_min}:{en_max}]")
+                logger.error(f" -> matches to {sec[match]}")
+                raise ValueError(f"ID {ids[i]} not found or is not unique in the entry range [{en_min}:{en_max}]")
+            res[i] = sec[match[0]]
+        # entry numbers are 1-based
+        return res + 1
+
     def process_species(self, node):
         assert node.tag == "{http://orthoXML.org/2011/}species"
         sp_name = node.get("name").encode("utf-8")
@@ -495,18 +512,13 @@ class OrthoXMLGeneIdParserGeneralProtID(OrthoXMLGeneIdParserWithOmaProtId):
         }
         max_prot_id_len = min(max(len(z) for z in sp_genes.values()), max(len(z) for z in self._prot_ids))
         prot_ids = numpy.fromiter(sp_genes.values(), dtype=f"S{max_prot_id_len}")
-        idx = numpy.searchsorted(self._prot_ids, prot_ids, side="left", sorter=self._protkey)
-        if not numpy.all(self._prot_ids[self._protkey[idx]] == prot_ids):
-            not_found = prot_ids[self._prot_ids[self._protkey[idx]] != prot_ids]
-            logger.error(f"Couldn't find {len(not_found)} protId from {sp_name.decode()}: e.g {not_found[:3]}")
-            raise RuntimeError(f"not all IDs in OrthoXML file found in species {sp_name.decode()}")
-        enrs = self._protkey[idx] + 1
-        if not sp["EntryOff"] < enrs.min() < enrs.max() <= sp["EntryOff"] + sp["TotEntries"]:
-            logger.error(f"Not all protein map to {sp_name.decode()}")
-            bogus = numpy.argwhere(numpy.logical_or(enrs <= sp["EntryOff"], enrs > sp["EntryOff"] + sp["TotEntries"]))
-            logger.error(f"Unexpected entry numbers: {enrs[bogus]}")
-            logger.error(f" -> ids: {self._protkey[enrs[bogus]-1]}")
-            raise RuntimeError(f"not all protein map to {sp_name.decode()}")
+        try:
+            enrs = self._search_entry_nrs_of_ids_within_species(prot_ids, sp)
+        except ValueError:
+            logger.exception(
+                f"Couldn't map {len(prot_ids)} protId from {sp_name.decode()} unambiguously to entry numbers"
+            )
+            raise
 
         genes = []
         for id_, prot_id, e_nr in zip(sp_genes.keys(), sp_genes.values(), enrs):

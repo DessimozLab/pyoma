@@ -1473,6 +1473,10 @@ def iter_domains(url):
     fname = download_url_if_not_present(url) if "://" in url else url
     if fname is None:
         return
+    if not os.path.exists(fname) or os.path.getsize(fname) == 0:
+        common.package_logger.warning("file %s is empty", fname)
+        return
+
     with common.auto_open(fname, "rt") as uncompressed:
         dialect = csv.Sniffer().sniff(uncompressed.read(4096))
         uncompressed.seek(0)

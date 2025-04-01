@@ -479,7 +479,7 @@ class OrthoXMLGeneIdParserGeneralProtID(OrthoXMLGeneIdParserWithOmaProtId):
         res = numpy.zeros(len(ids), dtype=int)
         for i, (low, high) in enumerate(zip(idx, idy)):
             sec = self._protkey[low:high]
-            mask = (sec >= en_min) & (sec <= en_max)
+            mask = (sec >= en_min) & (sec < en_max)
             match = numpy.where(mask)[0]
             if match.size != 1:
                 logger.error(f"ID '{ids[i]}' not found or is not unique in the entry range [{en_min}:{en_max}]")

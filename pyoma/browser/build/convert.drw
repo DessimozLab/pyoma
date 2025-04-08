@@ -43,11 +43,11 @@ GetGenomeData := proc(outdir)
             GS[g,TotAA], Goff[gNr],
             GS[g,SCINAME], GS[g,COMMONNAME], GS[g, SYNNAME],
             GS[g,DBRELEASE], GS[g,URL], GS[g,SOURCE], GS[g,DATE], SubGenomes[g]<>unassigned,
-            genomefilenames[gNr], ncbi_taxid, genome_id]);
+            genomefilenames[gNr], ncbi_taxid, genome_id, g]);
     od:
 
     headers := ['NCBITaxonId', 'UniProtSpeciesCode', 'TotEntries', 'TotAA', 'EntryOff', 'SciName', 'CommonName', 'SynName',
-                'Release', 'Url', 'Source', 'Date', 'IsPolyploid', 'DBpath', 'OriginalNCBITaxonId', 'GenomeId'];
+                'Release', 'Url', 'Source', 'Date', 'IsPolyploid', 'DBpath', 'OriginalNCBITaxonId', 'GenomeId', 'Name'];
     OpenWriting(outdir.'/gs.tsv');
     printf('%s\n', ConcatStrings(headers, '\t'));
     for curGS in gs do

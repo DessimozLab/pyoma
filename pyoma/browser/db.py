@@ -29,6 +29,7 @@ import tables.file as _tables_file
 from Bio.UniProt import GOA
 from datasketch import MinHash
 from property_manager import lazy_property
+from tables import NoSuchNodeError
 from tqdm import tqdm
 
 from .KmerEncoder import KmerEncoder
@@ -546,17 +547,12 @@ class Database(object):
                 raise InvalidId(f"Center gene {center_entry} is not a valid for genome {identified_genome}")
             all_genes = all_genes[idx - window : idx + window + 1]
             all_genes = all_genes[numpy.where(all_genes["Chromosome"] == ref["Chromosome"])]
-        oma_ids = list(
-            map(
-                lambda x: f"{gs['UniProtSpeciesCode'].decode()}{x - gs['EntryOff']:05d}",
-                all_genes["EntryNr"],
-            )
-        )
+        oma_ids = {x: f"{gs['UniProtSpeciesCode'].decode()}{x - gs['EntryOff']:05d}" for x in all_genes["EntryNr"]}
 
         def node_data_generator(genes):
-            for id_, g in zip(oma_ids, genes):
+            for g in genes:
                 yield (
-                    id_,
+                    oma_ids[g["EntryNr"]],
                     {
                         "chromosome": g["Chromosome"].decode(),
                         "start": int(g["LocusStart"]),
@@ -568,9 +564,30 @@ class Database(object):
 
         G = nx.Graph()
         G.add_nodes_from(node_data_generator(all_genes))
-        for i in range(len(all_genes) - 1):
-            if all_genes[i]["Chromosome"] == all_genes[i + 1]["Chromosome"]:
-                G.add_edge(oma_ids[i], oma_ids[i + 1], weight=1)
+
+        try:
+            synteny_rels = self.db.get_node(f"/ExtantGenomes/{gs['UniProtSpeciesCode'].decode()}/Synteny").read()
+        except NoSuchNodeError:
+            synteny_rels = None
+        if synteny_rels is not None:
+            synteny_rels = synteny_rels[
+                numpy.logical_and(
+                    numpy.isin(synteny_rels["EntryNr1"], all_genes["EntryNr"]),
+                    numpy.isin(synteny_rels["EntryNr2"], all_genes["EntryNr"]),
+                )
+            ]
+            for rel in synteny_rels:
+                G.add_edge(
+                    oma_ids[rel["EntryNr1"]],
+                    oma_ids[rel["EntryNr2"]],
+                    weight=float(rel["Weight"]),
+                    age=float(self.tax.taxid_to_age.get(rel["LCA_taxid"], -1)),
+                )
+        else:
+            # fall back without any additional data
+            for i in range(len(all_genes) - 1):
+                if all_genes[i]["Chromosome"] == all_genes[i + 1]["Chromosome"]:
+                    G.add_edge(oma_ids[all_genes[i]["EntryNr"]], oma_ids[all_genes[i + 1]["EntryNr"]], weight=1)
         return G
 
     def _get_vptab(self, entry_nr):

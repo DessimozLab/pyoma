@@ -77,7 +77,7 @@ def phase_vps(conf):
     with tables.open_file(conf.db, "r") as db:
         with DBBuilder(conf.hdf5_out, mode="write", logger=logger, complib="blosc") as out:
             genomes_tab = db.get_node("/Genome")
-            out.add_orthologs(conf.vps_base, genomes=genomes_tab)
+            out.add_orthologs(basedir=conf.vps_base, genomes=genomes_tab, homoeologs_base=conf.homoeologs_base)
 
 
 def phase_add_domains(conf):
@@ -320,6 +320,7 @@ def parse_command_line_args():
     vp_parser.set_defaults(func=phase_vps)
     vp_parser.add_argument("--db", required=True, help="Path to hdf5 database containing genomes")
     vp_parser.add_argument("--vps-base", required=False, help="Folder where all the pairwise orthologs are stored")
+    vp_parser.add_argument("--homoeologs-base", required=False, help="Folder where all the homoeologs files are stored")
     vp_parser.add_argument("--hdf5-out", required=True, help="Path to store pairwise orthologs in HDF5")
 
     domain_parser = subparsers.add_parser(

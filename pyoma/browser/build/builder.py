@@ -154,6 +154,19 @@ class XrefStorer:
         self.add_xref(enr, src, xref, self.verify_enum["exact"], 1)
 
 
+def load_homoeologs_from_tsv(genome, basedir: Optional[Union[str, os.PathLike]] = None):
+    """load homoeologs from the tsv file"""
+    if basedir is None or not os.path.isdir(basedir):
+        common.package_logger.warning("No base directory for homoeologs passed. Won't load any homoeologs.")
+        return numpy.empty(0, dtype=tables.dtype_from_descr(tablefmt.PairwiseRelationTable))
+    fn = os.path.join(basedir, f"{genome['UniProtSpeciesCode'].decode()}.tsv.gz")
+    off = genome["EntryOff"]
+    if not os.path.exists(fn):
+        common.package_logger.error("expected homoeologs file %s not found", fn)
+        return numpy.empty(0, dtype=tables.dtype_from_descr(tablefmt.PairwiseRelationTable))
+    return load_tsv_to_numpy((fn, off, off, False))
+
+
 class DBBuilder(DarwinExporter):
     def __init__(self, path, logger=None, mode=None, complib="zlib"):
         self.logger = logger if logger is not None else common.package_logger
@@ -261,7 +274,12 @@ class DBBuilder(DarwinExporter):
         create_index_for_columns(gstab, "NCBITaxonId", "UniProtSpeciesCode", "EntryOff")
         return name2code
 
-    def add_orthologs(self, basedir: Optional[Union[str, os.PathLike]], genomes: tables.Table):
+    def add_orthologs(
+        self,
+        basedir: Optional[Union[str, os.PathLike]],
+        genomes: tables.Table,
+        homoeologs_base: Optional[Union[str, os.PathLike]],
+    ):
         genome_offs = genomes.col("EntryOff")
         anygenome = genomes[0]["UniProtSpeciesCode"].decode()
         if basedir is None:
@@ -308,6 +326,13 @@ class DBBuilder(DarwinExporter):
                 for col in dflt_cols:
                     cp[col] = tablefmt.PairwiseRelationTable.columns[col].dflt
                 cp = cp[cols]
+                if gs["IsPolyploid"] and homoeologs_base is not None:
+                    hp = pandas.DataFrame(load_homoeologs_from_tsv(gs, basedir=homoeologs_base))
+                    hp = hp.set_index(["EntryNr1", "EntryNr2"])
+                    cp = cp.set_index(["EntryNr1", "EntryNr2"])
+                    cp.update(hp)
+                    cp.reset_index()
+
                 dt = {k: v.dtype for k, v in tablefmt.PairwiseRelationTable.columns.items()}
                 within_tab = self.h5.create_table(
                     rel_node_for_genome,

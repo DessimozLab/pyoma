@@ -361,7 +361,8 @@ def sort_table(tab: tables.Table, col_order: Union[List[str], str]):
         if cnt > 1_000_000:
             new_tab.append(numpy.concatenate(buf))
             buf, cnt = [], 0
-    new_tab.append(numpy.concatenate(buf))
+    if len(buf) > 0:
+        new_tab.append(numpy.concatenate(buf))
     create_index_for_columns(new_tab, *col_order)
     tab.remove()
     return new_tab

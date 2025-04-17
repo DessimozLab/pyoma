@@ -328,10 +328,14 @@ class DBBuilder(DarwinExporter):
                 cp = cp[cols]
                 if gs["IsPolyploid"] and homoeologs_base is not None:
                     hp = pandas.DataFrame(load_homoeologs_from_tsv(gs, basedir=homoeologs_base))
+                    dflt_cols = set(cols) - set(hp.columns)
+                    for col in dflt_cols:
+                        hp[col] = tablefmt.PairwiseRelationTable.columns[col].dflt
                     hp = hp.set_index(["EntryNr1", "EntryNr2"])
                     cp = cp.set_index(["EntryNr1", "EntryNr2"])
                     cp.update(hp)
-                    cp.reset_index()
+                    cp = cp.reset_index(drop=False)
+                    cp = cp[cols]
 
                 dt = {k: v.dtype for k, v in tablefmt.PairwiseRelationTable.columns.items()}
                 within_tab = self.h5.create_table(

@@ -220,7 +220,11 @@ def phase_keywords(conf):
 
 def build_fingerprints(conf):
     with auto_open(conf.out, "wt") as fh:
-        for og, fp in find_fingerprints(conf.db, conf.suffix_db).items():
+        if conf.og_rng is not None:
+            ogs = range(int(conf.og_rng[0]), int(conf.og_rng[1]) + 1, 1)
+        else:
+            ogs = None
+        for og, fp in find_fingerprints(conf.db, conf.suffix_db, ogs=ogs).items():
             fh.write(f"{og}\t{fp}\n")
 
 
@@ -521,7 +525,13 @@ def parse_command_line_args():
     fingerprint_parser.set_defaults(func=build_fingerprints)
     fingerprint_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
     fingerprint_parser.add_argument("--suffix-db", required=False, help="Path to suffix array file")
-    # fingerprint_parser.add_argument("--ogs", required=False, help="List of oma groups to process")
+    fingerprint_parser.add_argument(
+        "--og-rng",
+        required=False,
+        default=None,
+        nargs=2,
+        help="Range of oma groups to process. Boundaries of range are inclusive.",
+    )
     fingerprint_parser.add_argument("--out", required=True, help="Path to output file")
 
     profile_parser = subparsers.add_parser("profile", help="Generate profiles for HOGs")

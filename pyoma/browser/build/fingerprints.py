@@ -37,6 +37,8 @@ def find_fingerprints(
     """
     db = Database(db_path)
     searcher = SequenceSearch(db, seq_idx_fpath=suffix_path)
+    # read the sequence buffer into memory
+    searcher.seq_buff = searcher.seq_buff[:]
     pe_tab = db.db.get_node("/Protein/Entries")
 
     og_iter = range(1, db.get_nr_oma_groups() + 1) if ogs is None else ogs

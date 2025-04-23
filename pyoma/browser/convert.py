@@ -1210,7 +1210,8 @@ class DarwinExporter(object):
             "GeneOntologyTermCounts",
             description=tablefmt.GeneOntologyTermCounts,
         )
-        tab.append(cnts)
+        if len(cnts) > 0:
+            tab.append(cnts)
         self.h5.set_node_attr(tab, "total_molecular_function", tot_cnts[0])
         self.h5.set_node_attr(tab, "total_biological_process", tot_cnts[1])
         self.h5.set_node_attr(tab, "total_cellular_component", tot_cnts[2])

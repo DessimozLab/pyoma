@@ -43,6 +43,8 @@ class TaxonomyLookupHelper:
         return mrca
 
     def levels_between(self, child_node, parent_node):
+        if child_node == parent_node:
+            return
         n = child_node.up
         while n != parent_node:
             yield n
@@ -510,7 +512,7 @@ class OrthoXMLGeneIdParserGeneralProtID(OrthoXMLGeneIdParserWithOmaProtId):
             gene.get("id"): gene.get("protId").encode("utf-8")
             for gene in node.findall(".//{http://orthoXML.org/2011/}gene")
         }
-        max_prot_id_len = min(max(len(z) for z in sp_genes.values()), max(len(z) for z in self._prot_ids))
+        max_prot_id_len = min(max(len(z) for z in sp_genes.values()), self._prot_ids.dtype.itemsize)
         prot_ids = numpy.fromiter(sp_genes.values(), dtype=f"S{max_prot_id_len}")
         try:
             enrs = self._search_entry_nrs_of_ids_within_species(prot_ids, sp)
@@ -588,16 +590,21 @@ def xml_writer(stream, root_elem):
 
         while True:
             try:
-                data = yield
+                data, level = yield
             except GeneratorExit:
                 break
             if isinstance(data, etree._Element):
                 # Write an XML element
-                xf.write(etree.tostring(strip_namespace(data), pretty_print=True, encoding="utf-8"))
+                data = strip_namespace(data)
+                etree.indent(data, level=level)
+                xf.write(b"  " * level)
+                xf.write(etree.tostring(data, pretty_print=True, encoding="utf-8"))
             elif isinstance(data, (str, bytes)):
                 # Write raw string/byte data
                 if isinstance(data, str):
-                    data = data.encode("utf-8")
+                    data = ("  " * level + data).encode("utf-8")
+                else:
+                    data = b"  " * level + data
                 xf.write(data)
             else:
                 raise ValueError("Unsupported data type sent to writer")
@@ -624,18 +631,19 @@ class FullOrthoXMLObserver(HogObserver):
     def orthoxml_header_processed_hook(self):
         self._write_xml_header()
         for sp in self._parser.gene_helper.iter_species_with_genes_nodes():
-            self.writer.send(sp)
-        self.writer.send(self._parser.taxonomy.as_xml())
+            self.writer.send((sp, 1))
+        tax = self._parser.taxonomy.as_xml()
+        self.writer.send((tax, 1))
         scores = self._parser.get_score_defs()
         if scores is not None:
-            self.writer.send(scores)
-        self.writer.send("<groups>")
+            self.writer.send((scores, 1))
+        self.writer.send(("<groups>\n", 1))
 
     def process_hog(self, node: etree.Element):
-        self.writer.send(node)
+        self.writer.send((node, 2))
 
     def finished(self):
-        self.writer.send("</groups>")
+        self.writer.send(("</groups>\n", 1))
         self.writer.close()
         super().finished()
 
@@ -645,7 +653,7 @@ class FullAugmentedOrthoXMLObserver(FullOrthoXMLObserver):
         pass
 
     def process_augmented_hog(self, node: etree.Element):
-        self.writer.send(node)
+        self.writer.send((node, 2))
 
 
 class PerFamilyHOGObserver(HogObserver):

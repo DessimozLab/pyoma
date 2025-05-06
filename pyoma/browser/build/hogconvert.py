@@ -15,6 +15,7 @@ from ete3 import TreeNode
 
 from .. import tablefmt
 from ..convert import create_index_for_columns
+from ...common import auto_open
 
 HOGID_RE = re.compile(r"HOG:(?P<rel>[A-Z])?(?P<fam>\d+)(?:\.(?P<subhog>[a-z0-9.]*))?(?:_(?P<taxid>-?\d+))?")
 logger = logging.getLogger(__name__)
@@ -578,7 +579,7 @@ def strip_namespace(element):
 
 
 def xml_writer(stream, root_elem):
-    with open(stream, "wb") as xf:
+    with auto_open(stream, "wb") as xf:
         xf.write(b'<?xml version="1.0" encoding="UTF-8"?>\n')
         # Write the root element's opening tag
         xf.write(b"<%s" % root_elem["tag"].encode("utf-8"))

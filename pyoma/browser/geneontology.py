@@ -1,3 +1,4 @@
+from __future__ import annotations
 from builtins import int, bytes, str
 import collections
 import csv
@@ -6,6 +7,7 @@ import math
 import re
 from functools import lru_cache
 from collections import deque
+from typing import List, Set
 
 import numpy
 
@@ -90,23 +92,23 @@ class GOterm(object):
         self.is_a = [validate_go_id(parent) for parent in stanza["is_a"]]
         self.min_depth = 100000
         for rel in stanza["relationship"]:
-            reltype, partner = rel.strip().split()
-            if not reltype in self.__dict__.keys():
-                self.__dict__[reltype] = list()
-            self.__dict__[reltype].append(validate_go_id(partner))
+            rel_type, partner = rel.strip().split()
+            if not hasattr(self, rel_type):
+                setattr(self, rel_type, [])
+            getattr(self, rel_type).append(validate_go_id(partner))
 
     def replace_parentnames_by_refs(self, ont):
         for rel in [("is_a", "can_be"), ("part_of", "has_part")]:
-            if rel[0] in self.__dict__.keys():
-                for i, parent_id in enumerate(self.__dict__[rel[0]]):
+            if hasattr(self, rel[0]):
+                for i, parent_id in enumerate(getattr(self, rel[0])):
                     parent_obj = ont[parent_id]
-                    self.__dict__[rel[0]][i] = parent_obj
-                    parent_obj._add_relation(self, rel[1])
+                    getattr(self, rel[0])[i] = parent_obj
+                    parent_obj.add_relation(self, rel[1])
 
-    def _add_relation(self, term, rel):
-        if rel not in self.__dict__.keys():
-            self.__dict__[rel] = list()
-        self.__dict__[rel].append(term)
+    def add_relation(self, term: GOterm, rel: str) -> None:
+        if not hasattr(self, rel):
+            setattr(self, rel, [])
+        getattr(self, rel).append(term)
 
     def get_parents(self, rels=None):
         """iterate over the direct parent GO terms.

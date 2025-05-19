@@ -198,7 +198,9 @@ def import_go(conf):
     with auto_open(conf.tax_map, "rb") as fh:
         relevant_taxid_map = pickle.load(fh)
     rel_taxids = set(relevant_taxid_map.keys())
-    xref_build.import_go(obo=conf.obo, gafs=conf.gaf, xref_db=conf.xref_db, relevant_taxid=rel_taxids, out=conf.out)
+    xref_build.import_go(
+        obo=conf.obo, gafs=conf.gaf, xref_db=conf.xref_db, og_db=conf.og_db, relevant_taxid=rel_taxids, out=conf.out
+    )
 
 
 def phase_keywords(conf):
@@ -500,6 +502,7 @@ def parse_command_line_args():
     )
     go_import_parser.set_defaults(func=import_go)
     go_import_parser.add_argument("--xref-db", required=True, help="Path to xref database in hdf5 format")
+    go_import_parser.add_argument("--og-db", required=True, help="Path to the database containing oma groups")
     go_import_parser.add_argument("--tax-map", required=True, help="Path to taxid map file (pickle)")
     go_import_parser.add_argument("--obo", required=True, help="Path to input obo file defining gene ontology")
     go_import_parser.add_argument("--gaf", nargs="+", help="Path to one or more gene annotations gaf files")

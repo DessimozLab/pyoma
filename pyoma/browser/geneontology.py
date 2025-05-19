@@ -290,24 +290,28 @@ class GeneOntology(object):
         term = self.ensure_term(term)
         return self._traverseGraph(term, max_steps, self.up_rels)
 
-    def get_subterms(self, term, max_steps=-1):
+    def get_superterms(self, term, include_query=True, max_steps=-1):
         term = self.ensure_term(term)
-        return self._traverseGraph(term, max_steps, self.down_rels)
+        parents = self._traverseGraph(term, max_steps, self.up_rels)
+        return parents if include_query else parents - {term}
+
+    def get_subterms(self, term, include_query=True, max_steps=-1):
+        term = self.ensure_term(term)
+        children = self._traverseGraph(term, max_steps, self.down_rels)
+        return children if include_query else children - {term}
 
     @lru_cache(maxsize=4048)
-    def _traverseGraph(self, node, max_steps, rels):
+    def _traverseGraph(self, node: GOterm, max_steps: int, rels: List[str]) -> Set[GOterm]:
         """_traverseGraph traverses the graph in a breath first manner
         and reports all the nodes reachable within max_steps."""
-        remain = set([node])
+        remain = {node}
         found = set()
         while len(remain) > 0 and max_steps != 0:
             novel = set()
-            for t in remain:
+            for term in remain:
                 for rel in rels:
-                    try:
-                        novel.update(t.__dict__[rel])
-                    except KeyError:
-                        pass
+                    novel.update(getattr(term, rel, set()))
+
             found.update(remain)
             remain = novel.difference(found)
             max_steps -= 1

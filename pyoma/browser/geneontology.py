@@ -416,22 +416,25 @@ class DifferentAspectError(Exception):
 
 class AnnotationFilter(object):
     EXP_CODES = frozenset(["EXP", "IDA", "IPI", "IMP", "IGI", "IEP"])
+    PHYL_CODES = frozenset(["IBA", "IBD", "IKR", "IRD"])
     TRUST_IEA_REFS = frozenset(
         [
             "GO_REF:0000002",
+            "GO_REF:002",
             "GOA:interpro",
             "GOA:interpro|GO_REF:0000002",  # InterPro
             "GO_REF:0000003",
+            "GO_REF:003",
             "GOA:spec",
-            "GOA:spec|GO_REF:0000003" "GO_REF:0000004",  # EC number
+            "GOA:spec|GO_REF:0000003",  # EC number
+            "GO_REF:0000004",
+            "GO_REF:004",
             "GOA:spkw",
-            "GOA:spkw|GO_REF:0000004",
-            "GO_REF:0000037",
-            "GO_REF:0000038" "GO_REF:0000023",  # SwissProt Keywords
-            "GOA:spsl",
-            "GOA:spsl|GO_REF:0000023",
-            "GO_REF:0000039",
-            "GO_REF:0000040",  # UniProtKB Subcellular Location
+            "GOA:spkw|GO_REF:0000004",  # UniProtKB keyword mapping
+            "GO_REF:0000043",
+            "GO_REF:043",  # UniProtKB/Swiss-Prot keyword mapping
+            "GO_REF:0000044",
+            "GO_REF:044",  # UniProtKB/Swiss-Prot Subcellular Location vocabulary mapping
         ]
     )
 

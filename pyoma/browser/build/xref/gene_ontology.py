@@ -3,12 +3,13 @@ import itertools
 import os
 import logging
 from functools import lru_cache
-from typing import List, Set
+from typing import List, Set, Optional
 import re
 import numpy
 import tables
 
 from ..builder import DBBuilder
+from ..function_propagation_omagroup import FunctionPredictor
 from ...convert import create_index_for_columns, sort_table
 from ...tablefmt import GeneOntologyTable
 from ...geneontology import GeneOntology, OntologyParser, AnnotationParser, GOA_Annotation, AnnotationFilter
@@ -21,7 +22,10 @@ class GeneOntologyManager:
         self.fpath = fpath
         self.annotation_path = annotation_path
         self.ontology_path = ontology_path
+        self.go = None
         self._go_buf = []
+        self._inf_buf = []
+        self.phase = -1  # 0 -> accept ontology, 1 -> collect annotations, 2 -> infer annotations
 
     def __enter__(self):
         self.h5 = tables.open_file(
@@ -31,9 +35,12 @@ class GeneOntologyManager:
         self.go_tab = self.h5.create_table(
             root, name, GeneOntologyTable, "Gene Ontology annotations", expectedrows=1e8, createparents=True
         )
+        self._inf_tab = self.h5.create_table(root, name + "_infer", GeneOntologyTable, expectedrows=1e8)
+        self.phase = 0
         return self
 
     def add_ontology(self, obo_path):
+        assert self.phase == 0
         # check that ontology file is not broken. if we can build it, it should be ok
         self.go = GeneOntology(OntologyParser(obo_path))
         self.go.parse()
@@ -49,9 +56,15 @@ class GeneOntologyManager:
             obj=numpy.ndarray(len(go_obo), buffer=go_obo, dtype=tables.StringAtom(1)),
         )
         obo.set_attr("ontology_release", self._get_obo_version(obo))
+        self.phase = 1
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._flush_buffers()
+        if self.phase == 2:
+            # copy over inf_tab into go_tab
+            self._bulk_copy_table(self._inf_tab, self.go_tab)
+        # remove temporary _inf_tab (it has been copied over)
+        self._inf_tab.remove()
         self.go_tab.flush()
         create_index_for_columns(self.go_tab, "EntryNr", "TermNr")
         sort_table(self.go_tab, col_order=["EntryNr", "TermNr", "Evidence"])
@@ -68,12 +81,45 @@ class GeneOntologyManager:
         if len(self._go_buf) > 0:
             self.go_tab.append(self._go_buf)
         self._go_buf = []
+        if len(self._inf_buf) > 0:
+            self._inf_tab.append(self._inf_buf)
+        self._inf_buf = []
+
+    def switch_collect_to_inference_phase(self):
+        """method to switch from collect phase to inference phase.
+
+        After calling this method, you can no longer call add_annotations
+        on this object. From then on, only calls to add_inference are allowed."""
+        # switch to inference phase (2). build index of annotations
+        assert self.phase == 1
+        self._flush_buffers()
+        self.go_tab.flush()
+        create_index_for_columns(self.go_tab, "EntryNr", "TermNr")
+        self.phase = 2
+
+    def _bulk_copy_table(self, source_tab: tables.Tables, target_tab: tables.Table, chunk: int = 1_000_000):
+        # 1. remove all indexes from taget_tab
+        for c in target_tab.colnames:
+            if target_tab.colindexed[c]:
+                target_tab.colinstances[c].remove_index()
+
+        # 2. Copy data
+        buffer = []
+        for i, row in enumerate(source_tab.iterrows()):
+            buffer.append(row.fetch_all_fields())
+            if len(buffer) >= chunk:
+                target_tab.append(buffer)
+                buffer.clear()
+        if buffer:
+            target_tab.append(buffer)
+        target_tab.flush()
 
     def annotation_generated_date(self, date):
         self.go_tab.set_attr("annotations_generated", date)
 
     def add_annotations(self, enrs: Set[int], anno: GOA_Annotation):
         """parse go annotations and add them to the go buffer"""
+        assert self.phase == 1, "cannot add annotations if phase != 1"
         if len(enrs) == 0:
             return
         try:
@@ -89,6 +135,17 @@ class GeneOntologyManager:
         if len(self._go_buf) > 2e6:
             self._flush_buffers()
 
+    def add_inference(self, enr: int, term_nr: int, ref="OMA_Fun:001"):
+        assert self.phase == 2, "cannot add inferences if phase != 2"
+        try:
+            term = self.go.term_by_id(term_nr)
+        except ValueError:
+            logger.warning(f"annotation: term {term_nr} not valid (obsolete?)")
+            return
+        self._inf_buf.append((enr, term_nr, b"IEA", ref.encode("utf-8")))
+        if len(self._inf_buf) > 2e6:
+            self._flush_buffers()
+
 
 class XRefBasedMapper:
     def __init__(self, xref_db_path: os.PathLike):
@@ -96,7 +153,7 @@ class XRefBasedMapper:
 
     def __enter__(self):
         self.xref_db = tables.open_file(self.xref_db_path, mode="r")
-        self.xrefs = self.xref_db.get_node("/XRef")
+        self.xrefs: tables.Table = self.xref_db.get_node("/XRef")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -147,7 +204,13 @@ class Stats:
 
 
 def import_go(
-    obo: os.PathLike, gafs: List[os.PathLike], xref_db: os.PathLike, relevant_taxid: Set[int], out: os.PathLike
+    obo: os.PathLike,
+    gafs: List[os.PathLike],
+    xref_db: os.PathLike,
+    relevant_taxid: Set[int],
+    og_db: os.PathLike,
+    out: os.PathLike,
+    clades: Optional[List[str]] = None,
 ):
     stats = Stats()
     with GeneOntologyManager(out, "/Annotations/GeneOntology", "/Ontologies/GO") as go_man:
@@ -169,6 +232,20 @@ def import_go(
                     stats.log(taxid, len(enrs))
                     if len(enrs) > 1:
                         logger.info(f"{annotation.db_obj_id} mapped to {len(enrs)} entries: {enrs}")
-    stats.summary()
+
+        stats.summary()
+        go_man.switch_collect_to_inference_phase()
+
+        if len(go_man.go_tab) > 0:
+            logger.info("predicting GO annotations based on OMA Groups")
+            with FunctionPredictor(
+                db_h5_path=og_db, ontology=go_man.go, anno_tab=go_man.go_tab, clades=clades
+            ) as predictor:
+                for og in predictor.oma_groups:
+                    for enr, go_term in predictor.annotate_group(og):
+                        go_man.add_inference(enr, go_term)
+        else:
+            logger.info("no GO annotations found, won't predict based on OMA Groups")
+
     with DBBuilder(path=out, mode="append", logger=logger) as builder:
         builder.add_gene_ontology_term_cnts()

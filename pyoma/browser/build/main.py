@@ -198,8 +198,21 @@ def import_go(conf):
     with auto_open(conf.tax_map, "rb") as fh:
         relevant_taxid_map = pickle.load(fh)
     rel_taxids = set(relevant_taxid_map.keys())
+    clades = None
+    if conf.clades is not None:
+        if exists(conf.clades):
+            with auto_open(conf.clades, "rt") as fh:
+                clades = [l.strip() for l in fh]
+        else:
+            clades = [c.strip() for c in conf.clades.split(",")]
     xref_build.import_go(
-        obo=conf.obo, gafs=conf.gaf, xref_db=conf.xref_db, og_db=conf.og_db, relevant_taxid=rel_taxids, out=conf.out
+        obo=conf.obo,
+        gafs=conf.gaf,
+        xref_db=conf.xref_db,
+        og_db=conf.og_db,
+        relevant_taxid=rel_taxids,
+        clades=clades,
+        out=conf.out,
     )
 
 
@@ -506,6 +519,12 @@ def parse_command_line_args():
     go_import_parser.add_argument("--tax-map", required=True, help="Path to taxid map file (pickle)")
     go_import_parser.add_argument("--obo", required=True, help="Path to input obo file defining gene ontology")
     go_import_parser.add_argument("--gaf", nargs="+", help="Path to one or more gene annotations gaf files")
+    go_import_parser.add_argument(
+        "--clades",
+        required=False,
+        default=None,
+        help="Either a comma seperated list of clades or a text file with clade names (one per line). These clades are used to identify clade specific terms for the  go function propagation. If not provided, default clades from OMA pipeline are used.",
+    )
     go_import_parser.add_argument("--out", required=True, help="Output path for the hdf5 file")
 
     gen_aux_file_parser = subparsers.add_parser("generate-aux-files", help="Generate auxiliary files")

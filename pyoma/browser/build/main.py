@@ -523,7 +523,9 @@ def parse_command_line_args():
         "--clades",
         required=False,
         default=None,
-        help="Either a comma seperated list of clades or a text file with clade names (one per line). These clades are used to identify clade specific terms for the  go function propagation. If not provided, default clades from OMA pipeline are used.",
+        help="Either a comma seperated list of clades or a text file with clade names (one per line). These clades "
+        "are used to identify clade specific terms for the  go function propagation. If not provided, default "
+        "clades from OMA pipeline are used.",
     )
     go_import_parser.add_argument("--out", required=True, help="Output path for the hdf5 file")
 

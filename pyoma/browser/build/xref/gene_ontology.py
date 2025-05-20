@@ -97,7 +97,7 @@ class GeneOntologyManager:
         create_index_for_columns(self.go_tab, "EntryNr", "TermNr")
         self.phase = 2
 
-    def _bulk_copy_table(self, source_tab: tables.Tables, target_tab: tables.Table, chunk: int = 1_000_000):
+    def _bulk_copy_table(self, source_tab: tables.Table, target_tab: tables.Table, chunk: int = 1_000_000):
         # 1. remove all indexes from taget_tab
         for c in target_tab.colnames:
             if target_tab.colindexed[c]:

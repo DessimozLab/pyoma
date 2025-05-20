@@ -105,8 +105,13 @@ class FunctionPredictor:
         return grps
 
     def enr2clade(self, enrs: Union[int, NDArray[int]]) -> NDArray[numpy.str_]:
-        k = self.clade_ranges["Low"].searchsorted(enrs)
-        return numpy.where(self.clade_ranges[k - 1]["High"] >= enrs, self.clade_ranges[k - 1]["Clade"], "")
+        if self.clade_ranges.size > 0:
+            k = self.clade_ranges["Low"].searchsorted(enrs)
+            return numpy.where(
+                (k > 0) & (self.clade_ranges[k - 1]["High"] >= enrs), self.clade_ranges[k - 1]["Clade"], ""
+            )
+        else:
+            return numpy.zeros_like(enrs, numpy.str_)
 
     def reliable_annotations_of_entry(self, enr: int) -> Set[GOterm]:
         terms = set()
@@ -141,6 +146,7 @@ class FunctionPredictor:
 
         # annotate all group members
         clades = self.enr2clade(list(entry_anno.keys()))
+        logger.debug(f"clades: {clades}")
         for (enr, annos_entry), clade in zip(entry_anno.items(), clades):
             if not clade:
                 continue

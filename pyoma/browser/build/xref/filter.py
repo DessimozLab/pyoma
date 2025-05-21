@@ -94,6 +94,7 @@ def load_relevant_taxids(
     also the parent taxids up to the genus rank (Higher parents are
     left out, as they are likely too general)"""
     ranks = ncbi_taxonomy.get_rank(species_taxids)
+    logger.debug(f"mapped {len(species_taxids)} taxids to {len(ranks)} ranks: {ranks}")
     relevant_taxids = collections.defaultdict(set)
     for taxid in species_taxids:
         relevant_taxids[taxid].add(taxid)
@@ -103,6 +104,7 @@ def load_relevant_taxids(
             sub_taxids = ncbi_taxonomy.get_descendant_taxa(taxid, intermediate_nodes=True)
             for sub_taxid in sub_taxids:
                 relevant_taxids[sub_taxid].add(taxid)
+    logger.debug(f"relevant taxid mapping: {relevant_taxids}")
     # now, build a tree with the input species and select the genus rank nodes.
     # for each of those, store in the mapping every subnode taxid to a all the
     # species nodes in that clade.
@@ -114,4 +116,5 @@ def load_relevant_taxids(
             else:
                 nn.add_feature("subtaxids", set.union(*list(x.subtaxids for x in nn.get_children())))
                 relevant_taxids[nn.taxid].update(nn.subtaxids)
+    logger.debug(f"final relevant taxid mapping: {relevant_taxids}")
     return relevant_taxids

@@ -47,9 +47,9 @@ def auto_open(fn, *args, **kwargs):
             if fs.startswith(magic):
                 return _open(fn, *args, **kwargs)
     else:
-        if fn.endswith("gz"):
+        if fn.endswith(".gz"):
             return gzip.open(fn, *args, **kwargs)
-        elif fn.endswith("bz2"):
+        elif fn.endswith(".bz2"):
             return bz2.open(fn, *args, **kwargs)
     return open(fn, *args, **kwargs)
 

@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import string
-from typing import Optional, Union
+from typing import Optional, Union, List, Tuple
 
 import numpy
 import tables
@@ -35,11 +35,21 @@ class TaxonomyLookupHelper:
     def get_node_from_taxid(self, taxid):
         return self._taxid_to_node[int(taxid)]
 
-    def get_mrca(self, taxon_ids):
-        taxon_ids = set(taxon_ids)
-        leaves = [self._taxonId_to_node[taxonId] for taxonId in taxon_ids]
+    def get_mrca(self, taxon_ids: List[Tuple[int, str]]) -> TreeNode:
+        """finds the most recent common ancestor of the species tree
+        based on a list of taxon ids.
+        the taxon ids can be either taxids (new numeric taxids in database)
+        or taxonId (original xml_taxonId attributes). Each element in
+        taxon_ids should be a tuple with the taxid/taxonId and the type,
+        i.e. 'taxid', or 'xml'."""
+        leaves = set()
+        for taxon_id, src in taxon_ids:
+            if src == "xml":
+                leaves.add(self._taxonId_to_node[taxon_id])
+            elif src == "taxid":
+                leaves.add(self._taxid_to_node[taxon_id])
         if len(leaves) == 1:
-            return leaves[0]
+            return leaves.pop()
         mrca = self.taxtree.get_common_ancestor(*leaves)
         return mrca
 
@@ -254,7 +264,12 @@ class Annotator:
             else:
                 genes = [self.parser.gene_helper.get_gene_by_new_id(n.get("id")) for n in node.findall(".//geneRef")]
             if node.tag != "orthologGroup":
-                mrca = tax_helper.get_mrca([g.genome_taxonId for g in genes])
+                # get the mrca from all the genes and all the sub-orthologous groups tax ranges
+                taxonIds_of_genes = set(g.genome_taxonId for g in genes)
+                taxids_of_ogs = set(int(og.get("taxonId")) for og in node.findall(".//orthologGroup"))
+                taxids = [(taxonId, "xml") for taxonId in taxonIds_of_genes]
+                taxids.extend([(taxid, "taxid") for taxid in taxids_of_ogs])
+                mrca = tax_helper.get_mrca(taxids)
             else:
                 mrca = tax_helper.get_node_from_taxid(node.get("taxonId"))
                 for pos, c in enumerate(node.iterchildren()):

@@ -46,7 +46,7 @@ tab['cdna'] := [seq(SearchTag('DNA', Entry(i)), i=1..tot_entries)]:
 tab['chrs'] := [seq(SearchTag('CHR',Entry(i)), i=1..tot_entries)];
 locs := []:
 for i to tot_entries do
-    loc_tag = SearchTag('LOC',Entry(i)):
+    loc_tag := SearchTag('LOC',Entry(i)):
     if loc_tag <> '' then
         r := convert_loc(parse(loc_tag));
         if not type(r, matrix) then r := [r] fi:

@@ -438,9 +438,14 @@ class DBBuilder(DarwinExporter):
                             f"{len_cds} vs {prot_tab.row['CDNABufferLength'] - 1}"
                         )
                     cnt_missmatch_locus += 1
-                prot_tab.row["LocusStart"] = locus_tab["Start"].min()
-                prot_tab.row["LocusEnd"] = locus_tab["End"].max()
-                prot_tab.row["LocusStrand"] = locus_tab[0]["Strand"]
+                if len(locus_tab) > 0:
+                    prot_tab.row["LocusStart"] = locus_tab["Start"].min()
+                    prot_tab.row["LocusEnd"] = locus_tab["End"].max()
+                    prot_tab.row["LocusStrand"] = locus_tab[0]["Strand"]
+                else:
+                    prot_tab.row["LocusStart"] = 0
+                    prot_tab.row["LocusEnd"] = 0
+                    prot_tab.row["LocusStrand"] = 1
                 if gs["IsPolyploid"]:
                     prot_tab.row["SubGenome"] = data["subgenome"][nr].encode("ascii")
                 prot_tab.row.append()

@@ -13,6 +13,7 @@ import operator
 import os
 import re
 import time
+import codecs
 from typing import Union, Optional, List, Iterable, Tuple
 
 import numpy
@@ -50,6 +51,18 @@ from ..convert import (
 from ..exceptions import DBConsistencyError
 from ..db import Taxonomy
 from ..convert import DarwinExporter
+
+
+# defining a handler the react on encoding errors while loading a file
+def log_and_replace_error_handler(exception):
+    # exception is a UnicodeDecodeError
+    common.package_logger.error(
+        f"Unicode decode error at byte {exception.start}: {exception.reason}. Replaceing it with '�'"
+    )
+    return ("�", exception.end)
+
+
+codecs.register_error("logreplace", log_and_replace_error_handler)
 
 
 class DataImportError(Exception):
@@ -390,7 +403,7 @@ class DBBuilder(DarwinExporter):
 
         for gs in gs_node.iterrows():
             genome = gs["UniProtSpeciesCode"].decode()
-            with open(code_to_file[genome], "r") as fd:
+            with open(code_to_file[genome], encoding="utf-8", errors="logreplace") as fd:
                 data = json.load(fd)
             if len(data["seqs"]) != gs["TotEntries"]:
                 raise DataImportError(

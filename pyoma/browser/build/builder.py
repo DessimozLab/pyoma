@@ -214,7 +214,7 @@ def identify_close_paralogs(df: pandas.DataFrame, join_threshold_mb=500) -> pand
             if len(entries) > 1:
                 pairs.update(pair for pair in itertools.combinations(sorted(entries), 2))
         cp = pandas.DataFrame(pairs, columns=["EntryNr1", "EntryNr2"])
-    return cp.sort_value(by=["EntryNr1", "EntryNr2"], ignore_index=True)
+    return cp.sort_values(by=["EntryNr1", "EntryNr2"], ignore_index=True)
 
 
 class DBBuilder(DarwinExporter):

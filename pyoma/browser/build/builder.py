@@ -180,6 +180,43 @@ def load_homoeologs_from_tsv(genome, basedir: Optional[Union[str, os.PathLike]] 
     return load_tsv_to_numpy((fn, off, off, False))
 
 
+def identify_close_paralogs(df: pandas.DataFrame, join_threshold_mb=500) -> pandas.DataFrame:
+    """identify the close paralogs (shared orthologs) pairs from a VPairs pandas.dataframe"""
+
+    avg_group_size = df.groupby("EntryNr2").size().mean()
+    num_groups = df["EntryNr2"].nunique()
+    est_pairs = num_groups * (avg_group_size * (avg_group_size - 1)) / 2
+    est_memory_bytes = est_pairs * 3 * 8
+    est_memory_mb = est_memory_bytes / (1024**2)
+
+    if est_memory_mb <= join_threshold_mb:
+        # Join-based method
+        common.package_logger.info(
+            f"Using join-based method to identify close paralogs (estimated memory: {est_memory_mb:.1f} MB)"
+        )
+        df_with_index = df.set_index("EntryNr2")
+        cp = df_with_index.join(df_with_index, rsuffix="_2")[["EntryNr1", "EntryNr1_2"]]
+        cp = cp[cp["EntryNr1"] < cp["EntryNr1_2"]].drop_duplicates(ignore_index=True)
+        cp = cp.rename(columns={"EntryNr1_2": "EntryNr2"})
+    else:
+        # Groupby-based method
+        common.package_logger.info(
+            f"⚠️ Using groupby-based method  to identify close paralogs(estimated memory: {est_memory_mb:.1f} MB)"
+        )
+
+        # Group by EntryNr2
+        grouped = df.groupby("EntryNr2")["EntryNr1"]
+
+        # generate all pairs
+        pairs = set()
+        for entrynr2, entrynr1_group in grouped:
+            entries = entrynr1_group.unique()
+            if len(entries) > 1:
+                pairs.update(pair for pair in itertools.combinations(sorted(entries), 2))
+        cp = pandas.DataFrame(pairs, columns=["EntryNr1", "EntryNr2"])
+    return cp.sort_value(by=["EntryNr1", "EntryNr2"], ignore_index=True)
+
+
 class DBBuilder(DarwinExporter):
     def __init__(self, path, logger=None, mode=None, complib="zlib"):
         self.logger = logger if logger is not None else common.package_logger
@@ -330,9 +367,7 @@ class DBBuilder(DarwinExporter):
             if "within" not in rel_node_for_genome:
                 df = pandas.DataFrame(self.h5.get_node(rel_node_for_genome, "VPairs").read())
                 df_with_ss_paralogs = df.loc[df["RelType"] > 1, ["EntryNr1", "EntryNr2"]].set_index("EntryNr2")
-                cp = df_with_ss_paralogs.join(df_with_ss_paralogs, rsuffix="_2")
-                cp = cp[cp["EntryNr1"] < cp["EntryNr1_2"]].reset_index()
-                cp["EntryNr2"] = cp["EntryNr1_2"]
+                cp = identify_close_paralogs(df_with_ss_paralogs)
                 cp["RelType"] = tablefmt.PairwiseRelationTable.columns.get("RelType").enum["close paralog"]
                 cols = list(tablefmt.PairwiseRelationTable.columns)
                 dflt_cols = set(cols) - set(cp.columns)

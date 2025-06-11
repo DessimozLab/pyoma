@@ -366,7 +366,7 @@ class DBBuilder(DarwinExporter):
                 create_index_for_columns(vp_tab, "EntryNr1")
             if "within" not in rel_node_for_genome:
                 df = pandas.DataFrame(self.h5.get_node(rel_node_for_genome, "VPairs").read())
-                df_with_ss_paralogs = df.loc[df["RelType"] > 1, ["EntryNr1", "EntryNr2"]].set_index("EntryNr2")
+                df_with_ss_paralogs = df.loc[df["RelType"] > 1, ["EntryNr1", "EntryNr2"]]
                 cp = identify_close_paralogs(df_with_ss_paralogs)
                 cp["RelType"] = tablefmt.PairwiseRelationTable.columns.get("RelType").enum["close paralog"]
                 cols = list(tablefmt.PairwiseRelationTable.columns)

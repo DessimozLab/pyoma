@@ -1649,14 +1649,16 @@ class RootHOGMetaDataLoader(object):
             data = []
             with open(fn, "rt") as fh:
                 reader = csv.reader(fh, dialect="excel-tab")
-                row = next(reader)
-                try:
-                    grp = int(row[0])
-                    data.append((grp, row[1]))
-                except ValueError:
-                    pass  # skip header
+                header_done = False
                 for row in reader:
-                    grp = int(row[0])
+                    try:
+                        grp = int(row[0])
+                        header_done = True
+                    except ValueError:
+                        # if header not yet done, skip header
+                        if header_done:
+                            common.package_logger.error(f"Cannot parse line {reader.line_num} of {fn}: {row}")
+                            raise
                     data.append((grp, row[1]))
             all_data[key] = [x[1] for x in sorted(data)]
         return all_data

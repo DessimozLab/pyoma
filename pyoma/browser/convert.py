@@ -1022,7 +1022,8 @@ class DarwinExporter(object):
                 drop_data=True,
             )
             data = sorted(group_sizes[group_type].items())
-            grp_size_tab.append(data)
+            if len(data) > 0:
+                grp_size_tab.append(data)
 
         cov_fracs = self.add_domain_covered_sites_counts()
         cov_hist, bins = numpy.histogram(cov_fracs[cov_fracs > 0], bins=numpy.linspace(0, 1, 51))

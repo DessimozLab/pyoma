@@ -4,6 +4,7 @@ import json
 import logging
 import pickle
 import sys
+import csv
 import warnings
 from os.path import exists, getsize, join, basename
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -41,7 +42,13 @@ def phase_genomes(conf):
     with DBBuilder(conf.db, mode="write", logger=logger) as db:
         db.add_version(conf.rel_char)
         db.add_taxonomy(conf.tax_tsv)
-        name2code = db.add_species_data(conf.gs_tsv)
+        if conf.updated_taxid_tsv is not None:
+            with open(conf.updated_taxid_tsv, "rt") as fh:
+                reader = csv.reader(fh, dialect="excel-tab")
+                taxid_updates = {int(row[0]): int(row[1]) for row in reader if row[0].isdigit()}
+        else:
+            taxid_updates = None
+        name2code = db.add_species_data(conf.gs_tsv, taxid_updates=taxid_updates)
         code_to_file = {name2code[basename(f).split(".")[0]]: f for f in conf.genomes}
         with XrefStorer(conf.xref_db, index_cols=["EntryNr"]) as xref_storer:
             db.add_proteins(code_to_file, OmaGroupsProvider(conf.oma_groups), xref_collector=xref_storer)
@@ -298,6 +305,9 @@ def parse_command_line_args():
     genomes_parser.set_defaults(func=phase_genomes)
     genomes_parser.add_argument("--db", required=True, help="Path to database")
     genomes_parser.add_argument("--gs-tsv", required=True, help="Path to genomes summary file in TSV format")
+    genomes_parser.add_argument(
+        "--updated-taxid-tsv", required=False, help="Path to a TSV file mapping outdated taxids to new ones."
+    )
     genomes_parser.add_argument("--tax-tsv", required=True, help="Path to taxonomy file in TSV format")
     genomes_parser.add_argument("--oma-groups", required=False, help="Path to OMA groups json file")
     genomes_parser.add_argument("--rel-char", required=False, default=None, help="Release character")

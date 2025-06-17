@@ -267,7 +267,7 @@ class DBBuilder(DarwinExporter):
         )
         create_index_for_columns(taxtab, "NCBITaxonId")
 
-    def add_species_data(self, gs_tsv):
+    def add_species_data(self, gs_tsv, taxid_updates=None):
         """parses a genome summary from the tsv file and adds it to the database"""
 
         def parse_as_date_column(val):
@@ -291,13 +291,25 @@ class DBBuilder(DarwinExporter):
 
         tax = Taxonomy(self.h5.get_node("/Taxonomy").read())
         taxid_order = {int(node["NCBITaxonId"]): i for i, (node, _) in enumerate(tax.traverse(strategy="postorder"))}
+        is_genome_node = {int(x["NCBITaxonId"]): x["IsGenome"] for x in tax.tax_table}
 
         data = pandas.read_csv(gs_tsv, sep="\t")
+        if taxid_updates is not None:
+            data["NCBITaxonId"] = data["NCBITaxonId"].replace(taxid_updates)
         data["order"] = data["NCBITaxonId"].map(taxid_order)
+        data["taxid_is_genome"] = data["NCBITaxonId"].map(is_genome_node)
         data.sort_values(by=["order", "GenomeId"], inplace=True)
         data["NCBITaxonId"] = numpy.where(
             (data["NCBITaxonId"].duplicated(keep=False)), data["GenomeId"], data["NCBITaxonId"]
         )
+        # for the genomes that are also internal nodes, make them extant by using the GenomeId as NCBITaxonId
+        data["NCBITaxonId"] = numpy.where(~data["taxid_is_genome"], data["GenomeId"], data["NCBITaxonId"])
+        data.loc[~data["taxid_is_genome"], "SciName"] = (
+            data.loc[~data["taxid_is_genome"], "SciName"]
+            + " - "
+            + data.loc[~data["taxid_is_genome"], "UniProtSpeciesCode"]
+        )
+
         data.reset_index(drop=True, inplace=True)
         name2code = {str(row.Name): str(row.UniProtSpeciesCode) for row in data.itertuples(index=False)}
 

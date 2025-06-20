@@ -100,7 +100,7 @@ def load_relevant_taxids(
         relevant_taxids[taxid].add(taxid)
     # for every species (that has a limited rank), select all its children (recursively)
     for taxid in species_taxids:
-        if ranks[taxid] in ("species", "genus", "varietas", "strain"):
+        if ranks.get(taxid) in ("species", "genus", "varietas", "strain"):
             sub_taxids = ncbi_taxonomy.get_descendant_taxa(taxid, intermediate_nodes=True)
             for sub_taxid in sub_taxids:
                 relevant_taxids[sub_taxid].add(taxid)
@@ -108,7 +108,11 @@ def load_relevant_taxids(
     # now, build a tree with the input species and select the genus rank nodes.
     # for each of those, store in the mapping every subnode taxid to a all the
     # species nodes in that clade.
-    tree = ncbi_taxonomy.get_topology(species_taxids, intermediate_nodes=True, annotate=True)
+    ncbi_taxids = list(ncbi_taxonomy.get_taxid_translator(species_taxids).keys())
+    if len(ncbi_taxids) == 0:
+        return relevant_taxids
+
+    tree = ncbi_taxonomy.get_topology(ncbi_taxids.keys(), intermediate_nodes=True, annotate=True)
     for genus_node in tree.iter_search_nodes(rank="genus"):
         for nn in genus_node.traverse(strategy="postorder"):
             if nn.is_leaf():

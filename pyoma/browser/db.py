@@ -3164,6 +3164,7 @@ class Taxonomy(object):
             levels of members for the resulting taxonomy."""
 
         taxids_to_keep = numpy.sort(self._get_taxids_from_any(members))
+        taxids_to_keep = taxids_to_keep[taxids_to_keep != 0]  # remove
         if augment_parents:
             # find all the parents of all the members, add them to taxids_to_keep
             additional_levels = set([])

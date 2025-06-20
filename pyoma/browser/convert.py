@@ -17,6 +17,7 @@ import re
 import resource
 import subprocess
 import time
+import uuid
 from typing import List, Iterable, Tuple, Union, Mapping, Dict
 from builtins import str, chr, range, object, super, bytes
 from tempfile import NamedTemporaryFile
@@ -241,7 +242,9 @@ def read_vps_from_tsv(gs, ref_genome, basedir=None, check_exist_and_swap=False):
     return numpy.lib.recfunctions.stack_arrays(all_pairs, usemask=False)
 
 
-def load_hogs_at_level(fname, level):
+def load_hogs_at_level(fname, level, outdir=None):
+    if outdir is None:
+        outdir = os.getenv("TMPDIR", "/tmp")
     with tables.open_file(fname, "r") as h5:
         lev = level.encode("utf-8") if isinstance(level, str) else level
         tab = h5.get_node("/HogLevel")
@@ -250,7 +253,10 @@ def load_hogs_at_level(fname, level):
         hogs = numpy.fromiter(hog_it, dtype=extended_dtype)
         hogs.sort(order="ID")
         hogs["IdxPerLevelTable"] = numpy.arange(len(hogs))
-        return hogs
+    tmp_id = uuid.uuid4().hex
+    out_path = os.path.join(outdir, f"hog-{tmp_id}.npz")
+    numpy.savez_compressed(out_path, hogs=hogs)
+    return level, out_path
 
 
 class DataImportError(Exception):
@@ -751,7 +757,9 @@ class DarwinExporter(object):
             for future in concurrent.futures.as_completed(future_to_level):
                 level = future_to_level[future]
                 try:
-                    hogs = future.result()
+                    level, hog_path = future.result()
+                    hogs = numpy.load(hog_path)["hogs"]
+                    os.remove(hog_path)
                     # fallback to level if taxid is not known
                     tab_name = "tax{}".format(lev2tax.get(level, level.decode()))
                     tab = self.h5.create_table(

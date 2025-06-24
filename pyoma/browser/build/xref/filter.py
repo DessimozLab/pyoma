@@ -112,7 +112,7 @@ def load_relevant_taxids(
     if len(ncbi_taxids) == 0:
         return relevant_taxids
 
-    tree = ncbi_taxonomy.get_topology(ncbi_taxids.keys(), intermediate_nodes=True, annotate=True)
+    tree = ncbi_taxonomy.get_topology(ncbi_taxids, intermediate_nodes=True, annotate=True)
     for genus_node in tree.iter_search_nodes(rank="genus"):
         for nn in genus_node.traverse(strategy="postorder"):
             if nn.is_leaf():

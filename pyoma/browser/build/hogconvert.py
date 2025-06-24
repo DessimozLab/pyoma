@@ -111,6 +111,7 @@ class GeneLookupHelper:
         )
 
         sp, sp_node, genes_node = None, None, None
+        gst = self.parser._gstab
         for gene in genes:
             if sp is None or gene.e_nr > sp.max_enr:
                 if sp is not None:
@@ -118,6 +119,12 @@ class GeneLookupHelper:
                 sp = self.search_species_by_entry_nr(gene.e_nr)
                 sp_node = copy.deepcopy(sp.xml_node)
                 sp_node.set("taxonId", str(self.parser.taxonomy.get_node_from_taxonId(sp.xml_taxonId).taxid))
+                gs = gst[numpy.where(gst["NCBITaxonId"] == int(sp_node.get("taxonId")))][0]
+                if gs["SciName"].decode() != sp_node.get("name"):
+                    logger.warning(
+                        f"Updateing species name for {gs['NCBITaxonId']} from {sp_node.get('name')} to {gs['SciName'].decode()}"
+                    )
+                    sp_node.set("name", gs["SciName"].decode())
                 genes_node = sp_node.find(".//genes")
 
             assert sp.entry_offset < gene.e_nr <= sp.max_enr

@@ -293,7 +293,7 @@ class DBBuilder(DarwinExporter):
         taxid_order = {int(node["NCBITaxonId"]): i for i, (node, _) in enumerate(tax.traverse(strategy="postorder"))}
         is_genome_node = {int(x["NCBITaxonId"]): x["IsGenome"] for x in tax.tax_table}
 
-        data = pandas.read_csv(gs_tsv, sep="\t")
+        data = pandas.read_csv(gs_tsv, sep="\t", dtype={"SciName": str})
         if taxid_updates is not None:
             data["NCBITaxonId"] = data["NCBITaxonId"].replace(taxid_updates)
         data["order"] = data["NCBITaxonId"].map(taxid_order)

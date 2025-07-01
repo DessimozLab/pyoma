@@ -291,24 +291,24 @@ class DBBuilder(DarwinExporter):
 
         tax = Taxonomy(self.h5.get_node("/Taxonomy").read())
         taxid_order = {int(node["NCBITaxonId"]): i for i, (node, _) in enumerate(tax.traverse(strategy="postorder"))}
-        is_genome_node = {int(x["NCBITaxonId"]): x["IsGenome"] for x in tax.tax_table}
+
+        tax_2_taxtable_row = {int(x["NCBITaxonId"]): x for x in tax.tax_table}
+
+        def select_taxid_and_set_is_genome(row):
+            taxid = row["NCBITaxonId"]
+            if taxid not in tax_2_taxtable_row or not tax_2_taxtable_row[taxid]["IsGenome"]:
+                taxid = row["GenomeId"]
+            taxtabrow = tax_2_taxtable_row[taxid]
+            return {"NCBITaxonId": taxid, "IsGenome": taxtabrow["IsGenome"], "SciName": taxtabrow["Name"]}
 
         data = pandas.read_csv(gs_tsv, sep="\t", dtype={"SciName": str})
         if taxid_updates is not None:
             data["NCBITaxonId"] = data["NCBITaxonId"].replace(taxid_updates)
+        data[["NCBITaxonId", "taxid_is_genome", "SciName"]] = data.apply(
+            select_taxid_and_set_is_genome, result_type="expand", axis=1
+        )
         data["order"] = data["NCBITaxonId"].map(taxid_order)
-        data["taxid_is_genome"] = data["NCBITaxonId"].map(is_genome_node)
         data.sort_values(by=["order", "GenomeId"], inplace=True)
-        data["NCBITaxonId"] = numpy.where(
-            (data["NCBITaxonId"].duplicated(keep=False)), data["GenomeId"], data["NCBITaxonId"]
-        )
-        # for the genomes that are also internal nodes, make them extant by using the GenomeId as NCBITaxonId
-        data["NCBITaxonId"] = numpy.where(~data["taxid_is_genome"], data["GenomeId"], data["NCBITaxonId"])
-        data.loc[~data["taxid_is_genome"], "SciName"] = (
-            data.loc[~data["taxid_is_genome"], "SciName"]
-            + " - "
-            + data.loc[~data["taxid_is_genome"], "UniProtSpeciesCode"]
-        )
 
         data.reset_index(drop=True, inplace=True)
         name2code = {str(row.Name): str(row.UniProtSpeciesCode) for row in data.itertuples(index=False)}

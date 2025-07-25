@@ -59,11 +59,11 @@ class Mapper(metaclass=abc.ABCMeta):
                 ranges.append((g.entry_nr_offset + 1, g.entry_nr_offset + g.nr_entries))
                 genomes.append(g)
             ranges = sorted(ranges, key=lambda x: x[0])
-            for k in range(len(ranges) - 1):
-                assert (
-                    ranges[k][1] + 1 == ranges[k + 1][0]
-                ), f"ranges not as expected for {src_taxid} -> {target_taxids}: {ranges}"
-            res[src_taxid] = TaxRange(genomes, (ranges[0][0], ranges[-1][1]))
+            if all(ranges[k][1] + 1 == ranges[k + 1][0] for k in range(len(ranges) - 1)):
+                tax_range = TaxRange(genomes, (ranges[0][0], ranges[-1][1]))
+            else:
+                tax_range = TaxRange(genomes, set(r for rng in ranges for r in range(rng[0], rng[1] + 1)))
+            res[src_taxid] = tax_range
         return res
 
     def _load_source_ids(self, dbpath: os.PathLike) -> Mapping[str, Set[int]]:
@@ -492,6 +492,9 @@ def combine_xrefs(xrefs: List[os.PathLike], out: os.PathLike):
                 dupl_subset_columns=["ECacc"],
                 storer_callback=storer.add_ecs,
             )
+        except Exception as e:
+            logger.exception(f"Error while combining xrefs: {e}")
+            raise
         finally:
             for h5h in h5hs:
                 h5h.close()

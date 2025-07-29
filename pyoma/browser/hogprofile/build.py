@@ -97,7 +97,12 @@ class BaseProfileBuilderProcess(mp.Process):
                 self.control_queue.put((self.proc_id, "DONE"))
                 logger.debug("sent DONE info to control queue (%s)", self.proc_id)
             else:
-                result = self.handle_input(item)
+                try:
+                    result = self.handle_input(item)
+                except Exception as e:
+                    logger.exception("Exception while handling input [%s]: %s", item, e)
+                    self.control_queue.put((self.proc_id, "ERROR"))
+                    continue
                 if result is not None:
                     self.out_queue.put(result)
                 self.control_queue.put((self.proc_id, "JOB_HANDELED"))
@@ -169,7 +174,7 @@ class ProfileBuilder(BaseProfileBuilderProcess):
         self.builder.db.close()
 
     def handle_input(self, df):
-        print("handling df: {}".format(df))
+        logger.info("handling df: {}".format(df))
         df["tree"] = df[["Fam", "ortho"]].apply(self.ham_pipeline, axis=1)
         df[["hash", "rows", "species"]] = df[["Fam", "tree"]].apply(self.hash_pipeline, axis=1)
         return df[["Fam", "hash", "species"]]
@@ -241,7 +246,7 @@ class Collector(BaseProfileBuilderProcess):
         print("Collector process initialized")
 
     def handle_input(self, df: pd.DataFrame):
-        print("handling hash df: {}".format(df))
+        logger.info("handling hash df: {}".format(df))
         if not df.empty:
             hashes = df["hash"].to_dict()
             hashes = {fam: hashes[fam] for fam in hashes if hashes[fam]}

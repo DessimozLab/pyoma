@@ -50,6 +50,9 @@ def find_fingerprints(
 
         for km, cnt in kmers_cnt.most_common():
             enrs = searcher.exact_search(km, only_full_length=False, is_sanitised=True)
+            if len(enrs) == 0:
+                continue
+            enrs = numpy.sort(enrs)
             if numpy.isin(enrs, og_entries["EntryNr"]).all():
                 fingerprints[og] = km.decode()
                 break

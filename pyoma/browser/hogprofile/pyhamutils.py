@@ -29,7 +29,7 @@ def switch_name_ncbi_id(orthoxml):
     root = ET.fromstring(orthoxml)
     for node in root:
         if "species" in node.tag:
-            if "taxonId" in node.attrib and node.attrib["NCBITaxId"] == "0":
+            if "taxonId" in node.attrib:
                 node.attrib["name"] = node.attrib["taxonId"]
             else:
                 node.attrib["name"] = node.attrib["NCBITaxId"]

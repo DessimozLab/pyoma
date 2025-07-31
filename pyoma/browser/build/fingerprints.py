@@ -41,6 +41,13 @@ def find_fingerprints(
     searcher.seq_buff = searcher.seq_buff[:]
     pe_tab = db.db.get_node("/Protein/Entries")
 
+    # ignore alternative splicings - they have too many similar sequences.
+    minor_splice_entries = numpy.array(
+        [r["EntryNr"] for r in pe_tab.where("(AltSpliceVariant > 0) & (AltSpliceVariant != EntryNr)")],
+        dtype=numpy.int32,
+    )
+    logger.info("Ignoring %d alternative splicing variants for fingerprinting", len(minor_splice_entries))
+
     og_iter = range(1, db.get_nr_oma_groups() + 1) if ogs is None else ogs
     fingerprints = {}
     for og in tqdm(og_iter, desc="Finding fingerprints"):
@@ -53,7 +60,8 @@ def find_fingerprints(
             if len(enrs) == 0:
                 continue
             enrs = numpy.sort(enrs)
-            if numpy.isin(enrs, og_entries["EntryNr"]).all():
+            valid = numpy.concatenate((og_entries["EntryNr"], minor_splice_entries))
+            if numpy.isin(enrs, valid).all():
                 fingerprints[og] = km.decode()
                 break
         else:

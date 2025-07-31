@@ -107,7 +107,7 @@ class XrefStorer:
 
     def __enter__(self):
         self.h5 = tables.open_file(
-            self.path, mode=self.mode, filters=tables.Filters(complevel=5, complib="blosc2", fletcher32=True)
+            self.path, mode=self.mode, filters=tables.Filters(complevel=7, complib="blosc2", fletcher32=True)
         )
         if self.mode == "w":
             self.xref = self.h5.create_table("/", "XRef", tablefmt.XRefTable, expectedrows=1e7)
@@ -227,7 +227,7 @@ class DBBuilder(DarwinExporter):
         self._mode = mode
 
     def __enter__(self):
-        compr = tables.Filters(complevel=6, complib=self._complib, fletcher32=False)
+        compr = tables.Filters(complevel=7, complib=self._complib, fletcher32=False)
         self.h5 = tables.open_file(self._path, mode=self._mode[0], filters=compr)
         self.logger.info(f"opened {self._path} in {self._mode} mode, options {compr} ; pyoma {version()}")
         if self._mode == "write":

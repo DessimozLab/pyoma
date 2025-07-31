@@ -87,7 +87,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         self.kwi = None
 
     def setup(self):
-        self.xref_h5 = tables.open_file(self.tmp_h5, "w", filters=tables.Filters(6, complib="blosc"))
+        self.xref_h5 = tables.open_file(self.tmp_h5, "w", filters=tables.Filters(7, complib="blosc2"))
         xref_dtype = numpy.dtype([("XRefId", "S50"), ("EntryNr", "i4"), ("XRefRow", "i4")])
         grp = self.xref_h5.create_group("/", "XRefIndex", title="auxiliary lookup tables with deduplicated xrefs")
         self.xref_idx = self.xref_h5.create_table(
@@ -105,7 +105,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         data = self.xref_idx.read()
         data.sort(order=["XRefId", "EntryNr"])
         self.xref_h5.close()
-        self.xref_h5 = tables.open_file(self.outfile, "w", filters=tables.Filters(6, complib="blosc"))
+        self.xref_h5 = tables.open_file(self.outfile, "w", filters=tables.Filters(7, complib="blosc2"))
         xref_idx = self.xref_h5.create_table(
             "/XRefIndex", "XRefs", obj=data, expectedrows=len(data), createparents=True
         )

@@ -29,7 +29,7 @@ class GeneOntologyManager:
 
     def __enter__(self):
         self.h5 = tables.open_file(
-            self.fpath, mode="w", filters=tables.Filters(complevel=5, complib="blosc2", fletcher32=True)
+            self.fpath, mode="w", filters=tables.Filters(complevel=7, complib="blosc2", fletcher32=True)
         )
         root, name = os.path.split(self.annotation_path)
         self.go_tab = self.h5.create_table(

@@ -71,7 +71,7 @@ class LSHBuilder(object):
     def _open_hdf5(self, filename, mode="w"):
         filters = None
         if mode == "w":
-            filters = tables.Filters(complevel=1, complib="blosc", shuffle=True)
+            filters = tables.Filters(complevel=5, complib="blosc2", fletcher32=True)
         return tables.open_file(filename, mode=mode, filters=filters)
 
     def init_hash_table_file(self, hash_file):
@@ -236,7 +236,7 @@ def compare_versions(output_file, target_path, *old_path):
     with tables.open_file(
         output_file,
         "w",
-        filters=tables.Filters(complevel=1, complib="blosc", shuffle=True),
+        filters=tables.Filters(complevel=7, complib="blosc2", shuffle=True),
     ) as h5_map:
         tab = h5_map.create_table(
             "/",

@@ -197,7 +197,7 @@ class Collector(BaseProfileBuilderProcess):
                 self.builder.db.get_nr_toplevel_hogs() + 1,
                 self.builder.numperm * 2,
             ),
-            filters=tables.Filters(complevel=6, complib="blosc"),
+            filters=tables.Filters(complevel=7, complib="blosc2"),
         )
         species = self.h5.create_carray(
             root,

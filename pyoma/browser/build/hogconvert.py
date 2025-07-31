@@ -721,7 +721,7 @@ class HOGtoHDF5(HogObserver):
         self.nr_entries = parser.nr_proteins
 
     def __enter__(self):
-        self.h5 = tables.open_file(self.h5path, mode="w", filters=tables.Filters(complib="blosc", complevel=6))
+        self.h5 = tables.open_file(self.h5path, mode="w", filters=tables.Filters(complib="blosc2", complevel=7))
         orthoxml_group = self.h5.create_group("/", "OrthoXML")
         self.orthoxml_buffer = self.h5.create_earray(
             orthoxml_group, "Buffer", tables.StringAtom(1), (0,), "concatenated orthoxml files", expectedrows=1e9

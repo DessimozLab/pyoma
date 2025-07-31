@@ -16,6 +16,7 @@ import tables
 from tables import PerformanceWarning
 import omataxonomy
 
+from pyoma.browser.hogidmap import compute_minhashes_for_db, compare_versions
 from ..hogprofile.build import compute_profiles
 from .fingerprints import find_fingerprints
 from .keyword import collect_keywords
@@ -260,6 +261,14 @@ def store_summary_info(conf):
         db.add_hog_domain_prevalence()
         db.add_group_metadata()
         db.add_roothog_metadata()
+
+
+def hogmap_lsh(conf):
+    compute_minhashes_for_db(conf.db, conf.out, nr_procs=conf.nr_procs)
+
+
+def hogmap_ids(conf):
+    compare_versions(conf.out, conf.target, *conf.old)
 
 
 def gen_aux_files(conf):
@@ -580,6 +589,24 @@ def parse_command_line_args():
     update_summary_parser.add_argument(
         "--db", required=True, help="Path to database hdf5 database. This file will be modified!"
     )
+
+    hogmap_lsh_parser = subparsers.add_parser(
+        "hogmap-lsh", help="Generate locality sensitive hashing database for HOGs"
+    )
+    hogmap_lsh_parser.set_defaults(func=hogmap_lsh)
+    hogmap_lsh_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
+    hogmap_lsh_parser.add_argument("--out", required=True, help="Path to output lsh database file")
+    hogmap_lsh_parser.add_argument(
+        "--nr-procs", type=int, default=None, help="Number of processes to use for LSH computation"
+    )
+
+    hogmap_ids_parser = subparsers.add_parser("hogmap-ids", help="Map HOGs from one version to another using LSH")
+    hogmap_ids_parser.set_defaults(func=hogmap_ids)
+    hogmap_ids_parser.add_argument("--target", required=True, help="Path to target LSH database")
+    hogmap_ids_parser.add_argument(
+        "--old", nargs="+", required=True, help="Path to old LSH databases to compare against the target"
+    )
+    hogmap_ids_parser.add_argument("--out", required=True, help="Path to output HOG mapping database file")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

@@ -45,9 +45,9 @@ class TaxonomyLookupHelper:
         leaves = set()
         for taxon_id, src in taxon_ids:
             if src == "xml":
-                leaves.add(self._taxonId_to_node[taxon_id])
+                leaves.add(self.get_node_from_taxonId(taxon_id))
             elif src == "taxid":
-                leaves.add(self._taxid_to_node[taxon_id])
+                leaves.add(self.get_node_from_taxid(taxon_id))
         if len(leaves) == 1:
             return leaves.pop()
         mrca = self.taxtree.get_common_ancestor(*leaves)
@@ -61,14 +61,16 @@ class TaxonomyLookupHelper:
             yield n
             n = n.up
 
-    def as_xml(self):
+    def as_xml(self, root_tax_node: Optional[TreeNode] = None) -> etree.Element:
         def _traverseR(node, xml):
             n = etree.SubElement(xml, "taxon", {"id": str(node.taxid), "name": str(node.name)})
             for child in node.children:
                 _traverseR(child, n)
 
         root = etree.Element("taxonomy")
-        _traverseR(self.taxtree, root)
+        if root_tax_node is None:
+            root_tax_node = self.taxtree
+        _traverseR(root_tax_node, root)
         return root
 
 
@@ -694,12 +696,16 @@ class PerFamilyHOGObserver(HogObserver):
         root_attribs = {"xmlns": "http://orthoXML.org/2011/", **self._parser.get_orthoxml_attribs()}
         root = etree.Element("orthoXML", attrib=root_attribs)
         genes = [int(n.get("id")) for n in node.findall(".//geneRef")]
+        taxon_ids_of_species = []
         for sp in self._parser.gene_helper.iter_species_with_genes_nodes(genes):
             root.append(sp)
-        root.append(self._parser.taxonomy.as_xml())
+            taxon_ids_of_species.append(int(sp.get("taxonId")))
+        taxonomy_root = self._parser.taxonomy.get_mrca([(taxon_id, "taxid") for taxon_id in taxon_ids_of_species])
+        root.append(self._parser.taxonomy.as_xml(taxonomy_root))
         root.append(self._parser.get_score_defs())
         groups = etree.SubElement(root, "groups")
         groups.append(node)
+        etree.indent(root, level=0)
         orthoxml = etree.tostring(root, pretty_print=True, encoding="utf-8")
         return orthoxml
 

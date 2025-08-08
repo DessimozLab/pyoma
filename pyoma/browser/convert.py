@@ -744,7 +744,8 @@ class DarwinExporter(object):
             create_index_for_columns(hlfh.get_node("/HogLevel"), "Level")
 
         rel_levels = set(hl_tab.read(field="Level"))
-        self.logger.info("found {} levels, start extracting hogs in parallel".format(len(rel_levels)))
+        remaining_levels = len(rel_levels)
+        self.logger.info("found %d levels, start extracting hogs in parallel", remaining_levels)
 
         if lev2tax is None:
             lev2tax = {row["Name"]: int(row["NCBITaxonId"]) for row in self.h5.get_node("/Taxonomy").read()}
@@ -762,6 +763,7 @@ class DarwinExporter(object):
                     os.remove(hog_path)
                     # fallback to level if taxid is not known
                     tab_name = "tax{}".format(lev2tax.get(level, level.decode()))
+                    self.logger.info("found %d hogs at level %s; store in %s", len(hogs), level, tab_name)
                     tab = self.h5.create_table(
                         where=f"/AncestralGenomes/{tab_name}",
                         name="Hogs",
@@ -772,6 +774,10 @@ class DarwinExporter(object):
                     )
                     create_index_for_columns(tab, "Fam", "IsRoot", "NrMemberGenes", "CompletenessScore")
                     idx_per_level[hogs["HogLevelRowIdx"]] = hogs["IdxPerLevelTable"]
+                    remaining_levels -= 1
+                    self.logger.info(
+                        "Hogs_by_level created for %s. Remaining levels to process: %d", level, remaining_levels
+                    )
                 except Exception as exc:
                     msg = "cannot store cached hogs for {}".format(level)
                     self.logger.exception(msg)

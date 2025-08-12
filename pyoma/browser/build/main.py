@@ -247,7 +247,7 @@ def build_fingerprints(conf):
             ogs = range(int(conf.og_rng[0]), int(conf.og_rng[1]) + 1, 1)
         else:
             ogs = None
-        for og, fp in find_fingerprints(conf.db, conf.suffix_db, ogs=ogs).items():
+        for og, fp in find_fingerprints(conf.db, conf.suffix_db, ogs=ogs, profile=conf.profile).items():
             fh.write(f"{og}\t{fp}\n")
 
 
@@ -574,6 +574,11 @@ def parse_command_line_args():
         default=None,
         nargs=2,
         help="Range of oma groups to process. Boundaries of range are inclusive.",
+    )
+    fingerprint_parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Whether to generate profile information for fingerprints into 'profile.stats'",
     )
     fingerprint_parser.add_argument("--out", required=True, help="Path to output file")
 

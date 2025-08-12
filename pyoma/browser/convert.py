@@ -736,7 +736,7 @@ class DarwinExporter(object):
             row.append()
 
     def add_cache_of_hogs_by_level(self, lev2tax=None, nr_procs=None):
-        self.logger.info("createing cached HogLevel table per level")
+        self.logger.info("creating cached HogLevel table per level")
         hl_tab = self.h5.get_node("/HogLevel")
         temp_hoglevel_file = os.path.join(os.getenv("DARWIN_NETWORK_SCRATCH_PATH", "./"), "tmp-hoglevel.h5")
         with tables.open_file(temp_hoglevel_file, "w") as hlfh:

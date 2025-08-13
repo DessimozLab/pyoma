@@ -61,6 +61,10 @@ def phase_build_seq_indexes(conf):
     ) as out:
         seqs = db.h5.get_node("/Protein/SequenceBuffer").read().tobytes()
         nr_entries = len(db.h5.get_node("/Protein/Entries"))
+        if conf.seq_buf:
+            logger.info("writing sequence buffer to %s", conf.seq_buf)
+            with auto_open(conf.seq_buf, "wb") as fh:
+                fh.write(seqs)
         out.add_sequence_index(seqs=seqs, nr_entries=nr_entries, k=6)
 
 
@@ -329,6 +333,11 @@ def parse_command_line_args():
     seqindex_parser = subparsers.add_parser("seqindex", help="Adding sequence indexes")
     seqindex_parser.set_defaults(func=phase_build_seq_indexes)
     seqindex_parser.add_argument("--db", required=True, help="Path to database containing sequence")
+    seqindex_parser.add_argument(
+        "--seq-buf",
+        required=False,
+        help="Path to output sequence buffer in a seperate file (for memory mapped loading)",
+    )
     seqindex_parser.add_argument("--out", required=True, help="Path to output sequence index database file")
 
     hogconv_parser = subparsers.add_parser(

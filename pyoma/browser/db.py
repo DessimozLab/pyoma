@@ -15,6 +15,7 @@ from bisect import bisect_left
 from builtins import chr, range, object, zip, bytes, str
 from xml.etree import ElementTree as et
 from typing import Union, Tuple, Optional, AnyStr, Set, Generator, Mapping
+from pathlib import Path
 
 import dateutil
 import fuzzyset
@@ -2369,7 +2370,12 @@ class SequenceSearch(object):
                 self.kmer_lookup = self.kmer_lookup()
         except (AttributeError, OSError) as e:
             raise DBConsistencyError("Suffix index for protein sequences is not available: " + str(e))
-        self.seq_buff = self.db.root.Protein.SequenceBuffer
+        seq_buf_path = Path(self.db.filename).parent / "sequences.bin"
+        if seq_buf_path.exists():
+            self.seq_buff = numpy.memmap(seq_buf_path, dtype=numpy.uint8, mode="r")
+            logger.info("Using memmap for the sequence search.")
+        else:
+            self.seq_buff = self.db.root.Protein.SequenceBuffer
         self.n_entries = len(self.db.root.Protein.Entries)
         # suffix array index
         try:

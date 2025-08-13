@@ -12,6 +12,7 @@ import concurrent.futures
 import operator
 import os
 import re
+import math
 import time
 import codecs
 from typing import Union, Optional, List, Iterable, Tuple
@@ -531,9 +532,11 @@ class DBBuilder(DarwinExporter):
         :param k: kmer size used for KmerIndex.
         """
         # Compute & save the suffix array to DB.
+        self.logger.info("computing suffix array")
         sa = sais(seqs)
         sa[:nr_entries].sort()  # Sort delimiters by position.
-        self.h5.create_carray(
+        self.logger.info("storing suffix array into database")
+        sa_h5 = self.h5.create_carray(
             "/Protein",
             createparents=True,
             name="SequenceIndex",
@@ -545,6 +548,7 @@ class DBBuilder(DarwinExporter):
         dtype = numpy.uint32 if (nr_entries < numpy.iinfo(numpy.uint32).max) else numpy.uint64
         idx = numpy.zeros(sa.shape, dtype=dtype)
         mask = numpy.zeros(sa.shape, dtype=bool)
+        orig_pos = numpy.arange(sa.shape[0], dtype=sa.dtype)
 
         # Compute mask and entry index for sequence buff
         for i in range(nr_entries):
@@ -554,7 +558,9 @@ class DBBuilder(DarwinExporter):
             mask[(e - k) : e] = True  # (k-1) invalid and delim.
 
         # Mask off those we don't want...
-        sa = sa[~mask[sa]]
+        keep_mask = ~mask[sa]
+        sa = sa[keep_mask]
+        orig_pos = orig_pos[keep_mask]
 
         # Reorder the necessary elements of entry index
         idx = idx[sa]
@@ -570,6 +576,10 @@ class DBBuilder(DarwinExporter):
             expectedrows=len(kmers),
         )
         self.h5.set_node_attr(kmer_lookup_arr, "k", k)
+        chunk_keys, chunk_pos = [], []
+        chunksize = sa_h5.chunkshape[0] * (
+            1 if len(sa) // sa_h5.chunkshape[0] < 64_000 else math.ceil(len(sa) / sa_h5.chunkshape[0] / 64_000)
+        )
 
         # Now find the split points and construct lookup ragged array.
         t = tqdm(total=len(sa) - k, desc="Building Kmer lookup")
@@ -577,6 +587,9 @@ class DBBuilder(DarwinExporter):
         while ii < len(sa) - k:
             kmer = seqs[sa[ii] : (sa[ii] + k)]
             kk = kmers.decode(kmer)
+            if len(chunk_pos) == 0 or orig_pos[ii] > chunk_pos[-1] + chunksize:
+                chunk_pos.append(orig_pos[ii])
+                chunk_keys.append(kk)
             # assert kk >= len(kmer_lookup_arr)
             nr_empty_kmers = kk - len(kmer_lookup_arr)
             for _ in range(nr_empty_kmers):
@@ -593,6 +606,12 @@ class DBBuilder(DarwinExporter):
         for _ in range(nr_empty_kmers):
             kmer_lookup_arr.append([])
         kmer_lookup_arr.flush()
+
+        self.logger.info("storing suffix array lookup index into database")
+        chunk_pos.append(len(seqs))
+        chunk_keys.append(tot_kmers)
+        self.h5.create_carray("/Protein", name="SuffixArrayIndexKeys", obj=chunk_keys, title="suffix array keys")
+        self.h5.create_carray("/Protein", name="SuffixArrayIndexPos", obj=chunk_pos, title="suffix array positions")
 
     def add_protein_hog_ids(self, hog_ids: numpy.array) -> None:
         entries_tab = self.h5.get_node("/Protein/Entries")

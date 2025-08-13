@@ -2371,6 +2371,15 @@ class SequenceSearch(object):
             raise DBConsistencyError("Suffix index for protein sequences is not available: " + str(e))
         self.seq_buff = self.db.root.Protein.SequenceBuffer
         self.n_entries = len(self.db.root.Protein.Entries)
+        # suffix array index
+        try:
+            self.sa_idx_key = self.db_idx.get_node("/Protein/SuffixArrayIndexKeys")[:]
+            self.sa_idx_pos = self.db_idx.get_node("/Protein/SuffixArrayIndexPos")[:]
+            logger.info("Successfully loaded suffix array index.")
+        except (AttributeError, OSError) as e:
+            self.sa_idx_key = None
+            self.sa_idx_pos = None
+            logger.warning("Suffix array index not available.")
 
         # Kmer lookup arrays / kmer setup
         self.k = self.kmer_lookup._f_getattr("k")
@@ -2461,9 +2470,13 @@ class SequenceSearch(object):
         seq = seq if is_sanitised else self._sanitise_seq(seq)
         filt = self._tax_filter_range if isinstance(entrynr_range, tuple) else self._tax_filter_set
         nn = len(seq)
+        lo, hi = self.n_entries, len(self.seq_idx)
+        if nn >= self.k and self.sa_idx_pos is not None:
+            lo, hi = self._get_suffix_array_range(kmer=self.encoder.decode(seq[: self.k]))
+            logger.debug(f"Prefix search range: [{lo}, {hi}]")
         if nn > 0:
             z = KeyWrapper(self.seq_idx, key=lambda i: self.seq_buff[i : (i + nn)].tobytes())
-            ii = bisect_left(z, seq, lo=self.n_entries)
+            ii = bisect_left(z, seq, lo=lo, hi=hi)
 
             if ii and ii < len(self.seq_idx) and (z[ii] == seq):
                 # Left most found.
@@ -2638,6 +2651,21 @@ class SequenceSearch(object):
         t.join()
         assert len(aligned) > 0, "Alignment thread crashed."
         return zip(matches, aligned)
+
+    def _get_suffix_array_range(self, kmer):
+        """
+        Returns the range of suffix array indices that match the given kmer.
+        Uses the precomputed index
+        """
+        if self.sa_idx_key is None or self.sa_idx_pos is None:
+            raise DBConsistencyError("Suffix array index is not available.")
+        idx = numpy.searchsorted(self.sa_idx_key, kmer, side="right")
+        assert 0 <= idx < len(self.sa_idx_key), "Suffix array index out of range."
+        if idx == 0:
+            # kmer does not exist in suffix array.
+            return 0, len(self.sa_idx_pos[idx])
+        else:
+            return self.sa_idx_pos[idx - 1], self.sa_idx_pos[idx]
 
 
 class OmaIdMapper(object):

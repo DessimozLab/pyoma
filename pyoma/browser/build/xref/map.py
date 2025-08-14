@@ -5,6 +5,7 @@ import itertools
 import os
 import pickle
 import re
+from time import time
 from typing import Mapping, Set, Union, List, Tuple
 import logging
 
@@ -468,16 +469,19 @@ def _fetch_combine_and_reduce_input_data(h5_handles, table_path, sort_columns, d
     ]
     queue = heapq.merge(*iters, key=lambda row: row["EntryNr"])
     for enr, data_per_enr_it in itertools.groupby(queue, key=lambda row: row["EntryNr"]):
+        t0 = time()
         df = pd.DataFrame.from_records(data_per_enr_it)
         df.sort_values(by=sort_columns, inplace=True)
         df.drop_duplicates(subset=dupl_subset_columns, keep="first", inplace=True)
         storer_callback(df.to_records(index=False, column_dtypes=dt).tolist())
+        logger.debug(f"processed {enr} in {time() - t0:.3f}s")
 
 
 def combine_xrefs(xrefs: List[os.PathLike], out: os.PathLike):
     with XrefStorer(out, index_cols=["EntryNr", "XRefId", "XRefSource"], suffix_col="XRefId") as storer:
         h5hs = [tables.open_file(fn, mode="r") for fn in xrefs]
         try:
+            logger.info("collecting crossreferences from %s files", len(xrefs))
             _fetch_combine_and_reduce_input_data(
                 h5hs,
                 "/XRef",
@@ -485,6 +489,7 @@ def combine_xrefs(xrefs: List[os.PathLike], out: os.PathLike):
                 dupl_subset_columns=["XRefSource", "XRefId"],
                 storer_callback=storer.add_xrefs,
             )
+            logger.info("collecting EC annotations from %s files", len(xrefs))
             _fetch_combine_and_reduce_input_data(
                 h5hs,
                 "/Annotations/EC",

@@ -13,6 +13,7 @@ import operator
 import os
 import re
 import math
+import tempfile
 import time
 import codecs
 from typing import Union, Optional, List, Iterable, Tuple
@@ -543,69 +544,165 @@ class DBBuilder(DarwinExporter):
             title="concatenated protein sequences suffix array",
             obj=sa,
         )
+        delimiters_sorted = sa[:nr_entries]
+        sa = None  # free memory
 
-        # Create lookup table for fa2go
+        # -----------------------------
+        # Phase 1: Build EntryIndex (idx) and Mask on disk, range-by-range
+        # -----------------------------
         dtype = numpy.uint32 if (nr_entries < numpy.iinfo(numpy.uint32).max) else numpy.uint64
-        idx = numpy.zeros(sa.shape, dtype=dtype)
-        mask = numpy.zeros(sa.shape, dtype=bool)
-        orig_pos = numpy.arange(sa.shape[0], dtype=sa.dtype)
-
-        # Compute mask and entry index for sequence buff
-        for i in range(nr_entries):
-            s = (sa[i - 1] if i > 0 else -1) + 1
-            e = sa[i] + 1
-            idx[s:e] = i + 1
-            mask[(e - k) : e] = True  # (k-1) invalid and delim.
-
-        # Mask off those we don't want...
-        keep_mask = ~mask[sa]
-        sa = sa[keep_mask]
-        orig_pos = orig_pos[keep_mask]
-
-        # Reorder the necessary elements of entry index
-        idx = idx[sa]
-
-        # Initialise lookup array
         atom = tables.UInt32Atom if dtype is numpy.uint32 else tables.UInt64Atom
-        kmers = KmerEncoder(k, is_protein=True)
-        kmer_lookup_arr = self.h5.create_vlarray(
-            "/Protein",
-            name="KmerLookup",
-            atom=atom(shape=()),
-            title="kmer entry lookup table",
-            expectedrows=len(kmers),
-        )
-        self.h5.set_node_attr(kmer_lookup_arr, "k", k)
-        chunk_keys, chunk_pos = [], []
-        chunksize = sa_h5.chunkshape[0] * (
-            1 if len(sa) // sa_h5.chunkshape[0] < 64_000 else math.ceil(len(sa) / sa_h5.chunkshape[0] / 64_000)
-        )
+        n_seq = len(seqs)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = os.path.join(tmpdir, "sa_helper.h5")
+            h5_tmp = tables.open_file(
+                tmp_path, mode="w", filters=tables.Filters(complevel=3, complib="blosc2", bitshuffle=True)
+            )
+            idx_node = h5_tmp.create_carray(
+                "/", "EntryIndex", atom=atom(), shape=(n_seq,), title="Entry number per sequence position"
+            )
+            mask_node = h5_tmp.create_carray(
+                "/",
+                "Mask",
+                atom=tables.BoolAtom(),
+                shape=(n_seq,),
+                title=f"Invalid flags for last {k} positions of each entry (and delimiter)",
+            )
+
+            self.logger.info("Building EntryIndex and Mask (range assignments; no big RAM)...")
+            prev = -1
+            for i, d in enumerate(delimiters_sorted):
+                s = prev + 1
+                e = int(d)  # inclusive end index for entry
+                if e >= s:
+                    idx_node[s : e + 1] = i + 1  # 1-based entry numbering
+                # mask last k positions (and delimiter position) if they exist
+                ms = max(e - (k - 1), 0)
+                me = min(e, n_seq - 1)
+                if ms <= me:
+                    mask_node[ms : me + 1] = True
+                prev = e
+
+            # -----------------------------
+            # Phase 2: Stream-filter SA → SA_filtered, SA_origpos, and build IndexInSAOrder
+            # -----------------------------
+            sa_f = h5_tmp.create_earray(
+                "/",
+                "SequenceIndex",
+                atom=tables.UInt64Atom(),
+                shape=(0,),
+                expectedrows=n_seq,
+                title="Filtered suffix array (kept positions only)",
+            )
+            sa_origpos = h5_tmp.create_earray(
+                "/",
+                "SequenceIndexOrigPos",
+                atom=tables.UInt64Atom(),
+                shape=(0,),
+                expectedrows=n_seq,
+                title="Original SA indices corresponding to filtered SA",
+            )
+            idx_saorder = h5_tmp.create_earray(
+                "/",
+                "IndexInSAOrder",
+                atom=atom(),
+                shape=(0,),
+                expectedrows=n_seq,
+                title="Entry numbers aligned to filtered SA order",
+            )
+
+            self.logger.info("Streaming SA to filter by mask and to align idx in SA-order...")
+            sa_chunk_read = 10_000_000  # stream size for reading SA from disk
+            for start in tqdm(range(0, n_seq, sa_chunk_read), desc="Filter SA"):
+                stop = min(n_seq, start + sa_chunk_read)
+                chunk_sa = sa_h5[start:stop]
+                # For each p in chunk_sa, keep if mask[p] == False
+                # Build boolean keep array without allocating huge temporaries:
+                # (per-chunk is fine)
+                chunk_mask = mask_node[chunk_sa]  # bool[chunk]
+                keep = ~chunk_mask
+
+                kept_sa = chunk_sa[keep]
+                if kept_sa.size == 0:
+                    continue
+
+                # append SA_filtered
+                sa_f.append(kept_sa)
+
+                # append SA_origpos (original indices)
+                # positions of kept entries in the original SA = start + np.nonzero(keep)
+                kept_origpos = (start + numpy.nonzero(keep)[0]).astype(numpy.uint64)
+                sa_origpos.append(kept_origpos)
+
+                # append idx in SA-order directly from idx_node[p] for each kept p
+                kept_idx = idx_node[kept_sa]
+                idx_saorder.append(kept_idx)
+
+            # flush to disk
+            sa_f.flush()
+            sa_origpos.flush()
+            idx_saorder.flush()
+
+            # -----------------------------
+            # Phase 3: Build k-mer lookup by scanning SA_filtered
+            # -----------------------------
+            kmers = KmerEncoder(k, is_protein=True)
+            kmer_lookup_arr = self.h5.create_vlarray(
+                "/Protein",
+                name="KmerLookup",
+                atom=atom(shape=()),
+                title="kmer entry lookup table",
+                expectedrows=len(kmers),
+            )
+            self.h5.set_node_attr(kmer_lookup_arr, "k", k)
+            chunk_keys, chunk_pos = [], []
+            chunksize = sa_h5.chunkshape[0] * (
+                1
+                if len(sa_h5) // sa_h5.chunkshape[0] < 64_000
+                else math.ceil(len(sa_h5) / sa_h5.chunkshape[0] / 64_000)
+            )
 
         # Now find the split points and construct lookup ragged array.
-        t = tqdm(total=len(sa) - k, desc="Building Kmer lookup")
+        L = int(len(sa_f)) - k
+        t = tqdm(total=max(L, 0), desc="Building Kmer lookup")
         ii, tot_kmers = 0, len(kmers)
-        while ii < len(sa) - k:
-            kmer = seqs[sa[ii] : (sa[ii] + k)]
-            kk = kmers.decode(kmer)
-            if len(chunk_pos) == 0 or orig_pos[ii] > chunk_pos[-1] + chunksize:
-                chunk_pos.append(orig_pos[ii])
+        while ii < L:
+            p = int(sa_f[ii])
+            kmer_bytes = bytes(seqs[p : (p + k)])  # random read of k bytes
+            kk = kmers.decode(kmer_bytes)
+
+            # append chunk boundary key if needed (use original SA position to space keys)
+            if len(chunk_pos) == 0 or int(sa_origpos[ii]) > int(chunk_pos[-1]) + int(chunksize):
+                chunk_pos.append(int(sa_origpos[ii]))
                 chunk_keys.append(kk)
-            # assert kk >= len(kmer_lookup_arr)
-            nr_empty_kmers = kk - len(kmer_lookup_arr)
-            for _ in range(nr_empty_kmers):
+
+            # ensure VLArray has rows up to kk
+            need = kk - len(kmer_lookup_arr)
+            for _ in range(need):
                 kmer_lookup_arr.append([])
+
+            # grow run of equal k-mers
             jj = ii + 1
-            while (jj < len(sa)) and (seqs[sa[jj] : (sa[jj] + k)] == kmer):
+            while jj < L:
+                p2 = int(sa_f[jj])
+                if bytes(seqs[p2 : p2 + k]) != kmer_bytes:
+                    break
                 jj += 1
-            kmer_lookup_arr.append(idx[ii:jj])
+
+            # write the entry numbers for this k-mer (taken from idx_saorder)
+            # NB: idx_saorder is aligned with sa_f, so ranges are contiguous
+            entries = idx_saorder[ii:jj]  # small slice from EArray (not loaded fully)
+            # store as a plain numpy array (PyTables VLArray will copy efficiently)
+            kmer_lookup_arr.append(numpy.array(entries, dtype=dtype))
             t.update(jj - ii)
             # New start at next different kmer
             ii = jj
         # add remaining ones
-        nr_empty_kmers = tot_kmers - len(kmer_lookup_arr)
-        for _ in range(nr_empty_kmers):
+        need_tail = tot_kmers - len(kmer_lookup_arr)
+        for _ in range(need_tail):
             kmer_lookup_arr.append([])
         kmer_lookup_arr.flush()
+        t.close()
 
         self.logger.info("storing suffix array lookup index into database")
         chunk_pos.append(len(seqs))

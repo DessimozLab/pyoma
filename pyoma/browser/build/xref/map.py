@@ -14,7 +14,7 @@ import pandas as pd
 import tables
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
-
+from tqdm import tqdm
 
 from ...db import SequenceSearch
 from ...db import Database, OmaIdMapper
@@ -467,14 +467,17 @@ def _fetch_combine_and_reduce_input_data(h5_handles, table_path, sort_columns, d
         map(lambda row: row.fetch_all_fields(), h5.get_node(table_path).itersorted(sortby="EntryNr"))
         for h5 in h5_handles
     ]
+    a_tab = h5_handles[0].get_node(table_path)
+    try:
+        tot_entries = a_tab[a_tab.colindexes["EntryNr"][-1]]["EntryNr"]
+    except IndexError:
+        tot_entries = len(a_tab)  # most likely empty table
     queue = heapq.merge(*iters, key=lambda row: row["EntryNr"])
-    for enr, data_per_enr_it in itertools.groupby(queue, key=lambda row: row["EntryNr"]):
-        t0 = time()
+    for enr, data_per_enr_it in tqdm(itertools.groupby(queue, key=lambda row: row["EntryNr"]), total=tot_entries):
         df = pd.DataFrame.from_records(data_per_enr_it)
         df.sort_values(by=sort_columns, inplace=True)
         df.drop_duplicates(subset=dupl_subset_columns, keep="first", inplace=True)
         storer_callback(df.to_records(index=False, column_dtypes=dt).tolist())
-        logger.debug(f"processed {enr} in {time() - t0:.3f}s")
 
 
 def combine_xrefs(xrefs: List[os.PathLike], out: os.PathLike):

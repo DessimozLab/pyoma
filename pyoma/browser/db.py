@@ -2479,7 +2479,6 @@ class SequenceSearch(object):
         lo, hi = self.n_entries, len(self.seq_idx)
         if nn >= self.k and self.sa_idx_pos is not None:
             lo, hi = self._get_suffix_array_range(kmer=self.encoder.decode(seq[: self.k]))
-            logger.debug(f"Prefix search range: [{lo}, {hi}]")
         if nn > 0:
             z = KeyWrapper(self.seq_idx, key=lambda i: self.seq_buff[i : (i + nn)].tobytes())
             ii = bisect_left(z, seq, lo=lo, hi=hi)

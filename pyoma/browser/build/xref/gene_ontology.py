@@ -104,14 +104,10 @@ class GeneOntologyManager:
                 target_tab.colinstances[c].remove_index()
 
         # 2. Copy data
-        buffer = []
-        for i, row in enumerate(source_tab.iterrows()):
-            buffer.append(row.fetch_all_fields())
-            if len(buffer) >= chunk:
-                target_tab.append(buffer)
-                buffer.clear()
-        if buffer:
-            target_tab.append(buffer)
+        for start in range(0, source_tab.nrows, chunk):
+            stop = min(start + chunk, source_tab.nrows)
+            target_tab.append(source_tab[start:stop])
+            logger.debug(f"copied chunk {start}:{stop} of {source_tab.nrows} rows")
         target_tab.flush()
 
     def annotation_generated_date(self, date):

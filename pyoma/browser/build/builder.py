@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import collections
 import csv
 import errno
@@ -28,7 +30,7 @@ from tqdm import tqdm
 
 from .. import suffixsearch
 from .. import tablefmt
-from ..KmerEncoder import KmerEncoder
+from ..KmerEncoder import KmerEncoder, DIGITS_AA
 from ..OrthoXMLSplitter import OrthoXMLSplitter
 from ..geneontology import GeneOntology, OntologyParser, FreqAwareGeneOntology
 from ..homoeologs import HomeologsConfidenceCalculator
@@ -536,7 +538,8 @@ class DBBuilder(DarwinExporter):
         self.logger.info("computing suffix array")
         sa = sais(seqs)
         sa[:nr_entries].sort()  # Sort delimiters by position.
-        self.logger.info("storing suffix array into database")
+
+        self.logger.info(f"storing suffix array into database ({len(sa)} positions)")
         sa_h5 = self.h5.create_carray(
             "/Protein",
             createparents=True,
@@ -545,43 +548,19 @@ class DBBuilder(DarwinExporter):
             obj=sa,
         )
         delimiters_sorted = sa[:nr_entries]
-        sa = None  # free memory
 
-        # -----------------------------
-        # Phase 1: Build EntryIndex (idx) and Mask on disk, range-by-range
-        # -----------------------------
-        dtype = numpy.uint32 if (nr_entries < numpy.iinfo(numpy.uint32).max) else numpy.uint64
-        atom = tables.UInt32Atom if dtype is numpy.uint32 else tables.UInt64Atom
+        # store dtype and atom type to fit size of actual entry number and suffix array
+        dtype_sa = sa.dtype
+        dtype_enr = numpy.uint32 if (nr_entries < numpy.iinfo(numpy.uint32).max) else numpy.uint64
+
+        # sa = None  # free memory
+
         n_seq = len(seqs)
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = os.path.join(tmpdir, "sa_helper.h5")
             h5_tmp = tables.open_file(
                 tmp_path, mode="w", filters=tables.Filters(complevel=3, complib="blosc2", bitshuffle=True)
             )
-            idx_node = h5_tmp.create_carray(
-                "/", "EntryIndex", atom=atom(), shape=(n_seq,), title="Entry number per sequence position"
-            )
-            mask_node = h5_tmp.create_carray(
-                "/",
-                "Mask",
-                atom=tables.BoolAtom(),
-                shape=(n_seq,),
-                title=f"Invalid flags for last {k} positions of each entry (and delimiter)",
-            )
-
-            self.logger.info("Building EntryIndex and Mask (range assignments; no big RAM)...")
-            prev = -1
-            for i, d in enumerate(delimiters_sorted):
-                s = prev + 1
-                e = int(d)  # inclusive end index for entry
-                if e >= s:
-                    idx_node[s : e + 1] = i + 1  # 1-based entry numbering
-                # mask last k positions (and delimiter position) if they exist
-                ms = max(e - (k - 1), 0)
-                me = min(e, n_seq - 1)
-                if ms <= me:
-                    mask_node[ms : me + 1] = True
-                prev = e
 
             # -----------------------------
             # Phase 2: Stream-filter SA → SA_filtered, SA_origpos, and build IndexInSAOrder
@@ -589,7 +568,7 @@ class DBBuilder(DarwinExporter):
             sa_f = h5_tmp.create_earray(
                 "/",
                 "SequenceIndex",
-                atom=tables.UInt64Atom(),
+                atom=tables.Atom.from_dtype(dtype_sa),
                 shape=(0,),
                 expectedrows=n_seq,
                 title="Filtered suffix array (kept positions only)",
@@ -597,7 +576,7 @@ class DBBuilder(DarwinExporter):
             sa_origpos = h5_tmp.create_earray(
                 "/",
                 "SequenceIndexOrigPos",
-                atom=tables.UInt64Atom(),
+                atom=tables.Atom.from_dtype(dtype_sa),
                 shape=(0,),
                 expectedrows=n_seq,
                 title="Original SA indices corresponding to filtered SA",
@@ -605,38 +584,45 @@ class DBBuilder(DarwinExporter):
             idx_saorder = h5_tmp.create_earray(
                 "/",
                 "IndexInSAOrder",
-                atom=atom(),
+                atom=tables.Atom.from_dtype(numpy.dtype(dtype_enr)),
                 shape=(0,),
                 expectedrows=n_seq,
                 title="Entry numbers aligned to filtered SA order",
             )
 
-            self.logger.info("Streaming SA to filter by mask and to align idx in SA-order...")
-            sa_chunk_read = 10_000_000  # stream size for reading SA from disk
-            for start in tqdm(range(0, n_seq, sa_chunk_read), desc="Filter SA"):
-                stop = min(n_seq, start + sa_chunk_read)
-                chunk_sa = sa_h5[start:stop]
-                # For each p in chunk_sa, keep if mask[p] == False
-                # Build boolean keep array without allocating huge temporaries:
-                # (per-chunk is fine)
-                chunk_mask = mask_node[chunk_sa]  # bool[chunk]
-                keep = ~chunk_mask
+            # Preconditions:
+            # - delimiters_sorted is a 1D increasing numpy array (uint64) of length nr_entries
+            # - ensure it contains a sentinel at the very end so every p has a next delimiter
+            if delimiters_sorted[-1] < n_seq - 1:
+                # your buffer ends with a delimiter; this line is usually a no-op
+                delimiters_sorted = numpy.concatenate(
+                    [delimiters_sorted, numpy.array([n_seq - 1], dtype=delimiters_sorted.dtype)]
+                )
 
-                kept_sa = chunk_sa[keep]
-                if kept_sa.size == 0:
+            self.logger.info("Streaming SA to filter by mask and to align idx in SA-order...")
+            sa_chunk_read = 10_000_000
+            for start in tqdm(range(0, len(sa_h5), sa_chunk_read), desc="Filter SA (searchsorted)"):
+                stop = min(len(sa_h5), start + sa_chunk_read)
+                chunk_sa = sa_h5[start:stop]
+
+                # Vectorized lookup of nearest delimiter >= p
+                idxs = numpy.searchsorted(delimiters_sorted, chunk_sa, side="left")  # int[chunk]
+                e = delimiters_sorted[idxs]  # uint64[chunk]
+
+                # Keep iff (e - p) >= k
+                keep = (e - chunk_sa) >= k
+
+                if not numpy.any(keep):
                     continue
 
-                # append SA_filtered
+                kept_sa = chunk_sa[keep]
+                kept_origpos = (start + numpy.nonzero(keep)[0]).astype(dtype_sa)
+                # Entry number is idxs+1 at kept positions (1-based)
+                kept_entries = (idxs[keep] + 1).astype(dtype_enr)
+
                 sa_f.append(kept_sa)
-
-                # append SA_origpos (original indices)
-                # positions of kept entries in the original SA = start + np.nonzero(keep)
-                kept_origpos = (start + numpy.nonzero(keep)[0]).astype(numpy.uint64)
                 sa_origpos.append(kept_origpos)
-
-                # append idx in SA-order directly from idx_node[p] for each kept p
-                kept_idx = idx_node[kept_sa]
-                idx_saorder.append(kept_idx)
+                idx_saorder.append(kept_entries)
 
             # flush to disk
             sa_f.flush()
@@ -650,59 +636,178 @@ class DBBuilder(DarwinExporter):
             kmer_lookup_arr = self.h5.create_vlarray(
                 "/Protein",
                 name="KmerLookup",
-                atom=atom(shape=()),
+                atom=tables.Atom.from_dtype(numpy.dtype(dtype_enr)),
                 title="kmer entry lookup table",
                 expectedrows=len(kmers),
             )
             self.h5.set_node_attr(kmer_lookup_arr, "k", k)
-            chunk_keys, chunk_pos = [], []
+
+            # vectorized preparation
+            seqs_np = numpy.frombuffer(seqs, dtype=numpy.uint8)
+            map256 = numpy.full(256, 255, dtype=numpy.uint8)
+            for i, aa in enumerate(DIGITS_AA):  # or DIGITS_DNA if not protein
+                map256[ord(aa)] = i
+            alphabet_size = len(DIGITS_AA)
+
+            # helper to grow VLArray up to a code index
+            def _ensure_rows(vl, upto: int):
+                need = upto - len(vl)
+                for _ in range(need):
+                    vl.append([])
+
+            def _emit_run(code_int: int, arr: numpy.ndarray):
+                _ensure_rows(kmer_lookup_arr, code_int)
+                kmer_lookup_arr.append(arr)
+
+            # vectorized version of kmer_codes_for_positions
+            def kmer_codes_for_positions(P):
+                """
+                Vectorized equivalent of [KmerEncoder.decode(seqs[p:p+k]) for p in P].
+
+                P: np.ndarray of start positions
+
+                implicitly using
+                seqs_np: np.ndarray view of the sequence buffer
+                dt: np.dtype for the position data
+                map256: map from character to uint8
+                alphabet_size: int, size of the alphabet (20 for AA, 5 for DNA)
+                Returns: codes (dt), valid_mask (bool)
+                """
+                P = P.astype(dtype_sa, copy=False)
+                codes = numpy.zeros(len(P), dtype=dtype_sa)
+                good = numpy.ones(len(P), dtype=bool)
+
+                for t in range(k):
+                    b = seqs_np[P + t]
+                    v = map256[b]
+                    bad = v == 255
+                    good &= ~bad
+                    codes = codes * alphabet_size + v.astype(dtype_sa)
+
+                codes[~good] = numpy.iinfo(dtype_sa).max  # sentinel
+                return codes, good
+
             chunksize = sa_h5.chunkshape[0] * (
                 1
                 if len(sa_h5) // sa_h5.chunkshape[0] < 64_000
                 else math.ceil(len(sa_h5) / sa_h5.chunkshape[0] / 64_000)
             )
 
-        # Now find the split points and construct lookup ragged array.
-        L = int(len(sa_f)) - k
-        t = tqdm(total=max(L, 0), desc="Building Kmer lookup")
-        ii, tot_kmers = 0, len(kmers)
-        while ii < L:
-            p = int(sa_f[ii])
-            kmer_bytes = bytes(seqs[p : (p + k)])  # random read of k bytes
-            kk = kmers.decode(kmer_bytes)
+            # Now find the split points and construct lookup ragged array.
+            L = int(len(sa_f)) - k
+            t = tqdm(total=max(L, 0), desc="Building Kmer lookup")
+            ii, tot_kmers = 0, len(kmers)
+            chunk_keys: list[int] = []  # chunk keys for sa-lookup-table
+            chunk_pos: list[int] = []  # positions of chunk in sa-lookup-table
 
-            # append chunk boundary key if needed (use original SA position to space keys)
-            if len(chunk_pos) == 0 or int(sa_origpos[ii]) > int(chunk_pos[-1]) + int(chunksize):
-                chunk_pos.append(int(sa_origpos[ii]))
-                chunk_keys.append(kk)
+            # carry-over for runs and for a deferred boundary that fell inside a run crossing batches
+            prev_code: int | None = None
+            prev_entries: list[numpy.ndarray] = []  # across batch kmers
+            pending_cut: bool = False
 
-            # ensure VLArray has rows up to kk
-            need = kk - len(kmer_lookup_arr)
-            for _ in range(need):
+            if L > 0:
+                first_code = int(kmer_codes_for_positions(sa_f[0:1])[0])
+                chunk_pos.append(int(sa_origpos[0]))
+                chunk_keys.append(first_code)
+            next_target = chunk_pos[-1] + int(chunksize) if chunk_pos else int(chunksize)
+
+            # batch_size = 2**19
+            batch_size = 50
+            while ii < L:
+                jj = min(ii + batch_size, L)
+                P = sa_f[ii:jj]  # start positions
+                codes, good = kmer_codes_for_positions(P)
+                entries = idx_saorder[ii:jj]
+                origpos = sa_origpos[ii:jj]
+                # run boundaries inside the batch
+
+                if jj - ii > 1:
+                    change = numpy.nonzero(codes[1:] != codes[:-1])[0] + 1
+                    run_starts = numpy.concatenate(([0], change))
+                    run_ends = numpy.concatenate((change, [codes.size]))
+                else:
+                    run_starts = numpy.array([0], dtype=numpy.int64)
+                    run_ends = numpy.array([1], dtype=numpy.int64)
+
+                # is the first local run a continuation of previous batch?
+                first_is_cont = prev_code is not None and int(codes[0]) == prev_code
+
+                for a, b in zip(run_starts, run_ends):
+                    code_int = int(codes[a])
+                    abs_a = ii + a
+                    abs_b = ii + b
+
+                    # entries slice for this run (for VLArray emission)
+                    entries_slice = entries[a:b].astype(dtype_enr, copy=False)
+
+                    # ---- boundary scheduler (align to run starts) ----
+                    # We may need to place 0..N boundaries while scanning forward.
+                    # A boundary belongs at the *start of a run*.
+                    start_pos = int(origpos[a])
+                    end_pos = int(origpos[b - 1])
+
+                    # 1) If we were waiting for the *next* run start (because the target fell inside
+                    #    a run that continued past the previous batch), place it now at this run start.
+                    if pending_cut:
+                        chunk_pos.append(start_pos)
+                        chunk_keys.append(code_int)
+                        next_target = chunk_pos[-1] + int(chunksize)
+                        pending_cut = False  # satisfied by this run start
+
+                    # 2) Place as many boundaries as targets we cross while scanning.
+                    #    A boundary can be placed at:
+                    #      - this run's start (if target <= start_pos and this is a *true* run start),
+                    #      - otherwise at the *next* run start (i.e., end of this run).
+                    while next_target <= end_pos:
+                        this_is_true_start = not (a == 0 and first_is_cont)
+                        if this_is_true_start and next_target <= start_pos:
+                            # cut exactly at this run start
+                            chunk_pos.append(start_pos)
+                            chunk_keys.append(code_int)
+                            next_target = chunk_pos[-1] + int(chunksize)
+                            # only one boundary per run start; further cuts must wait for later runs
+                            break
+                        else:
+                            # target lies *inside* this run (or at a fake start due to continuation)
+                            # → align cut to the *next* run start (code change).
+                            if b < len(codes):
+                                next_start_pos = int(origpos[b])  # start of next run in this batch
+                                next_code_int = int(codes[b])
+                                chunk_pos.append(next_start_pos)
+                                chunk_keys.append(next_code_int)
+                                next_target = chunk_pos[-1] + int(chunksize)
+                                # we may still have more targets to satisfy inside subsequent runs,
+                                # but not inside the current run (we aligned to its end), so break.
+                                break
+                            else:
+                                # the next run start is in the *next batch* → defer
+                                pending_cut = True
+                                # do not append now; it will be appended at the next run start we see
+                                break
+
+                    # ---- emit VLArray data, merging with a possible carry-over run ----
+                    if prev_code is None:
+                        prev_code = code_int
+                        prev_entries = [entries_slice]
+                    elif code_int == prev_code:
+                        prev_entries.append(entries_slice)
+                    else:
+                        _emit_run(prev_code, numpy.concatenate(prev_entries))
+                        prev_code = code_int
+                        prev_entries = [entries_slice]
+
+                t.update(jj - ii)
+                ii = jj
+
+            # flush final run
+            if prev_code is not None and prev_entries:
+                _emit_run(prev_code, numpy.concatenate(prev_entries))
+
+            # pad remaining empty rows
+            for _ in range(tot_kmers - len(kmer_lookup_arr)):
                 kmer_lookup_arr.append([])
-
-            # grow run of equal k-mers
-            jj = ii + 1
-            while jj < L:
-                p2 = int(sa_f[jj])
-                if bytes(seqs[p2 : p2 + k]) != kmer_bytes:
-                    break
-                jj += 1
-
-            # write the entry numbers for this k-mer (taken from idx_saorder)
-            # NB: idx_saorder is aligned with sa_f, so ranges are contiguous
-            entries = idx_saorder[ii:jj]  # small slice from EArray (not loaded fully)
-            # store as a plain numpy array (PyTables VLArray will copy efficiently)
-            kmer_lookup_arr.append(numpy.array(entries, dtype=dtype))
-            t.update(jj - ii)
-            # New start at next different kmer
-            ii = jj
-        # add remaining ones
-        need_tail = tot_kmers - len(kmer_lookup_arr)
-        for _ in range(need_tail):
-            kmer_lookup_arr.append([])
-        kmer_lookup_arr.flush()
-        t.close()
+            kmer_lookup_arr.flush()
+            t.close()
 
         self.logger.info("storing suffix array lookup index into database")
         chunk_pos.append(len(seqs))

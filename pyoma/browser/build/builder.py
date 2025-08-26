@@ -553,7 +553,7 @@ class DBBuilder(DarwinExporter):
         dtype_sa = sa.dtype
         dtype_enr = numpy.uint32 if (nr_entries < numpy.iinfo(numpy.uint32).max) else numpy.uint64
 
-        # sa = None  # free memory
+        sa = None  # free memory
 
         n_seq = len(seqs)
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -711,8 +711,7 @@ class DBBuilder(DarwinExporter):
                 chunk_keys.append(first_code)
             next_target = chunk_pos[-1] + int(chunksize) if chunk_pos else int(chunksize)
 
-            # batch_size = 2**19
-            batch_size = 50
+            batch_size = 2**16
             while ii < L:
                 jj = min(ii + batch_size, L)
                 P = sa_f[ii:jj]  # start positions

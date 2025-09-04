@@ -3,6 +3,7 @@ import queue
 import signal
 import threading
 import uuid
+import pickle
 
 import tables
 import ete3
@@ -10,6 +11,8 @@ import multiprocessing as mp
 import time
 import tempfile
 import pandas as pd
+import numpy
+
 from datasketch import WeightedMinHashGenerator, MinHashLSHForest
 from .pyhamutils import get_ham_treemap_from_row
 from .hashutils import generate_treeweights, row2hash
@@ -210,11 +213,12 @@ class Collector(BaseProfileBuilderProcess):
             ),
             filters=tables.Filters(complevel=3, complib="blosc"),
         )
-        lsh_forest = self.h5.create_vlarray(
+        lsh_forest = self.h5.create_earray(
             root,
             "min_hash_lsh_forest",
             createparents=True,
-            atom=tables.ObjectAtom(),
+            atom=tables.UInt8Atom(),
+            shape=(0,),
             filters=tables.Filters(complevel=3, complib="blosc"),
         )
         lsh_tree = self.h5.create_vlarray(
@@ -272,7 +276,12 @@ class Collector(BaseProfileBuilderProcess):
         print("received all results. wrapping up...")
         print("computed minhashes: {}".format(self.count))
         self.forest.index()
-        self.forest_arr.append(self.forest)
+        # Serialize the object
+        serialized = pickle.dumps(self.forest, protocol=pickle.HIGHEST_PROTOCOL)
+        # Convert to uint8 array
+        data = numpy.frombuffer(serialized, dtype=numpy.uint8)
+        # Append
+        self.forest_arr.append(data)
         self.h5.flush()
         self.h5.close()
         self.builder.db.close()

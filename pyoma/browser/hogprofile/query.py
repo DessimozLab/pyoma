@@ -1,5 +1,7 @@
 import datasketch
 import numpy
+import pickle
+import tables
 
 from .tree_helper import leaf_index
 import logging
@@ -7,11 +9,24 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def load_forest(root):
+    node = root.min_hash_lsh_forest
+    if isinstance(node.atom, tables.ObjectAtom):
+        # Old format (VLArray of pickled objects)
+        return node[0]
+    elif isinstance(node.atom, tables.UInt8Atom):
+        # New format (EArray of uint8 → bytes → pickle)
+        buffer = node[:].tobytes()
+        return pickle.loads(buffer)
+    else:
+        raise TypeError(f"Unsupported atom type: {type(node.atom)}")
+
+
 class Profiler(object):
     def __init__(self, db):
         root_level_data = db.get_hdf5_handle().get_node("/HOGProfile/ALL")
         self.db = db  # backref
-        self.forest = root_level_data.min_hash_lsh_forest[0]
+        self.forest = load_forest(root_level_data)
         self.hashes = root_level_data.hashes
         self.species_profile = root_level_data.species_profile
         self.species_tree = root_level_data.species_tree[0]

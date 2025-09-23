@@ -3,6 +3,7 @@ from __future__ import unicode_literals, division, absolute_import
 import sys
 import time
 import unittest
+from unittest.mock import MagicMock
 from builtins import str
 
 import numpy
@@ -92,6 +93,101 @@ class HOGModelTest(TestDbBase):
     def test_keyword_of_hog(self):
         hog = models.HOG(self.db, 2)
         self.assertEqual("", hog.keyword)
+
+
+class TestProteinEntryOrthologyParalogy(unittest.TestCase):
+    def setUp(self):
+        # Mock database and entry data
+        self.mock_db = MagicMock()
+        # Minimal entry dicts with required fields
+        self.entry1 = {"EntryNr": 1, "OmaHOG": b"1.15a.2bz"}
+        self.entry2 = {"EntryNr": 2, "OmaHOG": b"1.15a.2b"}
+        self.entry3 = {
+            "EntryNr": 3,
+            "OmaHOG": b"1.15b.2b",
+        }
+        self.entry4 = {
+            "EntryNr": 4,
+            "OmaHOG": b"5.1b",
+        }
+        self.entry5 = {
+            "EntryNr": 5,
+            "OmaHOG": b"5",
+        }
+        self.entry6 = {
+            "EntryNr": 6,
+            "OmaHOG": b"",
+        }
+        self.entry7 = {
+            "EntryNr": 7,
+            "OmaHOG": b"",
+        }
+
+        def hog_family_sideffect(entry):
+            f = entry["OmaHOG"].split(b".")[0]
+            if len(f) == 0:
+                raise pyoma.browser.exceptions.Singleton(entry)
+            return int(f)
+
+            # Patch hog_family method
+
+        self.mock_db.hog_family.side_effect = hog_family_sideffect
+
+    def make_entry(self, entry_dict):
+        # Patch id_mapper and other required db methods if needed
+        return models.ProteinEntry(self.mock_db, entry_dict)
+
+    def test_not_orthologous_if_same(self):
+        p1 = self.make_entry(self.entry1)
+        self.assertFalse(p1.is_orthologous_to(p1))
+
+    def test_not_paralogous_if_same(self):
+        p1 = self.make_entry(self.entry1)
+        self.assertFalse(p1.is_paralogous_to(p1))
+
+    def test_not_orthologous_but_paralogous_if_different_subhogid(self):
+        p1 = self.make_entry(self.entry1)
+        p2 = self.make_entry(self.entry2)
+        self.assertFalse(p1.is_orthologous_to(p2))
+        self.assertFalse(p2.is_orthologous_to(p1))
+        self.assertEqual("1.15a", p1.is_paralogous_to(p2))
+        self.assertEqual("1.15a", p2.is_paralogous_to(p1))
+
+    def test_not_orthologous_if_different_family(self):
+        p1 = self.make_entry(self.entry1)
+        p4 = self.make_entry(self.entry4)
+        self.assertFalse(p1.is_orthologous_to(p4))
+
+    def test_subfam_orthologous_to_superfam(self):
+        p4 = self.make_entry(self.entry4)
+        p5 = self.make_entry(self.entry5)
+        self.assertEqual("5", p4.is_orthologous_to(p5))
+        self.assertEqual("5", p5.is_orthologous_to(p4))
+
+    def test_subfam_are_not_paralogous_to_superfam(self):
+        p4 = self.make_entry(self.entry4)
+        p5 = self.make_entry(self.entry5)
+        self.assertFalse(p4.is_paralogous_to(p5))
+
+    def test_paralog_not_ortholog_on_subhog(self):
+        p2 = self.make_entry(self.entry2)
+        p3 = self.make_entry(self.entry3)
+        self.assertFalse(p2.is_orthologous_to(p3))
+        self.assertFalse(p3.is_orthologous_to(p2))
+        self.assertEqual("1", p2.is_paralogous_to(p3))
+        self.assertEqual("1", p3.is_paralogous_to(p2))
+
+    def test_neither_paralog_nor_ortholog_on_subhog_with_empty_hogid(self):
+        p6 = self.make_entry(self.entry6)
+        p3 = self.make_entry(self.entry3)
+        self.assertFalse(p6.is_orthologous_to(p3))
+        self.assertFalse(p3.is_paralogous_to(p6))
+
+    def test_orthologous_to_paralogous_on_singletons(self):
+        p6 = self.make_entry(self.entry6)
+        p7 = self.make_entry(self.entry7)
+        self.assertFalse(p6.is_orthologous_to(p7))
+        self.assertFalse(p7.is_paralogous_to(p6))
 
 
 class OmaGroupModelTest(TestDbBase):

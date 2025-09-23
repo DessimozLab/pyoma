@@ -742,18 +742,16 @@ class Database(object):
         entry = self.ensure_entry(entry)
         genome_entry_range = self.id_mapper["OMA"].genome_range(entry["EntryNr"])
 
-        def is_orthologous(a, b):
+        def is_orthologous(a: ProteinEntry, b: ProteinEntry):
             """genes are orthologs if their HOG id have a common prefix that is
             either the base id of the family or the prefix does not end with
             a subfamily number, ie. not a digit as common prefix. See LOFT paper
             for details on encoding."""
-            if a["EntryNr"] == b["EntryNr"]:
-                return False
-            prefix = os.path.commonprefix((a["OmaHOG"], b["OmaHOG"])).decode()
-            if "." in prefix and prefix[-1].isdigit():
+            prefix_or_false = a.is_orthologous_to(b)
+            if prefix_or_false is False:
                 return False
             # count number of genes in query genome that are co-orthologs (== having the prefix)
-            cnts = numpy.char.startswith(hogids_of_genes_in_query_genome, prefix.encode("utf-8")).sum()
+            cnts = numpy.char.startswith(hogids_of_genes_in_query_genome, prefix_or_false.encode("utf-8")).sum()
             return cnts
 
         try:
@@ -767,8 +765,9 @@ class Database(object):
                 (hog_member["EntryNr"] >= genome_entry_range[0]) & (hog_member["EntryNr"] < genome_entry_range[1])
             )
         ]["OmaHOG"]
+        pe = ProteinEntry(self, entry)
         query_genome_genes_cnt = numpy.array(
-            [is_orthologous(entry, hog_member[i]) for i in range(len(hog_member))],
+            [is_orthologous(pe, ProteinEntry(self, hog_member[i])) for i in range(len(hog_member))],
             dtype="i4",
         )
         mask = numpy.asarray(query_genome_genes_cnt, bool)
@@ -811,18 +810,14 @@ class Database(object):
             levels = levels[numpy.isin(levels["Level"], lineage)]
             hog_member = self._members_of_hog_id(self.format_hogid(fam))
 
-        def is_paralogous(a, b):
+        def is_paralogous(a: ProteinEntry, b: ProteinEntry):
             """genes are orthologs if their HOG id have a common prefix that is
             either the base id of the family or the prefix does not end with
             a subfamily number, ie. not a digit as common prefix. See LOFT paper
             for details on encoding."""
-            if a["EntryNr"] == b["EntryNr"]:
-                return False
-            prefix = os.path.commonprefix((a["OmaHOG"], b["OmaHOG"])).decode()
-            if "." in prefix and prefix[-1].isdigit():
-                # gene is paralog. find MRCA in taxonomy of common HOGid prefix
-                k = prefix.rfind(".")
-                hog_id = prefix[:k].encode("ascii")
+            prefix_or_false = a.is_paralogous_to(b)
+            if prefix_or_false:
+                hog_id = prefix_or_false.encode("ascii")
                 cand_levels = levels[numpy.where(levels["ID"] == hog_id)]
                 sortidx = lineage.searchsorted(cand_levels["Level"], sorter=lineage_sorter)
                 lin_idx = numpy.take(lineage_sorter, sortidx, mode="clip")
@@ -830,11 +825,12 @@ class Database(object):
                 # we take the first diverged lineage, meaning the duplication happened
                 # on the branch to that level.
                 return lineage[lin_idx[mask].min() - 1]
-            return None
+            return False
 
         def filter_candidates(entry, candidates):
+            pe = ProteinEntry(self, entry)
             for cand in candidates:
-                lev = is_paralogous(entry, cand)
+                lev = is_paralogous(pe, ProteinEntry(self, cand))
                 if lev:
                     yield tuple(cand) + (lev,)
 

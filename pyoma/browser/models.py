@@ -1,6 +1,9 @@
-from __future__ import division
+from __future__ import division, annotations
 
 import collections
+import re
+from typing import List, Tuple
+
 import numpy
 import time
 from .exceptions import UnknownSpecies, InvalidTaxonId, InvalidId
@@ -224,6 +227,49 @@ class ProteinEntry(object):
         except HOGSingleton:
             fam = 0
         return fam
+
+    @LazyProperty
+    def _subhog_parts(self) -> List[Tuple[int, str]]:
+        root, *subhog_tokens = self.oma_hog.split(".")
+        parsed_parts = []
+        for part in subhog_tokens:
+            if match := re.match(r"(\d+)([a-z]+)", part):
+                num = int(match.group(1))
+                char = match.group(2)
+                parsed_parts.append((num, char))
+            else:
+                raise ValueError(f"Invalid part format in '{part}'")
+        return parsed_parts
+
+    def is_orthologous_to(self, other: ProteinEntry) -> bool | str:
+        if self.entry_nr == other.entry_nr:
+            return False
+        elif self.hog_family_nr != other.hog_family_nr:
+            return False
+        else:
+            common = [self.oma_hog.split(".")[0]]
+            for (num1, char1), (num2, char2) in zip(self._subhog_parts, other._subhog_parts):
+                if num1 != num2:
+                    break
+                elif char1 != char2:
+                    return False
+                common.append(f"{num1}{char1}")
+            return ".".join(common)
+
+    def is_paralogous_to(self, other: ProteinEntry) -> bool | str:
+        if self.entry_nr == other.entry_nr:
+            return False
+        elif self.hog_family_nr != other.hog_family_nr:
+            return False
+        else:
+            common = [self.oma_hog.split(".")[0]]
+            for (num1, char1), (num2, char2) in zip(self._subhog_parts, other._subhog_parts):
+                if num1 != num2:
+                    return False
+                elif char1 != char2:
+                    return ".".join(common)
+                common.append(f"{num1}{char1}")
+            return False
 
     @property
     def is_main_isoform(self):

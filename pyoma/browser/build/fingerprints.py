@@ -1,99 +1,137 @@
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 import logging
-import cProfile
-import pstats
-from contextlib import contextmanager
-from collections import Counter
+import os
+import tempfile
+
 import numpy
+import tables
 from tqdm import tqdm
 
+from .suffixarray_helper import build_filtered_sa, kmer_codes_for_positions
 from ..db import Database, SequenceSearch, read_table_where
+from ..KmerEncoder import KmerEncoder, DIGITS_AA
 
 logger = logging.getLogger(__name__)
 
 
-@contextmanager
-def profile_if_enabled(enabled=False, filename=None, sort="tottime", lines=40):
-    if not enabled:
-        # No-op context manager
-        yield
-        return
-
-    prof = cProfile.Profile()
-    prof.enable()
-    try:
-        yield
-    finally:
-        prof.disable()
-        if filename:
-            prof.dump_stats(filename)
-            logger.info(f"[Profiler] Saved stats to {filename}")
-        else:
-            pstats.Stats(prof).sort_stats(sort).print_stats(lines)
-
-
-def kmers(seqs: List, k: int) -> Counter:
-    """
-    Count the kmers in a set of sequences.
-    :param seqs:
-    :param k:
-    :return:
-    """
-    kmer_counts = Counter()
-    for seq in seqs:
-        for i in range(len(seq) - k - 1):  # Ensure at least k chars remain
-            kmer = seq[i : i + k]
-            kmer_counts[kmer] += 1
-    return kmer_counts
-
-
-def find_fingerprints(
+def find_fingerprints_streaming(
     db_path: str,
+    seqs_path: Optional[str] = None,
     suffix_path: Optional[str] = None,
-    ogs: Optional[List[int]] = None,
-    profile: bool = False,
-    profile_file: str = "profile.stats",
+    k: int = 7,
+    batch_size: int = 1_000_000,
 ) -> Dict[int, str]:
     """
-    Find fingerprints in a given set of oma groups.
+    Find one fingerprint (kmer length k) per OMA group using an streaming approach.
 
-    :param db_path: path to the OMA database
-    :param suffix_path: path to the suffix array file
-    :param List[int] ogs: list of oma groups to process. if None, all groups are processed
-    :param profile: whether to profile the function execution
-    :param profile_file: path to the profile file. if None, profiling is printed to stdout
-    :return: dictionary with the oma groups as keys and the fingerprints as values
+    Returns: dict {oma_group_id: kmer_str} (groups without fingerprints omitted)
     """
-    db = Database(db_path)
-    searcher = SequenceSearch(db, seq_idx_fpath=suffix_path)
-    # read the sequence buffer into memory
-    searcher.seq_buff = searcher.seq_buff[:]
-    pe_tab = db.db.get_node("/Protein/Entries")
+    # --- Preparations -------------------------------------------------------
+    kmers = KmerEncoder(k, is_protein=True)
+    tot_kmers = len(kmers)
 
-    # ignore alternative splicings - they have too many similar sequences.
-    minor_splice_entries = numpy.array(
-        [r["EntryNr"] for r in pe_tab.where("(AltSpliceVariant > 0) & (AltSpliceVariant != EntryNr)")],
-        dtype=numpy.int32,
-    )
-    logger.info("Ignoring %d alternative splicing variants for fingerprinting", len(minor_splice_entries))
+    with tables.open_file(db_path, mode="r") as h5_db:
+        # Build entry_nr -> group_id mapping (numpy array indexed by EntryNr)
+        pe_tab: tables.Table = h5_db.get_node("/Protein/Entries")
+        # Find max entry number to size the array (entries are 1-based)
+        # Build mapping using vectorized fill
+        nr_entries = int(pe_tab[-1]["EntryNr"])
 
-    og_iter = range(1, db.get_nr_oma_groups() + 1) if ogs is None else ogs
-    fingerprints = {}
-    with profile_if_enabled(enabled=profile, filename=profile_file):
-        for og in tqdm(og_iter, desc="Finding fingerprints"):
-            og_entries = read_table_where(pe_tab, "(OmaGroup == og)", condvars={"og": og})
-            seqs = [db.get_sequence(e) for e in og_entries]
-            kmers_cnt = kmers(seqs, 7)
+        # for k<=7 on protein 21^7 ~1.8e9
+        dtype_kmer = numpy.dtype(numpy.uint32 if (tot_kmers < numpy.iinfo(numpy.uint32).max) else numpy.uint64)
 
-            for km, cnt in kmers_cnt.most_common():
-                enrs = searcher.exact_search(km, only_full_length=False, is_sanitised=True)
-                if len(enrs) == 0:
-                    continue
-                enrs = numpy.sort(enrs)
-                valid = numpy.concatenate((og_entries["EntryNr"], minor_splice_entries))
-                if numpy.isin(enrs, valid).all():
-                    fingerprints[og] = km.decode()
-                    break
-            else:
-                fingerprints[og] = "n/a"
+        # Fill mapping
+        entry_to_group = numpy.full(nr_entries + 1, 0, dtype=numpy.int32)  # default -1
+        for row in pe_tab:
+            entry_to_group[row["EntryNr"]] = row["OmaGroup"]
+            if row["AltSpliceVariant"] > 0 and row["AltSpliceVariant"] != row["EntryNr"]:
+                entry_to_group[row["EntryNr"]] = -1  # ignore alt splice variants
+
+        seqs = (
+            numpy.memmap(seqs_path, dtype=numpy.uint8, mode="r")
+            if seqs_path
+            else h5_db.get_node("/Protein/SequenceBuffer")[:]
+        )
+    seqs_np = numpy.frombuffer(seqs, dtype=numpy.uint8)
+    n_seq = len(seqs_np)
+    # --- End preparations -------------------------------------------------------
+
+    # -----------------------------
+    # Stream-filter SA → SA_filtered, SA_origpos, and build IndexInSAOrder
+    # -----------------------------
+    with tables.open_file(suffix_path or db_path, mode="r") as h5_sa:
+        sa_h5: tables.CArray = h5_sa.get_node("/Protein/SequenceIndex")
+        dtype_sa = sa_h5.dtype
+        delimiters_sorted = sa_h5[:nr_entries]
+
+        # Build filtered SA for this k
+        with tempfile.TemporaryDirectory() as tmpdir:
+            h5_tmp = tables.open_file(
+                os.path.join(tmpdir, "sa_kmerfilter.h5"),
+                mode="w",
+                filters=tables.Filters(complevel=3, complib="blosc2", bitshuffle=True),
+            )
+            sa_f, sa_origpos, idx_saorder = build_filtered_sa(
+                sa_h5, delimiters_sorted, n_seq, nr_entries, k, dtype_sa, numpy.uint32, h5_tmp
+            )
+
+            # Prepare alphabet map (AA)
+            map256 = numpy.full(256, 255, dtype=numpy.uint8)
+            for i, aa in enumerate(DIGITS_AA):
+                map256[ord(aa)] = i
+            alphabet_size = len(DIGITS_AA)
+
+            logger.info(f"Streaming filtered SA for k={k} to find fingerprints...")
+            fingerprints = {}
+            L, ii = len(sa_f), 0
+            # carry-over for cross-batch runs
+            prev_code, prev_groups = None, None
+            t = tqdm(total=max(L, 0), desc="K-mer fingerprints")
+            while ii < L:
+                jj = min(ii + batch_size, L)
+                P = sa_f[ii:jj]
+                entries = idx_saorder[ii:jj]
+                codes, good = kmer_codes_for_positions(P, k, seqs_np, dtype_sa, map256, alphabet_size)
+
+                # Find runs of equal k-mers (SA is sorted → contiguous)
+                change = numpy.nonzero(codes[1:] != codes[:-1])[0] + 1
+                run_starts = numpy.concatenate(([0], change))
+                run_ends = numpy.concatenate((change, [codes.size]))
+
+                for a, b in zip(run_starts, run_ends):
+                    code_int = int(codes[a])
+                    if code_int == numpy.iinfo(dtype_sa).max:
+                        continue  # invalid k-mer (e.g., with X)
+                    entry_ids = entries[a:b]
+                    groups = numpy.unique(entry_to_group[entry_ids])
+                    if prev_code is not None and code_int == prev_code:
+                        # continuation of same k-mer from previous batch
+                        groups = numpy.union1d(prev_groups, groups)
+                        prev_code = None  # fully handled now
+                        prev_groups = None
+
+                    # If we're at the *last* run in this batch and it might continue,
+                    # save it for the next batch to merge later.
+                    is_last_run = b == len(codes)
+                    if is_last_run and jj < L:
+                        prev_code = code_int
+                        prev_groups = groups
+                        continue  # defer handling
+
+                    # fully formed run (safe to analyze)
+                    if len(groups) == 1 or (len(groups) == 2 and -1 in groups):
+                        g = int(groups[groups != -1][0])
+                        if g > 0 and g not in fingerprints:
+                            fingerprints[g] = kmers.encode(code_int).decode()
+                t.update(jj - ii)
+                ii = jj
+
+            # handle leftover carried run (if any)
+            if prev_code is not None and (len(prev_groups) == 1 or (len(prev_groups) == 2 and -1 in prev_groups)):
+                g = int(groups[groups != -1][0])
+                if g > 0 and g not in fingerprints:
+                    fingerprints[g] = kmers.encode(code_int).decode("ascii")
+    for og in range(1, entry_to_group.max() + 1):
+        if og not in fingerprints:
+            fingerprints[og] = "n/a"
     return fingerprints

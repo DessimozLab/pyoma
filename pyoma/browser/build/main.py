@@ -18,7 +18,7 @@ import omataxonomy
 
 from pyoma.browser.hogidmap import compute_minhashes_for_db, compare_versions
 from ..hogprofile.build import compute_profiles
-from .fingerprints import find_fingerprints
+from .fingerprints import find_fingerprints_streaming
 from .keyword import collect_keywords
 from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
 from . import hogconvert
@@ -246,12 +246,9 @@ def phase_keywords(conf):
 
 
 def build_fingerprints(conf):
+    fingerprints = find_fingerprints_streaming(db_path=conf.db, seqs_path=conf.seq_buf, suffix_path=conf.suffix_db)
     with auto_open(conf.out, "wt") as fh:
-        if conf.og_rng is not None:
-            ogs = range(int(conf.og_rng[0]), int(conf.og_rng[1]) + 1, 1)
-        else:
-            ogs = None
-        for og, fp in find_fingerprints(conf.db, conf.suffix_db, ogs=ogs, profile=conf.profile).items():
+        for og, fp in fingerprints.items():
             fh.write(f"{og}\t{fp}\n")
 
 
@@ -577,18 +574,7 @@ def parse_command_line_args():
     fingerprint_parser.set_defaults(func=build_fingerprints)
     fingerprint_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
     fingerprint_parser.add_argument("--suffix-db", required=False, help="Path to suffix array file")
-    fingerprint_parser.add_argument(
-        "--og-rng",
-        required=False,
-        default=None,
-        nargs=2,
-        help="Range of oma groups to process. Boundaries of range are inclusive.",
-    )
-    fingerprint_parser.add_argument(
-        "--profile",
-        action="store_true",
-        help="Whether to generate profile information for fingerprints into 'profile.stats'",
-    )
+    fingerprint_parser.add_argument("--seq-buf", required=False, help="Path to sequence buffer file")
     fingerprint_parser.add_argument("--out", required=True, help="Path to output file")
 
     profile_parser = subparsers.add_parser("profile", help="Generate profiles for HOGs")

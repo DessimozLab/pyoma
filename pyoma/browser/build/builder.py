@@ -36,6 +36,7 @@ from ..geneontology import GeneOntology, OntologyParser, FreqAwareGeneOntology
 from ..homoeologs import HomeologsConfidenceCalculator
 from ..synteny import SyntenyScorer
 from .. import hoghelper
+from .suffixarray_helper import build_filtered_sa, kmer_codes_for_positions
 from ... import common, version
 from ..convert import (
     uniq,
@@ -565,69 +566,9 @@ class DBBuilder(DarwinExporter):
             # -----------------------------
             # Phase 2: Stream-filter SA → SA_filtered, SA_origpos, and build IndexInSAOrder
             # -----------------------------
-            sa_f = h5_tmp.create_earray(
-                "/",
-                "SequenceIndex",
-                atom=tables.Atom.from_dtype(dtype_sa),
-                shape=(0,),
-                expectedrows=n_seq,
-                title="Filtered suffix array (kept positions only)",
+            sa_f, sa_origpos, idx_saorder = build_filtered_sa(
+                sa_h5, delimiters_sorted, n_seq, nr_entries, k=k, dtype_sa=dtype_sa, dtype_enr=dtype_enr, h5_out=h5_tmp
             )
-            sa_origpos = h5_tmp.create_earray(
-                "/",
-                "SequenceIndexOrigPos",
-                atom=tables.Atom.from_dtype(dtype_sa),
-                shape=(0,),
-                expectedrows=n_seq,
-                title="Original SA indices corresponding to filtered SA",
-            )
-            idx_saorder = h5_tmp.create_earray(
-                "/",
-                "IndexInSAOrder",
-                atom=tables.Atom.from_dtype(numpy.dtype(dtype_enr)),
-                shape=(0,),
-                expectedrows=n_seq,
-                title="Entry numbers aligned to filtered SA order",
-            )
-
-            # Preconditions:
-            # - delimiters_sorted is a 1D increasing numpy array (uint64) of length nr_entries
-            # - ensure it contains a sentinel at the very end so every p has a next delimiter
-            if delimiters_sorted[-1] < n_seq - 1:
-                # your buffer ends with a delimiter; this line is usually a no-op
-                delimiters_sorted = numpy.concatenate(
-                    [delimiters_sorted, numpy.array([n_seq - 1], dtype=delimiters_sorted.dtype)]
-                )
-
-            self.logger.info("Streaming SA to filter by mask and to align idx in SA-order...")
-            sa_chunk_read = 10_000_000
-            for start in tqdm(range(0, len(sa_h5), sa_chunk_read), desc="Filter SA (searchsorted)"):
-                stop = min(len(sa_h5), start + sa_chunk_read)
-                chunk_sa = sa_h5[start:stop]
-
-                # Vectorized lookup of nearest delimiter >= p
-                idxs = numpy.searchsorted(delimiters_sorted, chunk_sa, side="left")  # int[chunk]
-                e = delimiters_sorted[idxs]  # uint64[chunk]
-
-                # Keep iff (e - p) >= k
-                keep = (e - chunk_sa) >= k
-
-                if not numpy.any(keep):
-                    continue
-
-                kept_sa = chunk_sa[keep]
-                kept_origpos = (start + numpy.nonzero(keep)[0]).astype(dtype_sa)
-                # Entry number is idxs+1 at kept positions (1-based)
-                kept_entries = (idxs[keep] + 1).astype(dtype_enr)
-
-                sa_f.append(kept_sa)
-                sa_origpos.append(kept_origpos)
-                idx_saorder.append(kept_entries)
-
-            # flush to disk
-            sa_f.flush()
-            sa_origpos.flush()
-            idx_saorder.flush()
 
             # -----------------------------
             # Phase 3: Build k-mer lookup by scanning SA_filtered
@@ -659,34 +600,6 @@ class DBBuilder(DarwinExporter):
                 _ensure_rows(kmer_lookup_arr, code_int)
                 kmer_lookup_arr.append(arr)
 
-            # vectorized version of kmer_codes_for_positions
-            def kmer_codes_for_positions(P):
-                """
-                Vectorized equivalent of [KmerEncoder.decode(seqs[p:p+k]) for p in P].
-
-                P: np.ndarray of start positions
-
-                implicitly using
-                seqs_np: np.ndarray view of the sequence buffer
-                dt: np.dtype for the position data
-                map256: map from character to uint8
-                alphabet_size: int, size of the alphabet (20 for AA, 5 for DNA)
-                Returns: codes (dt), valid_mask (bool)
-                """
-                P = P.astype(dtype_sa, copy=False)
-                codes = numpy.zeros(len(P), dtype=dtype_sa)
-                good = numpy.ones(len(P), dtype=bool)
-
-                for t in range(k):
-                    b = seqs_np[P + t]
-                    v = map256[b]
-                    bad = v == 255
-                    good &= ~bad
-                    codes = codes * alphabet_size + v.astype(dtype_sa)
-
-                codes[~good] = numpy.iinfo(dtype_sa).max  # sentinel
-                return codes, good
-
             chunksize = sa_h5.chunkshape[0] * (
                 1
                 if len(sa_h5) // sa_h5.chunkshape[0] < 64_000
@@ -706,7 +619,7 @@ class DBBuilder(DarwinExporter):
             pending_cut: bool = False
 
             if L > 0:
-                first_code = int(kmer_codes_for_positions(sa_f[0:1])[0])
+                first_code = int(kmer_codes_for_positions(sa_f[0:1], k, seqs_np, dtype_sa, map256, alphabet_size)[0])
                 chunk_pos.append(int(sa_origpos[0]))
                 chunk_keys.append(first_code)
             next_target = chunk_pos[-1] + int(chunksize) if chunk_pos else int(chunksize)
@@ -715,7 +628,7 @@ class DBBuilder(DarwinExporter):
             while ii < L:
                 jj = min(ii + batch_size, L)
                 P = sa_f[ii:jj]  # start positions
-                codes, good = kmer_codes_for_positions(P)
+                codes, good = kmer_codes_for_positions(P, k, seqs_np, dtype_sa, map256, alphabet_size)
                 entries = idx_saorder[ii:jj]
                 origpos = sa_origpos[ii:jj]
                 # run boundaries inside the batch
@@ -733,8 +646,6 @@ class DBBuilder(DarwinExporter):
 
                 for a, b in zip(run_starts, run_ends):
                     code_int = int(codes[a])
-                    abs_a = ii + a
-                    abs_b = ii + b
 
                     # entries slice for this run (for VLArray emission)
                     entries_slice = entries[a:b].astype(dtype_enr, copy=False)

@@ -5,7 +5,7 @@ import os
 import pickle
 import re
 import json
-from time import time
+from time import time, perf_counter, process_time
 
 import numpy
 import tables
@@ -86,6 +86,22 @@ def process_job_file(job_file: os.PathLike, db_fpath: os.PathLike, out: os.PathL
                 func(*args)
 
 
+def log_timing(func):
+    def wrapper(*args, **kwargs):
+        start_wall = perf_counter()
+        start_cpu = process_time()
+        result = func(*args, **kwargs)
+        end_wall = perf_counter()
+        end_cpu = process_time()
+        wall = end_wall - start_wall
+        cpu = end_cpu - start_cpu
+        efficiency = cpu / wall if wall > 0 else 0
+        logger.info(f"{func.__name__}: CPU={cpu:.6f}s, Wall={wall:.6f}s, Efficiency={efficiency:.2%}")
+        return result
+
+    return wrapper
+
+
 class CacheBuilder:
     def __init__(self, db_fpath, out_path):
         self.db_fpath = db_fpath
@@ -157,23 +173,51 @@ class CacheBuilder:
             fam_iter = itertools.islice(fam_members, rng[0], rng[1])
 
         counts = numpy.zeros(nr_memb, dtype=tables.dtype_from_descr(ProteinCacheInfo))
+        time_vps_wall, time_vps_cpu, time_ind_wall, time_ind_cpu, cpu_0 = 0, 0, 0, 0, process_time()
         for i, p1 in tqdm(
             enumerate(fam_iter),
             disable=len(fam_members) < 500,
             desc=f"Processing family {fam}",
             total=nr_memb,
         ):
+            t0_cpu, t0_wall = process_time(), perf_counter()
             vps = set(self.load_vps(p1.entry_nr))
+            t1_cpu, t1_wall = process_time(), perf_counter()
             ind_orth = set(p2.entry_nr for p2 in fam_members if are_orthologous(p1, p2))
-            grp = grp_members.get(p1.group, set([])) - set([p1.entry_nr])
+            t2_cpu, t2_wall = process_time(), perf_counter()
+            time_vps_wall += t1_wall - t0_wall
+            time_vps_cpu += t1_cpu - t0_cpu
+            time_ind_wall += t2_wall - t1_wall
+            time_ind_cpu += t2_cpu - t1_cpu
+            grp = grp_members.get(p1.group, set([])) - {p1.entry_nr}
             counts[i]["EntryNr"] = p1.entry_nr
             counts[i]["NrPairwiseOrthologs"] = len(vps)
             counts[i]["NrHogInducedPWOrthologs"] = len(ind_orth)
             counts[i]["NrHogInducedPWParalogs"] = len(fam_members) - len(ind_orth) - 1
             counts[i]["NrOMAGroupOrthologs"] = len(grp)
             counts[i]["NrAnyOrthologs"] = len(vps | ind_orth | grp)
+        cpu_1 = process_time()
+        logger.debug(
+            "timings for family %s: vps=[wall: %.3f; cpu: %.3f] ind=[wall: %.3f; cpu: %.3f]",
+            fam,
+            time_vps_wall,
+            time_vps_cpu,
+            time_ind_wall,
+            time_ind_cpu,
+        )
+        logger.debug("  total cpu time for family %s: %.3f sec", fam, cpu_1 - cpu_0)
+        logger.debug(
+            "  efficiency vps: %.2f%%, ind: %.2f%%",
+            (time_vps_cpu / time_vps_wall * 100) if time_vps_wall > 0 else 0,
+            (time_ind_cpu / time_ind_wall * 100) if time_ind_wall > 0 else 0,
+        )
+        logger.debug(
+            "  overall efficiency: %.2f%%",
+            ((cpu_1 - cpu_0) / (time_vps_wall + time_ind_wall) * 100) if (time_vps_wall + time_ind_wall) > 0 else 0,
+        )
         return counts
 
+    @log_timing
     def analyse_singleton(self, singletons):
         logger.info("analysing %d singletons", len(singletons))
         counts = numpy.zeros(len(singletons), dtype=tables.dtype_from_descr(ProteinCacheInfo))
@@ -185,6 +229,7 @@ class CacheBuilder:
             counts[i] = (entry_nr, len(vps), 0, 0, len(grp_members), len(vps | grp_members))
         return counts
 
+    @log_timing
     def compute_familydata_json(self, fam, fam_members):
         famhog_id = self.db.format_hogid(fam)
         logger.debug("family data for %s with %d members", fam, len(fam_members))

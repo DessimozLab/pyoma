@@ -118,11 +118,14 @@ def find_fingerprints_streaming(
                         prev_groups = groups
                         continue  # defer handling
 
-                    # fully formed run (safe to analyze)
+                    # check if this k-mer occurs in exactly one group
+                    # (ignore if in alternative splice variants (i.e. group=-1))
                     if len(groups) == 1 or (len(groups) == 2 and -1 in groups):
-                        g = int(groups[groups != -1][0])
-                        if g > 0 and g not in fingerprints:
-                            fingerprints[g] = kmers.encode(code_int).decode()
+                        valid = groups[groups > 0]
+                        if len(valid) == 1:
+                            g = int(valid[0])
+                            if g not in fingerprints:
+                                fingerprints[g] = kmers.encode(code_int).decode()
                 t.update(jj - ii)
                 ii = jj
 

@@ -114,8 +114,8 @@ def create_job_files(db_path, out_prefix):
 # Buffered chunk writer
 # --------------------------------------------------------------------
 FILTERS = tables.Filters(complevel=5, complib="blosc2")
-DTYPE_VPAIRS = numpy.dtype([("Fam", "i4"), ("EntryNr1", "i4"), ("EntryNr2", "i4")])
-DTYPE_FAMILY_INDEX = numpy.dtype([("Fam", "i4"), ("Start", "i8"), ("End", "i8")])
+DTYPE_VPAIRS = numpy.dtype([("Fam", numpy.int32), ("EntryNr1", numpy.int32), ("EntryNr2", numpy.int32)])
+DTYPE_FAMILY_INDEX = numpy.dtype([("Fam", numpy.int32), ("Start", numpy.int64), ("End", numpy.int64)])
 
 
 class BufferedChunkWriter:
@@ -208,9 +208,7 @@ class GlobalMerger:
         logger.info("Merging %d chunks into %s. %d relevant VPairs in total", n_chunks, out_h5, tot_vpairs)
 
         with tables.open_file(out_h5, "w", filters=FILTERS) as fout:
-            out_tab = fout.create_table(
-                "/", "AllVPairs", description=tables.descr_from_dtype(DTYPE_VPAIRS), expectedrows=tot_vpairs
-            )
+            out_tab = fout.create_table("/", "AllVPairs", description=DTYPE_VPAIRS, expectedrows=tot_vpairs)
             fam_index = []
             current_offset = 0
             buffer = []
@@ -263,7 +261,8 @@ def build_allvpairs_hdf5(
 ):
     """Build the AllVPairs table from the database."""
     with tables.open_file(db_path, "r") as h5:
-        genomes: numpy.ndarray = h5.get_node("/Genomes").read(field="UniProtSpeciesCode")
+        genomes: numpy.ndarray = h5.get_node("/Genome").read(field="UniProtSpeciesCode")
+    genomes = numpy.char.decode(genomes, "utf-8")
     numpy.random.shuffle(genomes)
     split_genomes = numpy.array_split(genomes, nproc)
     tmp_dirs = [tempfile.mkdtemp() for _ in range(nproc)]

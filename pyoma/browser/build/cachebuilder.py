@@ -5,7 +5,10 @@ import os
 import pickle
 import re
 import json
+import tempfile
+from pathlib import Path
 from time import time, perf_counter, process_time
+import multiprocessing as mp
 
 import numpy
 import tables
@@ -36,9 +39,13 @@ def create_job_files(db_path, out_prefix):
     singletons = []
     re_fam = re.compile(rb"HOG:[A-Z]?(\d+)(.[\w.])?")
     with tables.open_file(db_path) as h5:
-        for row in h5.get_node("/Protein/Entries"):
+        etab: tables.Table = h5.get_node("/Protein/Entries")
+        entry_to_fam = numpy.zeros(etab.nrows + 1, dtype=numpy.int32)
+        for row in etab:
             if len(row["OmaHOG"]) > 0:
-                fam_sizes.update((int(re_fam.match(row["OmaHOG"]).group(1)),))
+                fam = int(re_fam.match(row["OmaHOG"]).group(1))
+                entry_to_fam[row["EntryNr"]] = fam
+                fam_sizes.update((fam,))
             else:
                 singletons.append(
                     (
@@ -48,6 +55,8 @@ def create_job_files(db_path, out_prefix):
                 )
     with open(out_prefix + "_singleton.pkl", "wb") as fh:
         pickle.dump(["process_singletons", singletons], fh)
+    # save entry_to_fam to allow for fast lookup later on
+    numpy.save(out_prefix + "_entry_to_fam.npy", entry_to_fam)
 
     def yield_buckets(counts, nr_elem=10000):
         cur_bucket, cur_size = [], 0
@@ -73,11 +82,215 @@ def create_job_files(db_path, out_prefix):
     logger.info("wrote %d family job-files and 1 singleton file", job)
 
 
-def process_job_file(job_file: os.PathLike, db_fpath: os.PathLike, out: os.PathLike):
+# -----------------------------------------------------
+# parallel worker code to generate a temporary hdf5 file with
+# all the VPairs sorted by RootHOG to efficiently scan the
+# orthologs per Family when processing the jobs for the cachebuilder
+#
+# Overview of this code:
+# ┌───────────────────────────┐
+# │ Main process              │
+# │  - scans genomes          │
+# │  - distributes to workers │
+# │  - collects produced chunk paths
+# └───────────────────────────┘
+#          │
+#          ▼
+# ┌───────────────────────────┐
+# │ Worker process (nproc)    │
+# │  - open db                │
+# │  - read VPairs tables     │
+# │  - write chunks (sorted)  │
+# └───────────────────────────┘
+#          │
+#          ▼
+# ┌───────────────────────────┐
+# │ GlobalMerger              │
+# │  - family-wise merge      │
+# │  - global FamilyIndex     │
+# └───────────────────────────┘
+
+# --------------------------------------------------------------------
+# Buffered chunk writer
+# --------------------------------------------------------------------
+FILTERS = tables.Filters(complevel=5, complib="blosc2")
+DTYPE_VPAIRS = numpy.dtype([("Fam", "i4"), ("EntryNr1", "i4"), ("EntryNr2", "i4")])
+DTYPE_FAMILY_INDEX = numpy.dtype([("Fam", "i4"), ("Start", "i8"), ("End", "i8")])
+
+
+class BufferedChunkWriter:
+    """Accumulate VPairs rows across multiple genomes, flush to .npy
+    only when buffer exceeds target_rows."""
+
+    def __init__(self, out_dir, target_rows=5_000_000_000):
+        self.out_dir = Path(out_dir)
+        self.target_rows = target_rows
+        self.buffer = []
+        self.total_rows = 0
+        self.chunk_id = 0
+        self.out_dir.mkdir(exist_ok=True)
+
+    def add_rows(self, arr):
+        self.buffer.append(arr)
+        self.total_rows += len(arr)
+        if self.total_rows >= self.target_rows:
+            return self.flush()
+        return None
+
+    def flush(self):
+        if not self.buffer:
+            return None
+        chunk = numpy.concatenate(self.buffer)
+        chunk.sort(order=["Fam", "EntryNr1"], kind="mergesort")
+
+        fams, start, count = numpy.unique(chunk["Fam"], return_index=True, return_counts=True)
+        fam_index = numpy.zeros(len(fams), dtype=DTYPE_FAMILY_INDEX)
+        fam_index["Fam"], fam_index["Start"], fam_index["End"] = fams, start, start + count
+
+        logger.debug("flushing chunk %d with %d rows to %s", self.chunk_id, len(chunk), self.out_dir)
+        out_path = self.out_dir / f"chunk_{self.chunk_id:05d}.h5"
+        with tables.open_file(out_path, "w", filters=FILTERS) as h5:
+            h5.create_table("/", "AllVPairs", obj=chunk)
+            h5.create_table("/", "FamilyIndex", obj=fam_index)
+
+        self.buffer.clear()
+        self.total_rows = 0
+        self.chunk_id += 1
+        return str(out_path)
+
+
+# --------------------------------------------------------------------
+# 1. GenomeExtractor (multiprocessing) worker
+# --------------------------------------------------------------------
+def extract_genome_vpairs(args: tuple[str, list[str], str, int, str]) -> list[os.PathLike]:
+    db_h5_path, genomes, out_dir, chunk_size, entry_to_fam_path = args
+    writer = BufferedChunkWriter(out_dir, target_rows=chunk_size)
+    # Load entry → fam mapping as memory-map
+    entry_to_fam = numpy.load(entry_to_fam_path, mmap_mode="r")
+    chunk_paths = []
+
+    with tables.open_file(db_h5_path, "r") as h5:
+        for genome in genomes:
+            tab = h5.get_node(f"/PairwiseRelation/{genome}/VPairs")
+            nrows = tab.nrows
+            batch_size = 5_000_000
+            for start in range(0, nrows, batch_size):
+                chunk = tab[start : start + batch_size]
+                if len(chunk) == 0:
+                    continue
+                fams = entry_to_fam[chunk["EntryNr1"]]
+                fam_arr = numpy.empty(len(chunk), dtype=DTYPE_VPAIRS)
+                fam_arr["Fam"], fam_arr["EntryNr1"], fam_arr["EntryNr2"] = fams, chunk["EntryNr1"], chunk["EntryNr2"]
+
+                path = writer.add_rows(fam_arr)
+                if path is not None:
+                    chunk_paths.append(path)
+    final = writer.flush()
+    if final is not None:
+        chunk_paths.append(final)
+    return chunk_paths
+
+
+# --------------------------------------------------------------------
+# Global merge of all sorted chunks
+# --------------------------------------------------------------------
+class GlobalMerger:
+    def __init__(self, buf_write=100_000_000):
+        self.buf_write = buf_write
+
+    def merge_chunks(self, chunk_files, out_h5):
+        n_chunks = len(chunk_files)
+        fins = [tables.open_file(f, "r") for f in chunk_files]
+        tabs = [f.get_node("/AllVPairs") for f in fins]
+        family_indices = [f.get_node("/FamilyIndex").read() for f in fins]
+        positions = [0] * n_chunks
+        tot_vpairs = sum(t.nrows for t in tabs)
+        logger.info("Merging %d chunks into %s. %d relevant VPairs in total", n_chunks, out_h5, tot_vpairs)
+
+        with tables.open_file(out_h5, "w", filters=FILTERS) as fout:
+            out_tab = fout.create_table(
+                "/", "AllVPairs", description=tables.descr_from_dtype(DTYPE_VPAIRS), expectedrows=tot_vpairs
+            )
+            fam_index = []
+            current_offset = 0
+            buffer = []
+            total_fams = sum(len(idx) for idx in family_indices)
+            pbar = tqdm(total=total_fams, desc="Merging")
+
+            while True:
+                next_fam = None
+                for ci in range(n_chunks):
+                    if positions[ci] < len(family_indices[ci]):
+                        fam = family_indices[ci]["Fam"][positions[ci]]
+                        if next_fam is None or fam < next_fam:
+                            next_fam = fam
+                if next_fam is None:
+                    break
+
+                # Collect all rows for this family from all chunks
+                fam_rows = []
+                for ci in range(n_chunks):
+                    if positions[ci] < len(family_indices[ci]) and family_indices[ci]["Fam"][positions[ci]] == next_fam:
+                        s, e = family_indices[ci]["Start"][positions[ci]], family_indices[ci]["End"][positions[ci]]
+                        fam_rows.append(tabs[ci][s:e])
+                        positions[ci] += 1
+
+                fam_block = numpy.concatenate(fam_rows)
+                fam_block.sort(order="EntryNr1", kind="mergesort")
+                buffer.append(fam_block)
+                fam_index.append((next_fam, current_offset, current_offset + len(fam_block)))
+                current_offset += len(fam_block)
+
+                if sum(len(b) for b in buffer) >= self.buf_write:
+                    out_tab.append(numpy.concatenate(buffer))
+                    buffer.clear()
+                    out_tab.flush()
+                pbar.update(1)
+
+            if buffer:
+                out_tab.append(numpy.concatenate(buffer))
+                out_tab.flush()
+
+            fout.create_table("/", "FamilyIndex", obj=numpy.array(fam_index, dtype=DTYPE_FAMILY_INDEX))
+            pbar.close()
+
+        for f in fins:
+            f.close()
+
+
+def build_allvpairs_hdf5(
+    db_path: os.PathLike, entry_to_fam_path: os.PathLike, out_path: os.PathLike, nproc=8, target_rows=5_000_000_000
+):
+    """Build the AllVPairs table from the database."""
+    with tables.open_file(db_path, "r") as h5:
+        genomes: numpy.ndarray = h5.get_node("/Genomes").read(field="UniProtSpeciesCode")
+    numpy.random.shuffle(genomes)
+    split_genomes = numpy.array_split(genomes, nproc)
+    tmp_dirs = [tempfile.mkdtemp() for _ in range(nproc)]
+
+    args = [(db_path, list(split_genomes[i]), tmp_dirs[i], target_rows, entry_to_fam_path) for i in range(nproc)]
+    logger.info("Extracting VPairs in parallel...")
+    # Parallel ectraction of VPairs
+    with mp.Pool(nproc) as pool:
+        chunk_lists = pool.map(extract_genome_vpairs, args)
+
+    raw_chunks = [p for sublist in chunk_lists for p in sublist]
+    logger.info(f"{len(raw_chunks)} chunks written.")
+
+    # Merge all chunks into a single table
+    merger = GlobalMerger()
+    merger.merge_chunks(raw_chunks, out_path)
+
+
+# END of parallel code for temporary hdf5 file
+# ----------------------------------------
+
+
+def process_job_file(job_file: os.PathLike, db_fpath: os.PathLike, vp_fpath: os.PathLike, out: os.PathLike):
     with open(job_file, "rb") as fh:
         jobdata = pickle.load(fh)
     job, payload = jobdata
-    with CacheBuilder(db_fpath, out) as builder:
+    with CacheBuilder(db_fpath, vp_db_path=vp_fpath, out_path=out) as builder:
         func = getattr(builder, job)
         if job == "process_singletons":
             func(payload)
@@ -103,10 +316,12 @@ def log_timing(func):
 
 
 class CacheBuilder:
-    def __init__(self, db_fpath, out_path):
+    def __init__(self, db_fpath, vp_db_path, out_path):
         self.db_fpath = db_fpath
+        self.vp_db_path = vp_db_path
         self.out_path = out_path
         self.db = None
+        self.vp = None
         self.h5 = None
         self.cnts = []
         self.json_buffer = []
@@ -117,10 +332,12 @@ class CacheBuilder:
     def __enter__(self):
         self.db = Database(self.db_fpath)
         self.h5 = self.db.get_hdf5_handle()
+        self.vp = tables.open_file(self.vp_db_path, "r")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.db.close()
+        self.vp.close()
         self.save()
 
     def process_family(self, fam, rng=None):
@@ -160,6 +377,17 @@ class CacheBuilder:
     def load_vps(self, entry_nr):
         return self.db.get_vpairs(entry_nr)["EntryNr2"]
 
+    @log_timing
+    def load_vps_for_family(self, fam):
+        fam_idx_tab = self.vp.get_node("/FamilyIndex")
+        fams = fam_idx_tab.read(field="Fam")
+        fam_pos = numpy.searchsorted(fams, fam)
+        if fam_pos >= len(fams) or fams[fam_pos] != fam:
+            return numpy.zeros((0,), dtype=DTYPE_VPAIRS)
+        start, end = fam_idx_tab[fam_pos]["Start"], fam_idx_tab[fam_pos]["End"]
+        vps_tab = self.vp.get_node("/AllVPairs")
+        return vps_tab[start:end]
+
     def load_grp_members(self, group):
         return [row["EntryNr"] for row in self.h5.get_node("/Protein/Entries").where(f"OmaGroup == {group}")]
 
@@ -172,6 +400,7 @@ class CacheBuilder:
             nr_memb = rng[1] - rng[0]
             fam_iter = itertools.islice(fam_members, rng[0], rng[1])
 
+        fam_vps = self.load_vps_for_family(fam)
         counts = numpy.zeros(nr_memb, dtype=tables.dtype_from_descr(ProteinCacheInfo))
         time_vps_wall, time_vps_cpu, time_ind_wall, time_ind_cpu, cpu_0 = 0, 0, 0, 0, process_time()
         for i, p1 in tqdm(
@@ -181,7 +410,7 @@ class CacheBuilder:
             total=nr_memb,
         ):
             t0_cpu, t0_wall = process_time(), perf_counter()
-            vps = set(self.load_vps(p1.entry_nr))
+            vps = set(fam_vps[fam_vps["EntryNr1"] == p1.entry_nr]["EntryNr2"])
             t1_cpu, t1_wall = process_time(), perf_counter()
             ind_orth = set(p2.entry_nr for p2 in fam_members if are_orthologous(p1, p2))
             t2_cpu, t2_wall = process_time(), perf_counter()

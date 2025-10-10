@@ -23,7 +23,7 @@ from .keyword import collect_keywords
 from .builder import DBBuilder, OmaGroupsProvider, XrefStorer
 from . import hogconvert
 from . import xref as xref_build
-from .cachebuilder import create_job_files, combine_results, process_job_file
+from .cachebuilder import create_job_files, combine_results, process_job_file, build_allvpairs_hdf5
 from ..convert import (
     iter_domains,
     filter_duplicated_domains,
@@ -126,8 +126,12 @@ def cache_build_job_generator(conf):
     create_job_files(conf.db, conf.out_prefix)
 
 
+def cache_generate_vpairs_db(conf):
+    build_allvpairs_hdf5(conf.db, conf.entry_to_fam, conf.out, nproc=conf.nr_procs)
+
+
 def cache_build_process_job(conf):
-    process_job_file(conf.job_file, conf.db, conf.out)
+    process_job_file(conf.job_file, conf.db, vp_fpath=conf.vp_db, out=conf.out)
 
 
 def cache_build_combine(conf):
@@ -403,10 +407,18 @@ def parse_command_line_args():
     cache_job_parser.add_argument("--db", required=True, help="Path to database")
     cache_job_parser.add_argument("--out-prefix", default="cache-job", help="prefix for the job files path")
 
+    cache_vptab_parser = subparsers.add_parser("cache-vptab", help="Generate vpairs table database for cache building")
+    cache_vptab_parser.set_defaults(func=cache_generate_vpairs_db)
+    cache_vptab_parser.add_argument("--db", required=True, help="Path to database")
+    cache_vptab_parser.add_argument("--entry-to-fam", required=True, help="Path to the entry-to-family mapping file")
+    cache_vptab_parser.add_argument("--out", required=True, help="output path of vpairs table database")
+    cache_vptab_parser.add_argument("--nr-procs", default=8, type=int, help="nr of parallel processes to use")
+
     cache_build_parser = subparsers.add_parser("cache-build", help="Runs cache building for a job-file")
     cache_build_parser.set_defaults(func=cache_build_process_job)
     cache_build_parser.add_argument("--db", required=True, help="Path to database")
     cache_build_parser.add_argument("--job-file", required=True, help="job file to be processed")
+    cache_build_parser.add_argument("--vp-db", required=True, help="Path to vpairs table database")
     cache_build_parser.add_argument("--out", required=True, help="output filename")
 
     cache_combine_parser = subparsers.add_parser("cache-combine", help="Combines all cache jobs in a single hdf5")

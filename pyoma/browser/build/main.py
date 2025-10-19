@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 def phase_genomes(conf):
     with DBBuilder(conf.db, mode="write", logger=logger) as db:
-        db.add_version(conf.rel_char)
+        db.add_version(release=conf.release, release_char=conf.rel_char)
         db.add_taxonomy(conf.tax_tsv)
         if conf.updated_taxid_tsv is not None:
             with open(conf.updated_taxid_tsv, "rt") as fh:

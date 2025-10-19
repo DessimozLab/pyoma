@@ -455,7 +455,7 @@ class DarwinExporter(object):
                         break
         raise DataImportError("No version information found")
 
-    def add_version(self, release_char=None):
+    def add_version(self, release: str = None, release_char: str = None) -> None:
         if release_char is not None:
             if not re.match(r"^[A-Z]*$", release_char):
                 raise ValueError(
@@ -463,7 +463,7 @@ class DarwinExporter(object):
                 )
         else:
             release_char = ""
-        version = self.get_version()
+        version = release if release else self.get_version()
         self.h5.set_node_attr("/", "oma_version", version)
         self.h5.set_node_attr("/", "oma_release_char", release_char)
         self.h5.set_node_attr("/", "pytables", tables.get_pytables_version())

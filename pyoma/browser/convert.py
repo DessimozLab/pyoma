@@ -466,8 +466,8 @@ class DarwinExporter(object):
         version = release if release else self.get_version()
         self.h5.set_node_attr("/", "oma_version", version)
         self.h5.set_node_attr("/", "oma_release_char", release_char)
-        self.h5.set_node_attr("/", "pytables", tables.get_pytables_version())
-        self.h5.set_node_attr("/", "hdf5_version", tables.get_hdf5_version())
+        self.h5.set_node_attr("/", "pytables", tables.__version__)
+        self.h5.set_node_attr("/", "hdf5_version", tables.hdf5_version)
         self.h5.set_node_attr("/", "db_schema_version", self.DB_SCHEMA_VERSION)
 
     def add_species_data(self):

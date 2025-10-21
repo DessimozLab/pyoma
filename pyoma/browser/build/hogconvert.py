@@ -121,7 +121,13 @@ class GeneLookupHelper:
                 sp = self.search_species_by_entry_nr(gene.e_nr)
                 sp_node = copy.deepcopy(sp.xml_node)
                 sp_node.set("taxonId", str(self.parser.taxonomy.get_node_from_taxonId(sp.xml_taxonId).taxid))
-                gs = gst[numpy.where(gst["NCBITaxonId"] == int(sp_node.get("taxonId")))][0]
+                try:
+                    gs = gst[numpy.where(gst["NCBITaxonId"] == int(sp_node.get("taxonId")))][0]
+                except IndexError as err:
+                    logger.error(
+                        f"Cannot find genome for taxonId {sp_node.get('taxonId')}. Originally was {sp.name} -> {sp.xml_taxonId}"
+                    )
+                    raise
                 if gs["SciName"].decode() != sp_node.get("name"):
                     logger.warning(
                         f"Updateing species name for {gs['NCBITaxonId']} from {sp_node.get('name')} to {gs['SciName'].decode()}"

@@ -125,7 +125,7 @@ class GeneLookupHelper:
                     gs = gst[numpy.where(gst["NCBITaxonId"] == int(sp_node.get("taxonId")))][0]
                 except IndexError as err:
                     logger.error(
-                        f"Cannot find genome for taxonId {sp_node.get('taxonId')}. Originally was {sp.name} -> {sp.xml_taxonId}"
+                        f"Cannot find genome for taxonId {sp_node.get('taxonId')}. Originally was {sp.species_code}, {sp.xml_taxonId} -> {sp.xml_node}"
                     )
                     raise
                 if gs["SciName"].decode() != sp_node.get("name"):
@@ -531,10 +531,14 @@ class OrthoXMLGeneIdParserGeneralProtID(OrthoXMLGeneIdParserWithOmaProtId):
             try:
                 sp = self._gstab[self._gstab["UniProtSpeciesCode"] == sp_name][0]
             except IndexError:
-                logger.error(
-                    f"no species found for {sp_name.decode()} in species table using SciName nor UniProtSpeciesCode"
-                )
-                raise RuntimeError(f"species {sp_name.decode()} not found.")
+                try:
+                    sp_as_int = int(sp_name)
+                    sp = self._gstab[self._gstab["NCBITaxonId"] == sp_as_int][0]
+                except (IndexError, ValueError):
+                    logger.error(
+                        f"no species found for {sp_name.decode()} in species table using SciName, UniProtSpeciesCode nor as NCBITaxonId, aborting."
+                    )
+                    raise RuntimeError(f"species {sp_name.decode()} not found.")
         sp_code = sp["UniProtSpeciesCode"].decode()
         xml_taxonId = int(node.get("taxonId"))
 

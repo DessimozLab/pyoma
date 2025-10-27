@@ -134,6 +134,8 @@ def find_fingerprints_streaming(
                 g = int(groups[groups != -1][0])
                 if g > 0 and g not in fingerprints:
                     fingerprints[g] = kmers.encode(code_int).decode("ascii")
+            h5_tmp.close()
+
     for og in range(1, entry_to_group.max() + 1):
         if og not in fingerprints:
             fingerprints[og] = "n/a"

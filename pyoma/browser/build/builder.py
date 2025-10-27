@@ -718,6 +718,7 @@ class DBBuilder(DarwinExporter):
                 kmer_lookup_arr.append([])
             kmer_lookup_arr.flush()
             t.close()
+            h5_tmp.close()
 
         self.logger.info("storing suffix array lookup index into database")
         chunk_pos.append(len(seqs))

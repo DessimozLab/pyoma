@@ -470,9 +470,9 @@ class OrthoXMLGeneIdParserWithOmaProtId(AbstractOrthoXMLParser):
     def _get_features_for_taxonomy(self, xml_node: etree.Element):
         xml_taxonId = int(xml_node.get("id"))
         name = xml_node.get("name")
+        code = None
         try:
             taxid = self._taxname2taxid[name]
-            code = None
         except KeyError:
             gs = self._spcode2gs[name]
             name = gs["SciName"].decode()
@@ -500,6 +500,7 @@ class OrthoXMLGeneIdParserGeneralProtID(OrthoXMLGeneIdParserWithOmaProtId):
     def __init__(self, h5path):
         super().__init__(h5path)
         self._protkey = self._prot_ids.argsort()
+        self._taxid2taxname = {int(row["NCBITaxonId"]): row["Name"].decode() for row in self._taxtab}
 
     def _read_from_h5(self, h5):
         super()._read_from_h5(h5)
@@ -521,6 +522,17 @@ class OrthoXMLGeneIdParserGeneralProtID(OrthoXMLGeneIdParserWithOmaProtId):
             res[i] = sec[match[0]]
         # entry numbers are 1-based
         return res + 1
+
+    def _get_features_for_taxonomy(self, xml_node: etree.Element):
+        try:
+            return super()._get_features_for_taxonomy(xml_node)
+        except KeyError:
+            logger.debug('could not find taxname for "%s", trying to interpret as taxid', xml_node.get("name"))
+            xml_taxonId = int(xml_node.get("id"))
+            taxid = int(xml_node.get("name"))
+            name = self._taxid2taxname[taxid]
+            res = {"taxid": taxid, "name": name, "xml_taxonId": xml_taxonId}
+            return res
 
     def process_species(self, node):
         assert node.tag == "{http://orthoXML.org/2011/}species"

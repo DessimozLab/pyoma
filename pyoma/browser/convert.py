@@ -1499,7 +1499,7 @@ def iter_domains(url):
         uncompressed.seek(0)
         csv_reader = csv.reader(uncompressed, dialect)
         col_md5, col_id, col_coord = (None,) * 3
-        coord_fromat_trans = str.maketrans("-,", "::")
+        coord_format_trans = str.maketrans("-,", "::")
 
         for lineNr, row in enumerate(csv_reader):
             if col_md5 is None:
@@ -1510,13 +1510,20 @@ def iter_domains(url):
                 elif len(row) == 3:
                     # additionally created ones, minimal format
                     col_md5, col_id, col_coord = 0, 1, 2
+                elif len(row) == 1:
+                    common.package_logger.warning(
+                        "file %s has only one columns. Likely md5 hashes of sequences without domain annotations", fname
+                    )
+                    common.package_logger.warning("line %s: %s", lineNr, row)
+                    common.package_logger.warning("skipping this file")
+                    return
                 else:
-                    raise DataImportError("Unknown Domain Annotation format in {}".format(uncompressed.filename))
+                    raise DataImportError("Unknown Domain Annotation format in {}".format(fname))
             try:
                 dom = DomainTuple(
                     row[col_md5],
                     row[col_id],
-                    row[col_coord].translate(coord_fromat_trans),
+                    row[col_coord].translate(coord_format_trans),
                 )
                 if lineNr < 10:
                     # do some sanity checks on the first few lines
@@ -1530,7 +1537,7 @@ def iter_domains(url):
                         )
                 yield dom
             except Exception:
-                common.package_logger.exception("cannot create tuple from line {}".format(lineNr))
+                common.package_logger.exception(f"cannot create tuple from line {lineNr}: {row}")
 
 
 def only_pfam_or_cath_domains(iterable):

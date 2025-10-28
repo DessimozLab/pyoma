@@ -1510,7 +1510,7 @@ def iter_domains(url):
                 elif len(row) == 3:
                     # additionally created ones, minimal format
                     col_md5, col_id, col_coord = 0, 1, 2
-                elif len(row) == 1:
+                elif len(row) == 1 or (len(row) == 2 and row[1] == ""):
                     common.package_logger.warning(
                         "file %s has only one columns. Likely md5 hashes of sequences without domain annotations", fname
                     )
@@ -1518,7 +1518,7 @@ def iter_domains(url):
                     common.package_logger.warning("skipping this file")
                     return
                 else:
-                    raise DataImportError("Unknown Domain Annotation format in {}".format(fname))
+                    raise DataImportError(f"Unknown Domain Annotation format in {fname}: {row}")
             try:
                 dom = DomainTuple(
                     row[col_md5],

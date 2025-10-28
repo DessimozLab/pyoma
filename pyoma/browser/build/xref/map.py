@@ -6,7 +6,7 @@ import os
 import pickle
 import re
 from time import time
-from typing import Mapping, Set, Union, List, Tuple
+from typing import Mapping, Set, Union, List, Tuple, Callable
 import logging
 
 import networkx as nx
@@ -273,7 +273,7 @@ class CrossRefsExtractor(metaclass=abc.ABCMeta):
     SRC_ENUM_KEY = "SourceID"
 
     def __init__(self, out_fpath: os.PathLike, match_lookup: Mapping[str, List[BestMatch]]):
-        self.storer = XrefStorer(out_fpath, index_cols=["EntryNr"])
+        self.storer = XrefStorer(out_fpath, buffer_size=10_000_000, multi_files=True)
         self.match_lookup = match_lookup
         self.src_enum_val = None
 
@@ -460,6 +460,94 @@ def collect_crossrefs(
                     collector.map_record(rec)
 
 
+def merge_sorted_h5_table(
+    input_h5_handles: List[tables.File],
+    table_path: str,
+    sort_columns: List[str],
+    dupl_subset_columns: List[str],
+    storer_callback: Callable,
+    enr_batch_size: int = 100,
+    chunksize: int = 500_000,
+):
+    """
+    Merge pre-sorted HDF5 tables in memory-bounded, batch-wise fashion,
+    deduplicating per EntryNr across files.
+    """
+
+    # Build iterators for each file
+    def iter_sorted_with_carryover(h5: tables.File):
+        carryover = pd.DataFrame()
+        table = h5.get_node(table_path)
+        nrows = table.nrows
+        colnames = table.colnames
+        for start in range(0, nrows, chunksize):
+            stop = min(start + chunksize, nrows)
+            chunk = pd.DataFrame.from_records(table.read(start, stop), columns=colnames)
+            if not carryover.empty:
+                chunk = pd.concat([carryover, chunk], ignore_index=True)
+                carryover = pd.DataFrame()
+            if not chunk.empty:
+                last_enr = chunk["EntryNr"].iloc[-1]
+                mask = chunk["EntryNr"] == last_enr
+                carryover = chunk.loc[mask]
+                chunk = chunk.loc[~mask]
+            if not chunk.empty:
+                yield chunk
+        if not carryover.empty:
+            yield carryover
+
+    # store dtype for later use
+    dt = input_h5_handles[0].get_node(table_path).dtype
+    dt = {c: dt[c] for c in dt.names}
+
+    readers = [iter_sorted_with_carryover(path) for path in input_h5_handles]
+    current_chunks = [next(r, pd.DataFrame()) for r in readers]
+
+    while any(not df.empty for df in current_chunks):
+        # Find the smallest available EntryNr across all files
+        min_enr = min(df["EntryNr"].iloc[0] for df in current_chunks if not df.empty)
+        enr_limit = min_enr + enr_batch_size
+
+        per_batch = []
+        for i, df in enumerate(current_chunks):
+            if df.empty:
+                continue
+            # Take all rows < enr_limit
+            mask = df["EntryNr"] < enr_limit
+            batch_df = df.loc[mask]
+            leftover_df = df.loc[~mask]
+            if not batch_df.empty:
+                per_batch.append(batch_df)
+                # Load next chunk if necessary
+            current_chunks[i] = leftover_df if not leftover_df.empty else next(readers[i], pd.DataFrame())
+
+        if not per_batch:
+            continue
+
+        # Combine batch and find the true highest EntryNr seen
+        merged = pd.concat(per_batch, ignore_index=True)
+        max_enr_in_batch = merged["EntryNr"].max()
+
+        # Add any leftover rows from files that belong to the last EntryNr
+        extra_rows = []
+        for i, df in enumerate(current_chunks):
+            if not df.empty and df["EntryNr"].iloc[0] == max_enr_in_batch:
+                mask = df["EntryNr"] == max_enr_in_batch
+                extra_rows.append(df.loc[mask])
+                current_chunks[i] = df.loc[~mask]
+
+        if extra_rows:
+            merged = pd.concat([merged, *extra_rows], ignore_index=True)
+
+        merged.sort_values(by=sort_columns, inplace=True)
+        merged.drop_duplicates(subset=dupl_subset_columns, keep="first", inplace=True)
+
+        # Pass final merged batch to storer callback
+        storer_callback(merged.to_records(index=False))
+        logger.debug("Processed up to EntryNr %s", max_enr_in_batch)
+    logger.info("Finished merging table %s", table_path)
+
+
 def _fetch_combine_and_reduce_input_data(h5_handles, table_path, sort_columns, dupl_subset_columns, storer_callback):
     dt = h5_handles[0].get_node(table_path).dtype
     dt = {c: dt[c] for c in dt.names}
@@ -481,24 +569,30 @@ def _fetch_combine_and_reduce_input_data(h5_handles, table_path, sort_columns, d
 
 
 def combine_xrefs(xrefs: List[os.PathLike], out: os.PathLike):
-    with XrefStorer(out, index_cols=["EntryNr", "XRefId", "XRefSource"], suffix_col="XRefId") as storer:
-        h5hs = [tables.open_file(fn, mode="r") for fn in xrefs]
+    with XrefStorer(
+        str(out), index_cols=["EntryNr", "XRefId", "XRefSource"], suffix_col="XRefId", multi_files=False
+    ) as storer:
+        h5hs = [tables.open_file(str(fn), mode="r") for fn in xrefs]
         try:
             logger.info("collecting crossreferences from %s files", len(xrefs))
-            _fetch_combine_and_reduce_input_data(
+            merge_sorted_h5_table(
                 h5hs,
-                "/XRef",
-                sort_columns=["XRefSource", "XRefId", "Verification"],
-                dupl_subset_columns=["XRefSource", "XRefId"],
+                table_path="/XRef",
+                sort_columns=["EntryNr", "XRefSource", "XRefId", "Verification"],
+                dupl_subset_columns=["EntryNr", "XRefSource", "XRefId"],
                 storer_callback=storer.add_xrefs,
+                enr_batch_size=100,
+                chunksize=500_000,
             )
             logger.info("collecting EC annotations from %s files", len(xrefs))
-            _fetch_combine_and_reduce_input_data(
+            merge_sorted_h5_table(
                 h5hs,
-                "/Annotations/EC",
-                sort_columns=["ECacc"],
-                dupl_subset_columns=["ECacc"],
+                table_path="/Annotations/EC",
+                sort_columns=["EntryNr", "ECacc"],
+                dupl_subset_columns=["EntryNr", "ECacc"],
                 storer_callback=storer.add_ecs,
+                enr_batch_size=1000,
+                chunksize=500_000,
             )
         except Exception as e:
             logger.exception(f"Error while combining xrefs: {e}")

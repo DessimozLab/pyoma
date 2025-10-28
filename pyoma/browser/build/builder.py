@@ -18,7 +18,7 @@ import math
 import tempfile
 import time
 import codecs
-from typing import Union, Optional, List, Iterable, Tuple
+from typing import Union, Optional, List, Iterable, Tuple, Literal
 
 import numpy
 import numpy.lib.recfunctions
@@ -96,8 +96,158 @@ class OmaGroupsProvider:
                 return 0
 
 
+class BufferedTableWriter:
+    """
+    Efficiently buffers and writes data to a PyTables table.
+    Ensures buffer is a structured NumPy array for dtype safety and sorting.
+    """
+
+    def __init__(
+        self,
+        table,
+        sort_key: Optional[List[str]] = None,
+        buffer_size: int = 500_000,
+        dtype: Optional[numpy.dtype] = None,
+    ):
+        self.table = table
+        self.sort_key = sort_key
+        self.buffer_size = buffer_size
+        self.dtype = dtype or table.description._v_dtype
+        self.buffer: List[numpy.array] = []
+        self.buffer_cnt = 0
+        self.total_written = 0
+
+    def add(self, items: Union[Iterable[Tuple], numpy.ndarray, pandas.DataFrame]):
+        """Add multiple items."""
+        arr = self._to_recarray(items)
+        if arr.size == 0:
+            return
+
+        self.buffer.append(arr)
+        self.buffer_cnt += arr.size
+        if self.buffer_cnt >= self.buffer_size:
+            self.flush()
+
+    def add_one(self, item: Tuple):
+        """Add single row."""
+        self.add([item])
+
+    def _to_recarray(self, data):
+        """Ensure data is structured NumPy array with proper dtype."""
+        if isinstance(data, numpy.ndarray):
+            return data.astype(self.dtype, copy=False)
+        if isinstance(data, pandas.DataFrame):
+            return data.to_records(index=False).astype(self.dtype, copy=False)
+        # assume iterable of tuples
+        return numpy.asarray(list(data), dtype=self.dtype)
+
+    def flush(self):
+        """Sort and write to table, then clear buffer."""
+        if self.buffer_cnt == 0:
+            return
+        if len(self.buffer) == 1:
+            buf = self.buffer[0]
+        else:
+            buf = numpy.concatenate(self.buffer)
+        if self.sort_key:
+            buf.sort(order=self.sort_key)
+        self.table.append(buf)
+        self.total_written += len(buf)
+        self.buffer.clear()
+        self.buffer_cnt = 0
+
+
+class XrefFileWriter:
+    """Handles one HDF5 file lifecycle and table management."""
+
+    def __init__(self, filename, mode, index_cols=None, suffix_col=None, buffer_size=500_000):
+        self.filename = filename
+        self.mode = mode
+        self.index_cols = index_cols or []
+        self.suffix_col = suffix_col
+        self.buffer_size = buffer_size
+        self.h5 = None
+        self.xref_writer = None
+        self.ec_writer = None
+        self.source_enum = None
+        self.verify_enum = None
+
+    def open(self):
+        self.h5 = tables.open_file(
+            self.filename, mode=self.mode, filters=tables.Filters(complevel=7, complib="blosc2", fletcher32=True)
+        )
+        if self.mode == "w":
+            xref = self.h5.create_table("/", "XRef", tablefmt.XRefTable, expectedrows=10_000_000)
+            ec = self.h5.create_table(
+                "/Annotations", "EC", tablefmt.ECTable, expectedrows=1_000_000, createparents=True
+            )
+        else:
+            xref = self.h5.root.XRef
+            ec = self.h5.root.Annotations.EC
+
+        self.xref_writer = BufferedTableWriter(
+            xref, sort_key=["EntryNr", "XRefSource", "XRefId", "Verification"], buffer_size=self.buffer_size
+        )
+        self.ec_writer = BufferedTableWriter(ec, sort_key=["EntryNr", "ECacc"], buffer_size=self.buffer_size)
+
+        self.source_enum = xref.get_enum("XRefSource")
+        self.verify_enum = xref.get_enum("Verification")
+
+    def write_xref(self, item):
+        self.xref_writer.add_one(item)
+
+    def write_xrefs(self, it):
+        self.xref_writer.add(it)
+
+    def write_ec(self, item):
+        self.ec_writer.add_one(item)
+
+    def write_ecs(self, it):
+        self.ec_writer.add(it)
+
+    def flush(self):
+        self.xref_writer.flush()
+        self.ec_writer.flush()
+
+    @property
+    def total_rows(self):
+        return self.xref_writer.total_written + self.ec_writer.total_written
+
+    def create_indexes(self):
+        if self.index_cols:
+            create_index_for_columns(self.h5.root.XRef, *self.index_cols)
+            if "EntryNr" in self.index_cols:
+                create_index_for_columns(self.h5.root.Annotations.EC, "EntryNr")
+            if "XRefId" in self.index_cols:
+                create_index_for_columns(self.h5.root.Annotations.EC, "ECacc")
+        if self.suffix_col:
+            suffixsearch.create_suffix_index(self.h5.root.XRef, self.suffix_col)
+
+    def close(self):
+        self.flush()
+        if self.h5:
+            self.h5.flush()
+            self.create_indexes()
+            self.h5.close()
+            self.h5 = None
+
+
 class XrefStorer:
-    def __init__(self, path, mode: str = "w", index_cols: Optional[List] = None, suffix_col: Optional[str] = None):
+    """
+    Manages buffered writing of XRefs + ECs across multiple HDF5 files.
+    Automatically rotates files after reaching max_rows_per_file.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        mode: Literal["a", "w", "r"] = "w",
+        index_cols: Optional[List[str]] = None,
+        suffix_col: Optional[str] = None,
+        buffer_size: int = 500_000,
+        multi_files: bool = False,
+        max_rows_per_file: int = 10_000_000,
+    ):
         self.path = path
         self.mode = mode
         if index_cols is not None:
@@ -109,67 +259,81 @@ class XrefStorer:
             if suffix_col not in tablefmt.XRefTable.columns.keys():
                 raise ValueError("Unknown columns building suffix index: {}".format(suffix_col))
         self.suffix_col = suffix_col
+        self.buffer_size = buffer_size
+        self.multi_files = multi_files
+        self.max_rows_per_file = max_rows_per_file
+
+        self._file_counter = 0 if multi_files else -1
+        self._current_writer: Optional[XrefFileWriter] = None
 
     def __enter__(self):
-        self.h5 = tables.open_file(
-            self.path, mode=self.mode, filters=tables.Filters(complevel=7, complib="blosc2", fletcher32=True)
-        )
-        if self.mode == "w":
-            self.xref = self.h5.create_table("/", "XRef", tablefmt.XRefTable, expectedrows=1e7)
-            self.ec = self.h5.create_table("/Annotations", "EC", tablefmt.ECTable, expectedrows=1e6, createparents=True)
-        self.source_enum = self.xref.get_enum("XRefSource")
-        self.verify_enum = self.xref.get_enum("Verification")
-        self._buffer = []
-        self._ecbuffer = []
+        self._open_new_file_if_needed()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.flush()
-        self.h5.flush()
-        if self.index_cols is not None:
-            create_index_for_columns(self.xref, *self.index_cols)
-            if "EntryNr" in self.index_cols:
-                create_index_for_columns(self.ec, "EntryNr")
-            if "XRefId" in self.index_cols:
-                create_index_for_columns(self.ec, "ECacc")
-        if self.suffix_col is not None:
-            suffixsearch.create_suffix_index(self.xref, self.suffix_col)
-        self.h5.close()
+        if self._current_writer:
+            self._current_writer.close()
 
-    def flush(self):
-        if len(self._buffer) > 0:
-            self.xref.append(self._buffer)
-        if len(self._ecbuffer) > 0:
-            self.ec.append(self._ecbuffer)
-        self._buffer = []
-        self._ecbuffer = []
+    def _build_filename(self):
+        if self._file_counter < 0:
+            return self.path
+        base, ext = os.path.splitext(self.path)
+        fname = f"{base}_{self._file_counter:03d}{ext}"
+        self._file_counter += 1
+        return fname
+
+    def _open_new_file_if_needed(self):
+        if not self._current_writer:
+            fname = self._build_filename()
+            self._current_writer = XrefFileWriter(
+                fname, self.mode, self.index_cols, self.suffix_col, buffer_size=self.buffer_size
+            )
+            self._current_writer.open()
+            return
+
+        if self.multi_files and self._current_writer.total_rows >= self.max_rows_per_file:
+            self._current_writer.flush()  # ensure all written
+            self._current_writer.close()
+            fname = self._build_filename()
+            self._current_writer = XrefFileWriter(
+                fname, self.mode, self.index_cols, self.suffix_col, buffer_size=self.buffer_size
+            )
+            self._current_writer.open()
+
+    # ─────────────────────────────
+    # Public interface
+    # ─────────────────────────────
+    def add_xref(self, enr: int, src: int, xref: str, verif: int, ident: float = 0.0):
+        self._open_new_file_if_needed()
+        item = (enr, src, xref.encode("utf-8"), verif, ident)
+        self._current_writer.write_xref(item)
 
     def add_xrefs(self, it: Iterable[Tuple]):
-        """adds a bunch of xrefs from it. The tuple must be in the correct format (no checks performed)"""
-        self._buffer.extend(it)
-        if len(self._buffer) > 500_000:
-            self.flush()
+        self._open_new_file_if_needed()
+        self._current_writer.write_xrefs(it)
 
-    def add_xref(self, enr: int, src: int, xref: str, verif: int, ident: float = 0):
-        """adds an xref entry. src and verif need to be already mapped to their numeric enum value"""
-        self._buffer.append((enr, src, xref.encode("utf-8"), verif, ident))
-        if len(self._buffer) > 500_000:
-            self.flush()
+    def add_ec(self, enr: int, ec: str):
+        self._open_new_file_if_needed()
+        item = (enr, ec.encode("utf-8"))
+        self._current_writer.write_ec(item)
 
     def add_ecs(self, it: Iterable[Tuple[int, bytes]]):
-        self._ecbuffer.extend(it)
-        if len(self._ecbuffer) > 50_000:
-            self.flush()
+        self._open_new_file_if_needed()
+        self._current_writer.write_ecs(it)
 
-    def add_ec(self, enr, ec):
-        self._ecbuffer.append((enr, ec.encode("utf-8")))
-        if len(self._ecbuffer) > 50_000:
-            self.flush()
+    def flush(self):
+        if self._current_writer:
+            self._current_writer.flush()
 
     def add_source_xref(self, enr: int, xref: str, typ: str):
-        """Adds a source xref entry. type needs to be either 'id' or 'ac'."""
-        src = self.source_enum["SourceID"] if typ == "id" else self.source_enum["SourceAC"]
-        self.add_xref(enr, src, xref, self.verify_enum["exact"], 1)
+        self._open_new_file_if_needed()
+        src = (
+            self._current_writer.source_enum["SourceID"]
+            if typ == "id"
+            else self._current_writer.source_enum["SourceAC"]
+        )
+        verif = self._current_writer.verify_enum["exact"]
+        self.add_xref(enr, src, xref, verif, 1.0)
 
 
 def load_homoeologs_from_tsv(genome, basedir: Optional[Union[str, os.PathLike]] = None):
@@ -206,7 +370,7 @@ def identify_close_paralogs(df: pandas.DataFrame, join_threshold_mb=500) -> pand
     else:
         # Groupby-based method
         common.package_logger.info(
-            f"⚠️ Using groupby-based method  to identify close paralogs(estimated memory: {est_memory_mb:.1f} MB)"
+            f"⚠️ Using groupby-based method to identify close paralogs(estimated memory: {est_memory_mb:.1f} MB)"
         )
 
         # Group by EntryNr2

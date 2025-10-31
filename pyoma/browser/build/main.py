@@ -185,11 +185,12 @@ def map_xrefs(conf):
     with auto_open(conf.tax_map, "rb") as fh:
         relevant_taxid_map = pickle.load(fh)
     xref_build.map_xrefs(
-        fpath=conf.xref,
+        fpaths=conf.xref,
         format=conf.format,
         source=conf.source,
         out_fpath=conf.out,
         db=conf.db,
+        nr_procs=conf.nr_procs,
         seq_idx=conf.seq_idx_db,
         xref_db=conf.xref_source_db,
         taxid_mapping=relevant_taxid_map,
@@ -497,7 +498,7 @@ def parse_command_line_args():
 
     map_xref_parser = subparsers.add_parser("map-xref", help="Filtering xref files")
     map_xref_parser.set_defaults(func=map_xrefs)
-    map_xref_parser.add_argument("--xref", required=True, help="Path to filtered input xref file")
+    map_xref_parser.add_argument("--xref", nargs="+", required=True, help="Path to filtered input xref file")
     map_xref_parser.add_argument(
         "--format", required=True, choices=("swiss", "genbank"), help="Format of input xref file"
     )
@@ -510,6 +511,7 @@ def parse_command_line_args():
         required=False,
         help="Output file with map results in pickle format",
     )
+    map_xref_parser.add_argument("--nr-procs", type=int, default=1, help="Number of processes to use")
     map_xref_parser.add_argument("--db", required=True, help="Path to database hdf5 database")
     map_xref_parser.add_argument("--seq-idx-db", required=True, help="Path to sequence index database in hdf5 format")
     map_xref_parser.add_argument("--xref-source-db", required=True, help="Path to xref source hdf5 database")

@@ -5,7 +5,8 @@ import itertools
 import os
 import pickle
 import re
-from time import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 from typing import Mapping, Set, Union, List, Tuple, Callable
 import logging
 
@@ -193,8 +194,19 @@ class GenbankFormatMapper(Mapper):
         return 0
 
 
+def map_chunk_of_xrefs_worker(args):
+    mapper_cls, db, seq_idx, xref_db, taxid_mapping, recs = args
+    mapper = mapper_cls(db, seq_idx, xref_db, taxid_mapping)
+    mapping_results = []
+    for rec in recs:
+        res = mapper.map_record(rec)
+        if res is not None:
+            mapping_results.append(res)
+    return mapping_results
+
+
 def map_xrefs(
-    fpath: os.PathLike,
+    fpaths: List[os.PathLike],
     format: str,
     source: str,
     out_fpath: os.PathLike,
@@ -202,19 +214,38 @@ def map_xrefs(
     seq_idx: os.PathLike,
     xref_db: os.PathLike,
     taxid_mapping: Mapping[int, Set[int]],
+    nr_procs: int = 1,
 ):
     mapper_cls = (
         SwissProtMapper if source == "swissprot" else SwissFormatMapper if source == "trembl" else GenbankFormatMapper
     )
-    mapper = mapper_cls(db, seq_idx, xref_db, taxid_mapping)
-    mapping_results = []
-    with auto_open(fpath, "rt") as fh:
-        rec_iter = SeqIO.parse(fh, format=format)
-        for rec in rec_iter:
-            res = mapper.map_record(rec)
-            if res is not None:
-                mapping_results.append(res)
-    with auto_open(out_fpath, "wb") as fh:
+    logger.info(f"mapping {len(fpaths)} xref files using {mapper_cls.__name__} with {nr_procs} processes")
+
+    def chunkify(fpaths, size=50):
+        chunk = []
+        for fpath in fpaths:
+            with auto_open(fpath, "rt") as fh:
+                rec_iter = SeqIO.parse(fh, format=format)
+                for rec in rec_iter:
+                    chunk.append(rec)
+                    if len(chunk) == size:
+                        yield chunk
+                        chunk = []
+        if chunk:
+            yield chunk
+
+    with ProcessPoolExecutor(max_workers=nr_procs) as pool:
+        futures = []
+        for chunk in chunkify(fpaths, size=50):
+            args = (mapper_cls, db, seq_idx, xref_db, taxid_mapping, chunk)
+            futures.append(pool.submit(map_chunk_of_xrefs_worker, args))
+
+        mapping_results = []
+        for fut in as_completed(futures):
+            res = fut.result()
+            if res:
+                mapping_results.extend(res)
+    with open(out_fpath, "wb") as fh:
         pickle.dump(mapping_results, fh)
     logger.info(f"wrote {len(mapping_results)} records to {out_fpath}")
 

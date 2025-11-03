@@ -64,7 +64,7 @@ def create_job_files(db_path, out_prefix):
         for fam, size in sorted(counts.items(), key=lambda x: -x[1]):
             if size**2 > target:
                 for rng in range(0, size, nr_elem):
-                    yield [(fam, (rng, rng + nr_elem))]
+                    yield [(fam, (rng, min(rng + nr_elem, size)))]
             elif cur_size + size**2 < target and len(cur_bucket) < 2 * nr_elem:
                 cur_bucket.append((fam,))
                 cur_size += size**2
@@ -559,6 +559,8 @@ def combine_results(job_results, out):
 
         cnts = numpy.concatenate(cnts)
         cnts.sort(order="EntryNr")
+        if cnts["EntryNr"][0] == 0:
+            cnts = cnts[cnts["EntryNr"] > 0]
         if len(cnts) != cnts[-1]["EntryNr"]:
             logger.error("Cached orthologs seem not complete: %d <--> %d", len(cnts), cnts[-1]["EntryNr"])
             raise DBConsistencyError("Cached orthologs seem not complete")

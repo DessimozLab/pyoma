@@ -274,6 +274,14 @@ class XrefStorer:
         if self._current_writer:
             self._current_writer.close()
 
+    @property
+    def source_enum(self):
+        return self._current_writer.source_enum if self._current_writer else None
+
+    @property
+    def verify_enum(self):
+        return self._current_writer.verify_enum if self._current_writer else None
+
     def _build_filename(self):
         if self._file_counter < 0:
             return self.path

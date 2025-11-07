@@ -2,10 +2,12 @@ import collections
 import itertools
 import json
 import logging
+import math
 import pickle
 import sys
 import csv
 import warnings
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from os.path import exists, getsize, join, basename
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from shutil import copy
@@ -172,13 +174,51 @@ def build_relevant_taxid_mapping(conf):
         pickle.dump(mapped, fh)
 
 
+def _process_batch_filter_split_xrefs(file_batch, out_prefix, taxids, fmt):
+    """
+    Worker: process a batch of xref files.
+    Returns the list of processed files.
+    """
+    processed = []
+    with xref_build.ChunkWriter(out_prefix, 30_000) as writer:
+        for fpath in file_batch:
+            xref_build.filter_records_on_taxids(fpath, writer, taxids, fmt)
+            processed.append(fpath)
+    return processed
+
+
 def filter_and_split_xrefs(conf):
     with auto_open(conf.tax_map, "rb") as fh:
         relevant_taxid_map = pickle.load(fh)
     relevant_taxids = set(relevant_taxid_map.keys())
-    with xref_build.ChunkWriter(conf.out_prefix, 30_000) as writer:
-        for xref_file in conf.xref:
-            xref_build.filter_records_on_taxids(xref_file, writer, relevant_taxids, conf.format)
+    if len(conf.xref) <= 1:
+        with xref_build.ChunkWriter(conf.out_prefix, 30_000) as writer:
+            xref_build.filter_records_on_taxids(conf.xref[0], writer, relevant_taxids, conf.format)
+    else:
+        # run in parallel for multiple input files
+        bsize = min(25, math.ceil(len(conf.xref) / conf.nr_procs))
+        batches = [conf.xref[k : k + bsize] for k in range(0, len(conf.xref), bsize)]
+        with ProcessPoolExecutor(max_workers=conf.nr_procs) as executor:
+            futures = {
+                executor.submit(
+                    _process_batch_filter_split_xrefs,
+                    batches[i],
+                    conf.out_prefix + f"-{i:02d}",
+                    relevant_taxids,
+                    conf.format,
+                ): i
+                for i in range(len(batches))
+            }
+            total_files = 0
+            for fut in as_completed(futures):
+                try:
+                    processed_files = fut.result()
+                    total_files += len(processed_files)
+                    for f in processed_files:
+                        logger.info("Finished %s", f)
+                except Exception as e:
+                    batch_nr = futures[fut]
+                    logger.error("Error processing batch starting with %s: %s", batches[batch_nr], e)
 
 
 def map_xrefs(conf):
@@ -495,6 +535,7 @@ def parse_command_line_args():
         help="Prefix of output xref file. Output files will contain < 30k records, " "all named {prefix}-{03d}.gz",
     )
     filter_xref_parser.add_argument("--tax-map", required=True, help="Path to taxid map file (pickle)")
+    filter_xref_parser.add_argument("--nr-procs", type=int, default=1, help="Nr of processes to use")
 
     map_xref_parser = subparsers.add_parser("map-xref", help="Filtering xref files")
     map_xref_parser.set_defaults(func=map_xrefs)

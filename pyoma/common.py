@@ -7,6 +7,8 @@ import gzip
 import bz2
 import os
 from io import BytesIO, StringIO
+from pathlib import Path
+import lzma
 
 package_logger = logging.getLogger("pyoma")
 package_logger.addHandler(logging.NullHandler())
@@ -35,22 +37,33 @@ def auto_open(fn, *args, **kwargs):
     """
     if isinstance(fn, (BytesIO, StringIO)):
         return fn
+    if isinstance(fn, (Path, os.DirEntry)):
+        fn = str(fn)
 
     # File opening. This is based on the example on SO here:
     # http://stackoverflow.com/a/26986344
-    fmagic = {b"\x1f\x8b\x08": gzip.open, b"\x42\x5a\x68": bz2.open}
+    fmagic = {
+        b"\x1f\x8b\x08": gzip.open,
+        b"\x42\x5a\x68": bz2.open,
+        b"\xfd\x37\x7a\x58\x5a\x00": lzma.open,  # xz
+    }
 
+    # Try detecting via magic bytes (if file exists and non-empty)
     if os.path.isfile(fn) and os.stat(fn).st_size > 0:
         with open(fn, "rb") as fp:
-            fs = fp.read(max([len(x) for x in fmagic]))
+            fs = fp.read(max(map(len, fmagic)))
         for magic, _open in fmagic.items():
             if fs.startswith(magic):
                 return _open(fn, *args, **kwargs)
-    else:
-        if fn.endswith(".gz"):
-            return gzip.open(fn, *args, **kwargs)
-        elif fn.endswith(".bz2"):
-            return bz2.open(fn, *args, **kwargs)
+
+    # Fallback to detection via file extension
+    suffix = os.path.splitext(fn)[-1].lower()
+    if suffix == ".gz":
+        return gzip.open(fn, *args, **kwargs)
+    elif suffix == ".bz2":
+        return bz2.open(fn, *args, **kwargs)
+    elif suffix == ".xz":
+        return lzma.open(fn, *args, **kwargs)
     return open(fn, *args, **kwargs)
 
 

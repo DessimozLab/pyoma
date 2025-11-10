@@ -1,3 +1,5 @@
+import io
+import lzma
 import os
 import tempfile
 import unittest
@@ -75,6 +77,36 @@ class AutoOpenBz2WriteTest(AutoOpenRegularWriteTest):
 
     def expected_text_start(self):
         return b"\x42\x5a\x68"
+
+
+class AutoOpenXzTest(AutoOpenRegularReadTest):
+    filesuffix = ".xz"
+
+    def store_text(self, fn):
+        with lzma.open(fn, mode="wt", encoding="utf-8") as fh:
+            fh.write(self.expected_text)
+
+
+class AutoOpenBytesIOTest(unittest.TestCase):
+    def test_bytesio_returns_itself(self):
+        data = b"Hello World"
+        buf = io.BytesIO(data)
+        fh = auto_open(buf)
+        self.assertIs(fh, buf)
+        self.assertEqual(fh.read(), data)
+
+
+class AutoOpenPathTest(AutoOpenRegularReadTest):
+    def store_text(self, fn):
+        with open(fn, "wt", encoding="utf-8") as fh:
+            fh.write(self.expected_text)
+
+    def test_pathlib_path(self):
+        from pathlib import Path
+
+        path_obj = Path(self.testfilename)
+        with auto_open(path_obj, "rt") as fh:
+            self.assertEqual(fh.read(), self.expected_text)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import itertools
 import logging
 import multiprocessing
 import os
+import pickle
 import re
 import time
 from functools import partial
@@ -71,7 +72,7 @@ class LSHBuilder(object):
     def _open_hdf5(self, filename, mode="w"):
         filters = None
         if mode == "w":
-            filters = tables.Filters(complevel=5, complib="blosc2", fletcher32=True)
+            filters = tables.Filters(complevel=5, complib="blosc", bitshuffle=True, fletcher32=False, shuffle=True)
         return tables.open_file(filename, mode=mode, filters=filters)
 
     def init_hash_table_file(self, hash_file):
@@ -84,21 +85,30 @@ class LSHBuilder(object):
             shape=(0,),
             expectedrows=1e6,
         )
-        h5.create_vlarray("/", "lsh_obj", atom=tables.ObjectAtom())
+        # Use VLArray of UInt8Atom to store serialized LSH object
+        h5.create_vlarray("/", "lsh_obj", atom=tables.UInt8Atom())
         return h5
 
     def _load_hash_file(self, hash_file, mode="r"):
         h5 = self._open_hdf5(hash_file, mode=mode)
-        lsh_obj_arr = h5.get_node("/lsh_obj")
-        lsh = lsh_obj_arr[-2]
-        hogid2row = lsh_obj_arr[-1]
+        lsh_obj_arr: tables.VLArray = h5.get_node("/lsh_obj")
+        lsh_bytes = bytes(lsh_obj_arr[0])
+        hogid2row_bytes = bytes(lsh_obj_arr[1])
+        lsh = pickle.loads(lsh_bytes)
+        hogid2row = pickle.loads(hogid2row_bytes)
         return h5, lsh, hogid2row
 
     def close(self):
         if self.h5.mode != "r":
-            lsh_obj_arr = self.h5.get_node("/lsh_obj")
-            lsh_obj_arr.append(self.lsh)
-            lsh_obj_arr.append(self.hogid2row)
+            lsh_obj_arr: tables.VLArray = self.h5.get_node("/lsh_obj")
+            # Remove old content, if any (for repeated closes)
+            lsh_obj_arr.truncate(0)
+            # Serialize LSH and hogid2row
+            lsh_bytes = pickle.dumps(self.lsh)
+            hogid2row_bytes = pickle.dumps(self.hogid2row)
+            lsh_obj_arr.append(numpy.frombuffer(lsh_bytes, dtype=numpy.uint8))
+            lsh_obj_arr.append(numpy.frombuffer(hogid2row_bytes, dtype=numpy.uint8))
+            lsh_obj_arr.flush()
             self.hashes.flush()
             self.hogids.flush()
         self.h5.close()

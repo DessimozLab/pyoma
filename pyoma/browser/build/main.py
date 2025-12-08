@@ -234,6 +234,7 @@ def map_xrefs(conf):
         seq_idx=conf.seq_idx_db,
         xref_db=conf.xref_source_db,
         taxid_mapping=relevant_taxid_map,
+        align=conf.align_inexact,
     )
 
 
@@ -558,6 +559,11 @@ def parse_command_line_args():
     map_xref_parser.add_argument("--seq-idx-db", required=True, help="Path to sequence index database in hdf5 format")
     map_xref_parser.add_argument("--xref-source-db", required=True, help="Path to xref source hdf5 database")
     map_xref_parser.add_argument("--tax-map", required=True, help="Path to taxid map file (pickle)")
+    map_xref_parser.add_argument(
+        "--align-inexact",
+        action="store_true",
+        help="Whether to align inexact matches. If not, nr kmer hits will be used.",
+    )
 
     collect_xref_parser = subparsers.add_parser(
         "collect-xrefs", help="Identify and filter best xrefs matches per source and collect their crossreferences"

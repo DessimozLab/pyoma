@@ -39,12 +39,14 @@ class Mapper(metaclass=abc.ABCMeta):
         seq_idx_path: os.PathLike,
         src_xref_path: os.PathLike,
         taxid_mapping: Mapping[int, Set[int]],
+        approx_align: bool = True,
     ):
         self.db = Database(db_path)
         self.searcher = SequenceSearch(self.db, seq_idx_path)
         self.oma_id_mapper: OmaIdMapper = self.db.id_mapper["OMA"]
         self.taxid_mapping = self._identify_entry_ranges_for_taxid_mappings(taxid_mapping)
         self.src_xrefs = self._load_source_ids(src_xref_path)
+        self._do_approx_align = approx_align
 
     @abc.abstractmethod
     def get_taxid(self, rec):
@@ -154,21 +156,36 @@ class Mapper(metaclass=abc.ABCMeta):
         if len(entry_nrs) > 0:
             return Match(rec.id, entry_nrs, "exact", 1)
 
-        # now, we try approximate search
-        approx_matches = self.searcher.approx_search(
-            str(rec.seq), n=20, entrynr_range=taxrange.entry_nr_range, coverage=0.7, alignment="global"
-        )
-        logger.debug(f"computed global alignments for {len(approx_matches)} approx matches")
-        if len(approx_matches) > 0:
-            s1, s2 = (approx_matches[0][1]["alignment"][0][0], approx_matches[0][1]["alignment"][1][0])
-            identity = sum(1 for b1, b2 in zip(s1, s2) if b1 == b2) / len(s1)
-            logger.info(
-                f"best approximate match of {rec.id} is entry_nr {approx_matches[0][0]}: "
-                f"{identity:.3f} identy, score {approx_matches[0][1]['score']:.3f}"
+        if self._do_approx_align:
+            # now, we try approximate search
+            approx_matches = self.searcher.approx_search(
+                str(rec.seq),
+                n=20,
+                entrynr_range=taxrange.entry_nr_range,
+                coverage=self.identity_threshold - 0.2,
+                alignment="global",
             )
-            logger.debug(f"Alignment:\n{s1}\n{s2}")
-            if identity > self.identity_threshold:
-                return Match(rec.id, {approx_matches[0][0]}, "approx", identity)
+            logger.debug(f"computed global alignments for {len(approx_matches)} approx matches")
+            if len(approx_matches) > 0:
+                s1, s2 = (approx_matches[0][1]["alignment"][0][0], approx_matches[0][1]["alignment"][1][0])
+                identity = sum(1 for b1, b2 in zip(s1, s2) if b1 == b2) / len(s1)
+                logger.info(
+                    f"best approximate match of {rec.id} is entry_nr {approx_matches[0][0]}: "
+                    f"{identity:.3f} identy, score {approx_matches[0][1]['score']:.3f}"
+                )
+                logger.debug(f"Alignment:\n{s1}\n{s2}")
+                if identity > self.identity_threshold:
+                    return Match(rec.id, {approx_matches[0][0]}, "approx", identity)
+        else:
+            kmer_matches = self.searcher.approx_search_no_align(
+                str(rec.seq), coverage=self.identity_threshold - 0.2, entrynr_range=taxrange.entry_nr_range
+            )
+            logger.debug(f"searched for kmer-based matches: {len(kmer_matches)} approx matches")
+            if len(kmer_matches) > 1:
+                logger.debug(
+                    f"  -> {kmer_matches[0][1]} vs {kmer_matches[1][1]}: {kmer_matches[0][1]/kmer_matches[1][1]:.3f} ratio best/second"
+                )
+            return Match(rec.id, {kmer_matches[0][0]}, "approx", kmer_matches[0][1]) if kmer_matches else None
         return None
 
 
@@ -195,8 +212,8 @@ class GenbankFormatMapper(Mapper):
 
 
 def map_chunk_of_xrefs_worker(args):
-    mapper_cls, db, seq_idx, xref_db, taxid_mapping, recs = args
-    mapper = mapper_cls(db, seq_idx, xref_db, taxid_mapping)
+    mapper_cls, db, seq_idx, xref_db, taxid_mapping, align, recs = args
+    mapper = mapper_cls(db, seq_idx, xref_db, taxid_mapping, align)
     mapping_results = []
     for rec in recs:
         res = mapper.map_record(rec)
@@ -214,6 +231,7 @@ def map_xrefs(
     seq_idx: os.PathLike,
     xref_db: os.PathLike,
     taxid_mapping: Mapping[int, Set[int]],
+    align: bool = True,
     nr_procs: int = 1,
 ):
     mapper_cls = (
@@ -237,7 +255,7 @@ def map_xrefs(
     with ProcessPoolExecutor(max_workers=nr_procs) as pool:
         futures = []
         for chunk in chunkify(fpaths, size=50):
-            args = (mapper_cls, db, seq_idx, xref_db, taxid_mapping, chunk)
+            args = (mapper_cls, db, seq_idx, xref_db, taxid_mapping, align, chunk)
             futures.append(pool.submit(map_chunk_of_xrefs_worker, args))
 
         mapping_results = []

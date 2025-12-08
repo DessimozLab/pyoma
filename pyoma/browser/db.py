@@ -2534,6 +2534,7 @@ class SequenceSearch(object):
             for enr, cnts in c.items()
             if cnts >= cut_off and (entrynr_range is None or tax_filt(enr, entrynr_range))
         ]
+        entries.sort(key=lambda x: x[1], reverse=True)
         return entries
 
     def approx_search(
@@ -2578,13 +2579,12 @@ class SequenceSearch(object):
             raise ValueError("alignment must be either 'global' or 'local'")
 
         kmer_hits = self.approx_search_no_align(seq, is_sanitised=True, coverage=coverage, entrynr_range=entrynr_range)
-        c = sorted(kmer_hits, reverse=True, key=lambda x: x[1])
-        if n > 0:
-            c = c[:n]
+        if kmer_hits > 0:
+            kmer_hits = kmer_hits[:n]
 
         # 3. Do local alignments and return count / score / alignment
         res = []
-        if len(c) > 0:
+        if len(kmer_hits) > 0:
             res = sorted(
                 [
                     (
@@ -2597,7 +2597,7 @@ class SequenceSearch(object):
                             "distvar": a[3] if compute_distance else None,
                         },
                     )
-                    for (m, a) in self._align_entries(seq, c, compute_distance, alignment == "global")
+                    for (m, a) in self._align_entries(seq, kmer_hits, compute_distance, alignment == "global")
                 ],
                 key=lambda q: q[1]["score"],
                 reverse=True,
@@ -3117,7 +3117,7 @@ class Taxonomy(object):
                 it = numpy.fromiter(it, dtype="i4")
             except ValueError:
                 it = numpy.fromiter(it, dtype="S255")
-        if it.dtype.type is numpy.string_:
+        if it.dtype.type is numpy.bytes_:
             try:
                 ns = self.name_key
             except AttributeError:
@@ -3210,7 +3210,7 @@ class Taxonomy(object):
         idxs = numpy.searchsorted(self.tax_table["NCBITaxonId"], taxids_to_keep, sorter=self.taxid_key)
         idxs = numpy.clip(idxs, 0, len(self.taxid_key) - 1)
         subtaxdata = self.tax_table[self.taxid_key[idxs]]
-        if not numpy.alltrue(subtaxdata["NCBITaxonId"] == taxids_to_keep):
+        if not numpy.all(subtaxdata["NCBITaxonId"] == taxids_to_keep):
             raise KeyError("not all levels in members exists in this taxonomy")
 
         updated_parent = numpy.zeros(len(subtaxdata), "bool")

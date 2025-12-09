@@ -33,7 +33,7 @@ SKIPWORDS = {
 }
 
 
-@timethis(logging.INFO)
+@timethis(level=logging.INFO)
 def get_descriptions_for_entries(h5db: tables.File, entries: Union[numpy.ndarray, pd.DataFrame]) -> Dict[int, str]:
     """
     Get descriptions for a numpy array of protein entries.
@@ -77,7 +77,7 @@ def get_descriptions_for_entries(h5db: tables.File, entries: Union[numpy.ndarray
     return descriptions
 
 
-@timethis(logging.INFO)
+@timethis(level=logging.INFO)
 def get_xrefs_for_entries(h5db: tables.File, entries: Union[numpy.ndarray, pd.DataFrame]) -> Dict[int, Dict[str, str]]:
     """
     Get cross-references for a numpy array of protein entries.
@@ -289,7 +289,7 @@ def collect_keywords_from_desc_and_xrefs(descriptions: Dict[int, str], xrefs: Di
     return kw
 
 
-@timethis(logging.INFO)
+@timethis(level=logging.INFO)
 def load_all_entries(h5db: tables.File) -> pd.DataFrame:
     """
     Load all protein entries from the HDF5 database.

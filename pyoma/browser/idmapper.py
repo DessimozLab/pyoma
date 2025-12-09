@@ -368,7 +368,7 @@ class XrefIdMapper(NoSearchXrefIdMapper):
         super(XrefIdMapper, self).__init__(db)
         self.search_helper = XRefSearchHelper(db.get_hdf5_handle())
 
-    @timethis(logging.DEBUG)
+    @timethis(level=logging.DEBUG)
     def search_xref(self, xref, is_prefix=False, match_any_substring=False):
         """identify proteins associcated with `xref`.
 
@@ -400,7 +400,7 @@ class XrefIdMapper(NoSearchXrefIdMapper):
             res = res[numpy.in1d(res["XRefSource"], list(self.idtype))]
         return res
 
-    @timethis(logging.INFO)
+    @timethis(level=logging.INFO)
     def search_id(self, query, limit=None, entrynr_range=None):
         source_filter = None
         try:

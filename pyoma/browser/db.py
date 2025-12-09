@@ -2957,7 +2957,7 @@ class IDResolver(object):
             nr = (nr, False)
         return nr
 
-    @timethis(logging.DEBUG)
+    @timethis(level=logging.DEBUG)
     def search_protein(self, query: str, limit=None, entrynr_range=None):
         candidates = collections.defaultdict(dict)
         try:
@@ -3460,7 +3460,7 @@ class DescriptionSearcher(object):
         self.entry_tab = db.get_hdf5_handle().get_node("/Protein/Entries")
         self.desc_index = SuffixSearcher.from_tablecolumn(self.entry_tab, "DescriptionOffset")
 
-    @timethis(logging.DEBUG)
+    @timethis(level=logging.DEBUG)
     def search_term(self, term, limit=None):
         return self.desc_index.find(term, limit=limit)
 

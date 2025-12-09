@@ -3,7 +3,7 @@ import logging
 from time import time, perf_counter, process_time
 
 
-def timethis(level=logging.INFO, name=None):
+def timethis(_func=None, *, level=logging.INFO, name=None):
     """
     Decorator that reports the execution time. level is the logging
     level, name is the logger name. If name isn't specified,
@@ -37,7 +37,10 @@ def timethis(level=logging.INFO, name=None):
 
         return wrapper
 
-    return decorate
+    if _func is None:
+        return decorate
+    else:
+        return decorate(_func)
 
 
 def outdated_database_warning():

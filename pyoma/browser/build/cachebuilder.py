@@ -340,19 +340,20 @@ class CacheBuilder:
         self.save()
 
     def process_family(self, fam, rng=None):
-        t0 = time()
+        t0 = perf_counter()
         members = self.load_fam_members(fam)
         self.cnts.append(self.analyse_fam(fam, members, rng))
         if rng is None or rng[0] == 0:
             fam_json = self.compute_familydata_json(fam, members)
             self.store_familydata_json_result(fam, fam_json)
-        logger.info(f"processed family {fam} with {len(members)}, took {time() - t0}sec")
+        logger.info(f"processed family {fam} with {len(members)}, took {perf_counter() - t0} sec")
 
     def process_singletons(self, singletons):
         t0 = time()
         self.cnts.append(self.analyse_singleton(singletons))
         logger.info(f"processed %d singletons in %.2f sec", len(singletons), time() - t0)
 
+    @log_timing
     def load_fam_members(self, fam):
         members = []
         vals = {k: self.db.format_hogid(x).encode("utf-8") for k, x in zip(("fam", "fam_next"), (fam, fam + 1))}
@@ -387,6 +388,7 @@ class CacheBuilder:
         vps_tab = self.vp.get_node("/AllVPairs")
         return vps_tab[start:end]
 
+    @log_timing
     def load_grp_members(self, group):
         return [row["EntryNr"] for row in self.h5.get_node("/Protein/Entries").where(f"OmaGroup == {group}")]
 
@@ -401,7 +403,8 @@ class CacheBuilder:
 
         fam_vps = self.load_vps_for_family(fam)
         counts = numpy.zeros(nr_memb, dtype=tables.dtype_from_descr(ProteinCacheInfo))
-        time_vps_wall, time_vps_cpu, time_ind_wall, time_ind_cpu, cpu_0 = 0, 0, 0, 0, process_time()
+        time_vps_wall, time_vps_cpu, time_ind_wall, time_ind_cpu = 0, 0, 0, 0
+        cpu_0, wall_0 = process_time(), perf_counter()
         for i, p1 in tqdm(
             enumerate(fam_iter),
             disable=len(fam_members) < 500,
@@ -425,13 +428,16 @@ class CacheBuilder:
             counts[i]["NrOMAGroupOrthologs"] = len(grp)
             counts[i]["NrAnyOrthologs"] = len(vps | ind_orth | grp)
         cpu_1 = process_time()
+        wall_1 = perf_counter()
         logger.debug(
-            "timings for family %s: vps=[wall: %.3f; cpu: %.3f] ind=[wall: %.3f; cpu: %.3f]",
+            "timings for family %s: vps=[wall: %.3f; cpu: %.3f] ind=[wall: %.3f; cpu: %.3f] aux[wall: %3f; cpu %3f]",
             fam,
             time_vps_wall,
             time_vps_cpu,
             time_ind_wall,
             time_ind_cpu,
+            wall_1 - wall_0 - time_vps_wall - time_ind_wall,
+            cpu_1 - cpu_0 - time_vps_cpu - time_ind_cpu,
         )
         logger.debug("  total cpu time for family %s: %.3f sec", fam, cpu_1 - cpu_0)
         logger.debug(
@@ -441,7 +447,7 @@ class CacheBuilder:
         )
         logger.debug(
             "  overall efficiency: %.2f%%",
-            ((cpu_1 - cpu_0) / (time_vps_wall + time_ind_wall) * 100) if (time_vps_wall + time_ind_wall) > 0 else 0,
+            ((cpu_1 - cpu_0) / (wall_1 - wall_0) * 100) if (wall_1 - wall_0) > 0 else 0,
         )
         return counts
 

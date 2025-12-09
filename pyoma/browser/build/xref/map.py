@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from ...db import SequenceSearch
 from ...db import Database, OmaIdMapper
+from ...decorators import timethis
 from ....common import auto_open
 from ..builder import XrefStorer
 
@@ -114,6 +115,7 @@ class Mapper(metaclass=abc.ABCMeta):
                     res.update(self.src_xrefs[id_])
         return res
 
+    @timethis
     def map_record(self, rec: SeqRecord) -> Union[None, Match]:
         """Map a SeqRecord to the database by comparing the sequence with the proteins in OMA.
 
@@ -180,10 +182,10 @@ class Mapper(metaclass=abc.ABCMeta):
             kmer_matches = self.searcher.approx_search_no_align(
                 str(rec.seq), coverage=self.identity_threshold - 0.2, entrynr_range=taxrange.entry_nr_range
             )
-            logger.debug(f"searched for kmer-based matches: {len(kmer_matches)} approx matches")
+            logger.debug(f"kmer-based matches for {rec.id}: {len(kmer_matches)} approx matches")
             if len(kmer_matches) > 1:
                 logger.debug(
-                    f"  -> {kmer_matches[0][1]} vs {kmer_matches[1][1]}: {kmer_matches[0][1]/kmer_matches[1][1]:.3f} ratio best/second"
+                    f"  -> {kmer_matches[0][1]}: {kmer_matches[0][1]} vs {kmer_matches[1][0]}: {kmer_matches[1][1]}; {kmer_matches[0][1]/kmer_matches[1][1]:.3f} ratio best/second"
                 )
             return Match(rec.id, {kmer_matches[0][0]}, "approx", kmer_matches[0][1]) if kmer_matches else None
         return None
@@ -254,7 +256,7 @@ def map_xrefs(
 
     with ProcessPoolExecutor(max_workers=nr_procs) as pool:
         futures = []
-        for chunk in chunkify(fpaths, size=50):
+        for chunk in chunkify(fpaths, size=150):
             args = (mapper_cls, db, seq_idx, xref_db, taxid_mapping, align, chunk)
             futures.append(pool.submit(map_chunk_of_xrefs_worker, args))
 

@@ -15,6 +15,7 @@ import tables
 from tqdm import tqdm
 
 from ..db import Database
+from ..decorators import timethis as log_timing
 from ..exceptions import DBConsistencyError
 from ..models import ProteinEntry
 from ..tablefmt import ProteinCacheInfo, RootHOGMetaTable
@@ -296,22 +297,6 @@ def process_job_file(job_file: os.PathLike, db_fpath: os.PathLike, vp_fpath: os.
         else:
             for args in payload:
                 func(*args)
-
-
-def log_timing(func):
-    def wrapper(*args, **kwargs):
-        start_wall = perf_counter()
-        start_cpu = process_time()
-        result = func(*args, **kwargs)
-        end_wall = perf_counter()
-        end_cpu = process_time()
-        wall = end_wall - start_wall
-        cpu = end_cpu - start_cpu
-        efficiency = cpu / wall if wall > 0 else 0
-        logger.info(f"{func.__name__}: CPU={cpu:.6f}s, Wall={wall:.6f}s, Efficiency={efficiency:.2%}")
-        return result
-
-    return wrapper
 
 
 class CacheBuilder:

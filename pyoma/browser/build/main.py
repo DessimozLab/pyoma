@@ -10,9 +10,7 @@ import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from os.path import exists, getsize, join, basename
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-from shutil import copy
 
-import ete3
 import pandas
 import tables
 from tables import PerformanceWarning
@@ -677,15 +675,19 @@ def parse_command_line_args():
     return conf
 
 
-def build_database():
-    conf = parse_command_line_args()
-
+def setup_logging(conf):
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
     if hasattr(conf, "nr_procs") or hasattr(conf, "nr_cpu"):
-        fmt = "%(asctime)s %(levelname)-8s [pid=%(process)d name=%(process_name)s] %(name)s: %(message)s"
+        fmt = "%(asctime)s %(levelname)-8s [pid=%(process)d name=%(processName)s] %(name)s: %(message)s"
     else:
         fmt = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
-
     logging.basicConfig(level=30 - 10 * min(conf.verbose, 2), format=fmt)
+
+
+def build_database():
+    conf = parse_command_line_args()
+    setup_logging(conf)
     logger.info("Command line options: %s", str(conf))
     if not sys.warnoptions and not getattr(conf, "verbose", 0) >= 1:
         warnings.simplefilter("ignore", category=PerformanceWarning)

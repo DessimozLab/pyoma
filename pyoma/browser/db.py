@@ -2579,7 +2579,7 @@ class SequenceSearch(object):
             raise ValueError("alignment must be either 'global' or 'local'")
 
         kmer_hits = self.approx_search_no_align(seq, is_sanitised=True, coverage=coverage, entrynr_range=entrynr_range)
-        if kmer_hits > 0:
+        if n > 0:
             kmer_hits = kmer_hits[:n]
 
         # 3. Do local alignments and return count / score / alignment

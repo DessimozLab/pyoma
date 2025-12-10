@@ -679,10 +679,13 @@ def parse_command_line_args():
 
 def build_database():
     conf = parse_command_line_args()
-    logging.basicConfig(
-        level=30 - 10 * min(conf.verbose, 2),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+
+    if hasattr(conf, "nr_procs") or hasattr(conf, "nr_cpu"):
+        fmt = "%(asctime)s %(levelname)-8s [pid=%(process)d name=%(process_name)s] %(name)s: %(message)s"
+    else:
+        fmt = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+
+    logging.basicConfig(level=30 - 10 * min(conf.verbose, 2), format=fmt)
     logger.info("Command line options: %s", str(conf))
     if not sys.warnoptions and not getattr(conf, "verbose", 0) >= 1:
         warnings.simplefilter("ignore", category=PerformanceWarning)

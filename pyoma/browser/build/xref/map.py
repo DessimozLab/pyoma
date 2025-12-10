@@ -6,9 +6,11 @@ import os
 import pickle
 import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import Queue
 
 from typing import Mapping, Set, Union, List, Tuple, Callable
 import logging
+from logging.handlers import QueueListener, QueueHandler
 
 import networkx as nx
 import pandas as pd
@@ -159,6 +161,7 @@ class Mapper(metaclass=abc.ABCMeta):
             return Match(rec.id, entry_nrs, "exact", 1)
 
         if self._do_approx_align:
+            logger.debug(f"{rec.id} does not map exactly, trying approximate search")
             # now, we try approximate search
             approx_matches = self.searcher.approx_search(
                 str(rec.seq),
@@ -179,6 +182,9 @@ class Mapper(metaclass=abc.ABCMeta):
                 if identity > self.identity_threshold:
                     return Match(rec.id, {approx_matches[0][0]}, "approx", identity)
         else:
+            logger.debug(
+                f"{rec.id} does not map exactly, and approx align is disabled. kmer-based search will be used instead."
+            )
             kmer_matches = self.searcher.approx_search_no_align(
                 str(rec.seq), coverage=self.identity_threshold - 0.2, entrynr_range=taxrange.entry_nr_range
             )
@@ -188,6 +194,7 @@ class Mapper(metaclass=abc.ABCMeta):
                     f"  -> {kmer_matches[0][1]}: {kmer_matches[0][1]} vs {kmer_matches[1][0]}: {kmer_matches[1][1]}; {kmer_matches[0][1]/kmer_matches[1][1]:.3f} ratio best/second"
                 )
             return Match(rec.id, {kmer_matches[0][0]}, "approx", kmer_matches[0][1]) if kmer_matches else None
+        logger.debug(f"{rec.id} does not map at all")
         return None
 
 
@@ -224,6 +231,19 @@ def map_chunk_of_xrefs_worker(args):
     return mapping_results
 
 
+def work_log_configure(queue):
+    """
+    Attach a QueueHandler to the root logger in worker processes.
+    This forwards all log records to the main process.
+    """
+    qh = QueueHandler(queue)  # Just the one handler needed
+    root = logging.getLogger()
+    # Remove any existing handlers (important to prevent duplication)
+    root.handlers = []
+    root.addHandler(qh)
+    root.setLevel(logging.NOTSET)
+
+
 def map_xrefs(
     fpaths: List[os.PathLike],
     format: str,
@@ -254,20 +274,32 @@ def map_xrefs(
         if chunk:
             yield chunk
 
-    with ProcessPoolExecutor(max_workers=nr_procs) as pool:
-        futures = []
-        for chunk in chunkify(fpaths, size=150):
-            args = (mapper_cls, db, seq_idx, xref_db, taxid_mapping, align, chunk)
-            futures.append(pool.submit(map_chunk_of_xrefs_worker, args))
+    # create a multiprocessing queue for log records from workers
+    log_queue = Queue()
 
-        mapping_results = []
-        for fut in as_completed(futures):
-            res = fut.result()
-            if res:
-                mapping_results.extend(res)
-    with open(out_fpath, "wb") as fh:
-        pickle.dump(mapping_results, fh)
-    logger.info(f"wrote {len(mapping_results)} records to {out_fpath}")
+    # Listener uses whatever handlers the application configured
+    root = logging.getLogger()
+    listener = QueueListener(log_queue, *root.handlers, respect_handler_level=True)
+    listener.start()
+
+    try:
+        with ProcessPoolExecutor(max_workers=nr_procs, initializer=work_log_configure, initargs=(log_queue,)) as pool:
+            futures = []
+            for chunk in chunkify(fpaths, size=150):
+                args = (mapper_cls, db, seq_idx, xref_db, taxid_mapping, align, chunk)
+                futures.append(pool.submit(map_chunk_of_xrefs_worker, args))
+
+            mapping_results = []
+            for fut in as_completed(futures):
+                res = fut.result()
+                if res:
+                    mapping_results.extend(res)
+
+        with open(out_fpath, "wb") as fh:
+            pickle.dump(mapping_results, fh)
+        logger.info(f"wrote {len(mapping_results)} records to {out_fpath}")
+    finally:
+        listener.stop()
 
 
 def _filter_graph(G):

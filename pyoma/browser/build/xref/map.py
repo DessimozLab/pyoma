@@ -44,12 +44,22 @@ class Mapper(metaclass=abc.ABCMeta):
         taxid_mapping: Mapping[int, Set[int]],
         approx_align: bool = True,
     ):
-        self.db = Database(db_path)
-        self.searcher = SequenceSearch(self.db, seq_idx_path)
-        self.oma_id_mapper: OmaIdMapper = self.db.id_mapper["OMA"]
-        self.taxid_mapping = self._identify_entry_ranges_for_taxid_mappings(taxid_mapping)
-        self.src_xrefs = self._load_source_ids(src_xref_path)
+        self.db_path = db_path
+        self.seq_idx_path = seq_idx_path
+        self.src_xref_path = src_xref_path
+        self.taxid_mapping = taxid_mapping
         self._do_approx_align = approx_align
+
+    def __enter__(self):
+        self.db = Database(self.db_path)
+        self.searcher = SequenceSearch(self.db, self.seq_idx_path)
+        self.oma_id_mapper: OmaIdMapper = self.db.id_mapper["OMA"]
+        self.taxid_mapping = self._identify_entry_ranges_for_taxid_mappings(self.taxid_mapping)
+        self.src_xrefs = self._load_source_ids(self.src_xref_path)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.db.close()
 
     @abc.abstractmethod
     def get_taxid(self, rec):
@@ -220,14 +230,15 @@ class GenbankFormatMapper(Mapper):
         return 0
 
 
+@timethis(level=logging.INFO)
 def map_chunk_of_xrefs_worker(args):
     mapper_cls, db, seq_idx, xref_db, taxid_mapping, align, recs = args
-    mapper = mapper_cls(db, seq_idx, xref_db, taxid_mapping, align)
     mapping_results = []
-    for rec in recs:
-        res = mapper.map_record(rec)
-        if res is not None:
-            mapping_results.append(res)
+    with mapper_cls(db, seq_idx, xref_db, taxid_mapping, align) as mapper:
+        for rec in recs:
+            res = mapper.map_record(rec)
+            if res is not None:
+                mapping_results.append(res)
     return mapping_results
 
 
@@ -285,7 +296,7 @@ def map_xrefs(
     try:
         with ProcessPoolExecutor(max_workers=nr_procs, initializer=work_log_configure, initargs=(log_queue,)) as pool:
             futures = []
-            for chunk in chunkify(fpaths, size=150):
+            for chunk in chunkify(fpaths, size=5000):
                 args = (mapper_cls, db, seq_idx, xref_db, taxid_mapping, align, chunk)
                 futures.append(pool.submit(map_chunk_of_xrefs_worker, args))
 

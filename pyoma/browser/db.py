@@ -2507,7 +2507,7 @@ class SequenceSearch(object):
 
         :param seq: the sequence to be searched
         :type seq: str, bytes
-        :param is_sanitised: whether or not the sequence is already sanitised. defaults to false.
+        :param is_sanitised: whether the sequence is already sanitised. defaults to false.
         :type is_sanitised: bool
         :param coverage: the minimum fraction of covered kmers by the target sequence
         :type coverage: float
@@ -2516,25 +2516,42 @@ class SequenceSearch(object):
         :returns: A list of tuples with (entry_nr, fraction_of_matched_kmers)
         """
         seq = seq if is_sanitised else self._sanitise_seq(seq)
-        tax_filt = self._tax_filter_range if isinstance(entrynr_range, tuple) else self._tax_filter_set
 
-        # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
-        c = collections.Counter()
-        for z in map(
-            lambda kmer: numpy.unique(self.kmer_lookup[int(kmer)]),
-            self.encoder.decompose(seq),
-        ):
-            c.update(z)
+        # 1. Decompose the sequence into kmers, sort them and unique!
+        kmers, occ = numpy.unique(numpy.fromiter(self.encoder.decompose(seq), dtype=numpy.int32), return_counts=True)
 
-        # 2. Filter to top n if necessary
-        z = len(seq) - self.k + 1
-        cut_off = coverage * z
-        entries = [
-            (enr, (cnts / z))
-            for enr, cnts in c.items()
-            if cnts >= cut_off and (entrynr_range is None or tax_filt(enr, entrynr_range))
-        ]
-        entries.sort(key=lambda x: x[1], reverse=True)
+        # 2. Concatenate all arrays of unique (by kmer) "enrs" from kmers
+        all_enrs = numpy.concatenate([numpy.unique(enrs) for enrs in self.kmer_lookup[kmers]])
+
+        # 3. Count occurrences per entry number
+        uniq_enrs, counts = numpy.unique(all_enrs, return_counts=True)
+
+        # 4. Filter by coverage and taxonomic range
+        len_kmers = len(kmers)
+        cut_off = coverage * len_kmers
+
+        # Boolean mask for counts >= cutoff
+        mask_counts = counts >= cut_off
+
+        # build taxonomic mask
+        if entrynr_range is None:
+            mask_tax = numpy.ones_like(uniq_enrs, dtype=bool)
+        elif isinstance(entrynr_range, tuple):
+            low, high = entrynr_range
+            mask_tax = (uniq_enrs >= low) & (uniq_enrs <= high)
+        elif isinstance(entrynr_range, set):
+            mask_tax = numpy.isin(uniq_enrs, entrynr_range)
+        else:
+            raise TypeError("entrynr_range must be None, tuple, or set")
+
+        # combine masks
+        mask = mask_counts & mask_tax
+        masked_counts = counts[mask]
+        masked_uniq_enrs = uniq_enrs[mask]
+
+        # sort (desc by count)
+        sorted_idx = numpy.argsort(-masked_counts)
+        entries = list(zip(masked_uniq_enrs[sorted_idx], masked_counts[sorted_idx] / len_kmers))
         return entries
 
     def approx_search(

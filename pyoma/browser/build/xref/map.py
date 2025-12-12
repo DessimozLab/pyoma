@@ -201,7 +201,8 @@ class Mapper(metaclass=abc.ABCMeta):
             if len(kmer_matches) > 0:
                 logger.debug(f"kmer-based matches for {rec.id}: {len(kmer_matches)} approx matches")
                 best = self.select_best_kmer_match(rec, kmer_matches)
-                return Match(rec.id, {best[0]}, "approx", best[1])
+                if best is not None:
+                    return Match(rec.id, {best[0]}, "approx", best[1])
         logger.debug(f"{rec.id} does not map at all")
         return None
 

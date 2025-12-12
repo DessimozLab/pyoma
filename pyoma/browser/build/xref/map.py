@@ -198,14 +198,33 @@ class Mapper(metaclass=abc.ABCMeta):
             kmer_matches = self.searcher.approx_search_no_align(
                 str(rec.seq), coverage=self.identity_threshold - 0.2, entrynr_range=taxrange.entry_nr_range
             )
-            logger.debug(f"kmer-based matches for {rec.id}: {len(kmer_matches)} approx matches")
-            if len(kmer_matches) > 1:
-                logger.debug(
-                    f"  -> {kmer_matches[0][1]}: {kmer_matches[0][1]} vs {kmer_matches[1][0]}: {kmer_matches[1][1]}; {kmer_matches[0][1]/kmer_matches[1][1]:.3f} ratio best/second"
-                )
-            return Match(rec.id, {kmer_matches[0][0]}, "approx", kmer_matches[0][1]) if kmer_matches else None
+            if len(kmer_matches) > 0:
+                logger.debug(f"kmer-based matches for {rec.id}: {len(kmer_matches)} approx matches")
+                best = self.select_best_kmer_match(rec, kmer_matches)
+                return Match(rec.id, {best[0]}, "approx", best[1])
         logger.debug(f"{rec.id} does not map at all")
         return None
+
+    def select_best_kmer_match(self, rec: SeqRecord, kmer_matches: List[Tuple[int, float]]) -> Tuple[int, float] | None:
+        # Step 1: highest kmer overlap
+        max_coverage = kmer_matches[0][1]
+        coverage_threshold = 0.8 * max_coverage
+        min_len_frac = 0.7
+
+        eligible = []
+        for cand in kmer_matches:
+            if cand[1] < coverage_threshold:
+                break
+            cand_len = int(self.db.ensure_entry(cand[0])["SeqBufferLength"])
+            if min(cand_len, len(rec.seq)) >= min_len_frac * max(cand_len, len(rec.seq)):
+                eligible.append((cand, cand_len))
+
+        if not eligible:
+            return None
+
+        logger.debug(f" eligible kmer matches: {eligible}, query length: {len(rec.seq)}")
+        best = min(eligible, key=lambda c_l: abs(c_l[1] - len(rec.seq)))[0]
+        return best
 
 
 class SwissFormatMapper(Mapper):
@@ -296,7 +315,7 @@ def map_xrefs(
     try:
         with ProcessPoolExecutor(max_workers=nr_procs, initializer=work_log_configure, initargs=(log_queue,)) as pool:
             futures = []
-            for chunk in chunkify(fpaths, size=5000):
+            for chunk in chunkify(fpaths, size=2000):
                 args = (mapper_cls, db, seq_idx, xref_db, taxid_mapping, align, chunk)
                 futures.append(pool.submit(map_chunk_of_xrefs_worker, args))
 

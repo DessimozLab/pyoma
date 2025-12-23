@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from time import time, perf_counter, process_time
 import multiprocessing as mp
+from typing import Dict, Tuple
 
 import numpy
 import tables
@@ -299,6 +300,13 @@ def process_job_file(job_file: os.PathLike, db_fpath: os.PathLike, vp_fpath: os.
                 func(*args)
 
 
+@log_timing(level=logging.DEBUG)
+def build_entrynr1_index(fam_vps: numpy.ndarray) -> Dict[int, Tuple[int, int]]:
+    entry = fam_vps["EntryNr1"]
+    uniq, start, count = numpy.unique(entry, return_index=True, return_counts=True)
+    return dict(zip(uniq, zip(start, start + count)))
+
+
 class CacheBuilder:
     def __init__(self, db_fpath, vp_db_path, out_path):
         self.db_fpath = db_fpath
@@ -370,6 +378,7 @@ class CacheBuilder:
         if fam_pos >= len(fams) or fams[fam_pos] != fam:
             return numpy.zeros((0,), dtype=DTYPE_VPAIRS)
         start, end = fam_idx_tab[fam_pos]["Start"], fam_idx_tab[fam_pos]["End"]
+        logger.debug("loading pairs in /AllVPairs[%d:%d] (%d rows)", start, end, end - start)
         vps_tab = self.vp.get_node("/AllVPairs")
         return vps_tab[start:end]
 
@@ -379,7 +388,6 @@ class CacheBuilder:
 
     def analyse_fam(self, fam, fam_members, rng=None):
         logger.debug(f"analysing orthology of family {fam} with {len(fam_members)} members; doing range {rng}")
-        grp_members = {grp: set(self.load_grp_members(grp)) for grp in set(z.group for z in fam_members if z.group > 0)}
         nr_memb = len(fam_members)
         fam_iter = iter(fam_members)
         if rng is not None:
@@ -387,6 +395,8 @@ class CacheBuilder:
             fam_iter = itertools.islice(fam_members, rng[0], rng[1])
 
         fam_vps = self.load_vps_for_family(fam)
+        entry_index = build_entrynr1_index(fam_vps)
+        grp_members = {}
         counts = numpy.zeros(nr_memb, dtype=tables.dtype_from_descr(ProteinCacheInfo))
         time_vps_wall, time_vps_cpu, time_ind_wall, time_ind_cpu = 0, 0, 0, 0
         cpu_0, wall_0 = process_time(), perf_counter()
@@ -397,7 +407,8 @@ class CacheBuilder:
             total=nr_memb,
         ):
             t0_cpu, t0_wall = process_time(), perf_counter()
-            vps = set(fam_vps[fam_vps["EntryNr1"] == p1.entry_nr]["EntryNr2"])
+            s, e = entry_index.get(p1.entry_nr, (0, 0))
+            vps = set(fam_vps["EntryNr2"][s:e])
             t1_cpu, t1_wall = process_time(), perf_counter()
             ind_orth = set(p2.entry_nr for p2 in fam_members if are_orthologous(p1, p2))
             t2_cpu, t2_wall = process_time(), perf_counter()
@@ -405,7 +416,14 @@ class CacheBuilder:
             time_vps_cpu += t1_cpu - t0_cpu
             time_ind_wall += t2_wall - t1_wall
             time_ind_cpu += t2_cpu - t1_cpu
-            grp = grp_members.get(p1.group, set([])) - {p1.entry_nr}
+            if p1.group > 0:
+                grp = grp_members.get(p1.group)
+                if grp is None:
+                    grp = set(self.load_grp_members(p1.group))
+                    grp_members[p1.group] = grp
+                grp = grp - {p1.entry_nr}
+            else:
+                grp = set()
             counts[i]["EntryNr"] = p1.entry_nr
             counts[i]["NrPairwiseOrthologs"] = len(vps)
             counts[i]["NrHogInducedPWOrthologs"] = len(ind_orth)

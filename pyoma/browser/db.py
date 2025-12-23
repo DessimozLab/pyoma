@@ -2388,6 +2388,29 @@ class SequenceSearch(object):
         self.encoder = KmerEncoder(self.k)
         logger.info("KmerLookup of size k=%s loaded", self.k)
         self.multienv_align = None
+        try:
+            db.register_on_close(self.close)
+        except Exception:
+            pass
+
+    def close(self):
+        # Close secondary index file if it's a real file handle we opened
+        try:
+            if hasattr(self, "db_idx") and self.db_idx is not None:
+                # If we borrowed the main DB handle, Database.close() will handle it.
+                if isinstance(self.db_idx, tables.File) and self.db_idx is not self.db:
+                    self.db_idx.close()
+        finally:
+            try:
+                # Help the GC release the memmap and any buffers quickly
+                self.seq_buff = None
+                # unregister the close handler in the main database
+                if isinstance(self.db, Database):
+                    self.db.unregister_on_close(self.close)
+            except Exception:
+                pass
+            self.db_idx = None
+            self.multienv_align = None
 
     def get_entry_length(self, ii):
         """Get length of a particular entry."""

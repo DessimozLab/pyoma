@@ -300,6 +300,36 @@ def process_job_file(job_file: os.PathLike, db_fpath: os.PathLike, vp_fpath: os.
                 func(*args)
 
 
+def load_vps_for_family_range_scan(tab, fam_start, fam_end, lo, hi, chunk=5_000_000):
+    blocks = []
+    pos = fam_start
+
+    while pos < fam_end:
+        stop = min(pos + chunk, fam_end)
+        block = tab.read(start=pos, stop=stop)
+
+        # stop early once we passed hi
+        if block["EntryNr1"][0] > hi:
+            break
+
+        start = numpy.searchsorted(block["EntryNr1"], lo, side="left")
+        end = numpy.searchsorted(block["EntryNr1"], hi, side="right")
+        if start < end:
+            blocks.append(block[start:end])
+
+        pos = stop
+
+    res = numpy.concatenate(blocks) if blocks else tab.read(0, 0)
+    logger.debug(
+        "loaded %d rows from /AllVPairs[%d:%d] (%.1%%)",
+        len(res),
+        fam_start,
+        fam_end,
+        len(res) / (fam_end - fam_start) * 100,
+    )
+    return res
+
+
 @log_timing(level=logging.DEBUG)
 def build_entrynr1_index(fam_vps: numpy.ndarray) -> Dict[int, Tuple[int, int]]:
     entry = fam_vps["EntryNr1"]
@@ -371,7 +401,7 @@ class CacheBuilder:
         return self.db.get_vpairs(entry_nr)["EntryNr2"]
 
     @log_timing
-    def load_vps_for_family(self, fam):
+    def load_vps_for_family(self, fam, lo_entry_nr=None, hi_entry_nr=None):
         fam_idx_tab = self.vp.get_node("/FamilyIndex")
         fams = fam_idx_tab.read(field="Fam")
         fam_pos = numpy.searchsorted(fams, fam)
@@ -380,6 +410,9 @@ class CacheBuilder:
         start, end = fam_idx_tab[fam_pos]["Start"], fam_idx_tab[fam_pos]["End"]
         logger.debug("loading pairs in /AllVPairs[%d:%d] (%d rows)", start, end, end - start)
         vps_tab = self.vp.get_node("/AllVPairs")
+        if lo_entry_nr is not None and hi_entry_nr is not None:
+            logger.debug("loading pairs in chunks to avoid loading too much data into memory")
+            return load_vps_for_family_range_scan(vps_tab, start, end, lo_entry_nr, hi_entry_nr)
         return vps_tab[start:end]
 
     @log_timing
@@ -390,11 +423,14 @@ class CacheBuilder:
         logger.debug(f"analysing orthology of family {fam} with {len(fam_members)} members; doing range {rng}")
         nr_memb = len(fam_members)
         fam_iter = iter(fam_members)
+        lo_entry_nr, hi_entry_nr = None, None
         if rng is not None:
             nr_memb = rng[1] - rng[0]
             fam_iter = itertools.islice(fam_members, rng[0], rng[1])
+            lo_entry_nr = fam_members[rng[0]].entry_nr
+            hi_entry_nr = fam_members[min(rng[1] - 1, len(fam_members))].entry_nr
 
-        fam_vps = self.load_vps_for_family(fam)
+        fam_vps = self.load_vps_for_family(fam, lo_entry_nr, hi_entry_nr)
         entry_index = build_entrynr1_index(fam_vps)
         grp_members = {}
         counts = numpy.zeros(nr_memb, dtype=tables.dtype_from_descr(ProteinCacheInfo))

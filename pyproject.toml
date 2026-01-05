@@ -1,8 +1,63 @@
 [build-system]
-# These are the assumed default build requirements from pip:
-# https://pip.pypa.io/en/stable/reference/pip/#pep-517-and-518-support
-requires = ["setuptools>=40.8.0", "wheel"]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyoma"
+version = "0.13.4"
+description = "Library to interact and build OMA hdf5 files"
+readme = "README.md"
+license = "MPL-2.0"
+authors = [
+    { name = "DessimozLab", email = "contact@omabrowser.org" }
+]
+requires-python = ">=3.9,<3.13"
+dependencies = [
+    "numpy>=1.26,<2.0",
+    "tables>=3.9.0",
+    "fuzzyset2>=0.1.1",
+    "tqdm",
+    "pyopa>=0.8",
+    "pandas",
+    "biopython>=1.80",
+    "datasketch",
+    "ete3",
+    "networkx",
+    "property_manager"
+]
+
+[project.optional-dependencies]
+create_db = [
+    "PySAIS",
+    "matplotlib",
+    "scikit-learn",
+    "scikit-fuzzy",
+    "pyham",
+    "omataxonomy"
+]
+enrichment = [
+    "plotly",
+    "scikit-learn",
+    "statsmodels",
+    "scipy"
+]
+notebooks = [
+    "jupyter",
+    "matplotlib",
+    "seaborn"
+]
+docs = ["sphinx"]
+test = ["pytest"]
+
+[project.scripts]
+oma-build = "pyoma.browser.build.main:build_database"
+
+
+[tool.setuptools.packages.find]
+include = ["pyoma"]
+exclude = ["notebooks"]
+
 
 [tool.black]
 line-length = 120
-target-version = ['py39']
+target-version = ["py39"]

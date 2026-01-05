@@ -321,7 +321,7 @@ def load_vps_for_family_range_scan(tab, fam_start, fam_end, lo, hi, chunk=5_000_
 
     res = numpy.concatenate(blocks) if blocks else tab.read(0, 0)
     logger.debug(
-        "loaded %d rows from /AllVPairs[%d:%d] (%.1%%)",
+        "loaded %d rows from /AllVPairs[%d:%d] (%.1f%%)",
         len(res),
         fam_start,
         fam_end,
@@ -415,7 +415,6 @@ class CacheBuilder:
             return load_vps_for_family_range_scan(vps_tab, start, end, lo_entry_nr, hi_entry_nr)
         return vps_tab[start:end]
 
-    @log_timing
     def load_grp_members(self, group):
         return [row["EntryNr"] for row in self.h5.get_node("/Protein/Entries").where(f"OmaGroup == {group}")]
 

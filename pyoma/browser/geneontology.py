@@ -357,7 +357,7 @@ class FreqAwareGeneOntology(GeneOntology):
         return lca
 
     def ic(self, term):
-        """returns the information content of the term based on the number of annotations in the OMA database
+        r"""returns the information content of the term based on the number of annotations in the OMA database
 
         .. math::
             ic(GO_i) = -\log_{10}(term_freq)
@@ -373,7 +373,7 @@ class FreqAwareGeneOntology(GeneOntology):
         return lca, *goterms
 
     def lin_similarity(self, term1, term2) -> float:
-        """computes the Lin similarity between two GO terms:
+        r"""computes the Lin similarity between two GO terms:
 
         .. math::
             sim(GO_i, GO_j) = \frac{2 \log_{10}(IC(GO_{LCA}}{\log_{10}(IC(GO_i) + \log_{10}(IC(GO_j))}

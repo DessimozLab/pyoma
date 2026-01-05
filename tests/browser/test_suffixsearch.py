@@ -258,7 +258,7 @@ class SuffixBuilderFactoryTester(unittest.TestCase):
     offset_col_type = numpy.int16
 
     def setUp(self):
-        self.h5 = create_h5_with_varlen_string_col(100, self.offset_col_type)
+        self.h5 = create_h5_with_varlen_string_col(50, self.offset_col_type)
 
     def tearDown(self):
         self.h5.close()
@@ -278,7 +278,7 @@ class SuffixBuilderFactoryTester(unittest.TestCase):
         buf = "/test/buffer"
         suffixsearch.create_suffix_index(tab, "VarCharOff", buf, ignore_case=True)
         FixStrSuffixMock.assert_not_called()
-        VarStrSuffixMock.called_once_with(
+        VarStrSuffixMock.assert_called_once_with(
             tab,
             "VarCharOff",
             self.h5.get_node(buf),

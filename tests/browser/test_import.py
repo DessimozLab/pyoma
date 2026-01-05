@@ -22,6 +22,11 @@ from pyoma.browser.convert import (
 )
 from .test_db import find_path_to_test_db
 
+try:
+    import pytest
+except ImportError:
+    pytest = None
+
 
 def store_in_json(data, fn):
     os.mkdir(os.path.dirname(fn))
@@ -91,6 +96,8 @@ class ImportIntegrationBase(ImportDummyBase):
                 test_data_available = True
                 break
         if not test_data_available:
+            if pytest is not None:
+                pytest.skip("data not available")
             raise unittest.SkipTest("data not available")
         os.environ["DARWIN_BROWSERDATA_PATH"] = os.path.join(folder, "Test.Jul2014", "data")
 

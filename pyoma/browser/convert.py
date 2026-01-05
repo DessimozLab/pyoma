@@ -168,6 +168,17 @@ def load_tsv_to_numpy(args):
         ("AlignmentOverlap", "f2"),
         ("Distance", "f4"),
     ]
+
+    def reltype_converter(rel):
+        # Handle bytes (NumPy <2) and str (NumPy >=2)
+        if isinstance(rel, bytes):
+            rel_str = rel.decode()
+        else:
+            rel_str = rel
+        # Use slice direction if needed
+        key = rel_str[::read_dir] if len(rel_str) <= 3 else rel_str
+        return relEnum[key]
+
     for curNr, curFn in enumerate([fn, fn.replace(".ext.", ".")]):
         try:
             if gz_is_empty(curFn):
@@ -182,9 +193,7 @@ def load_tsv_to_numpy(args):
                     converters={
                         "EntryNr1": lambda nr: int(nr) + off1,
                         "EntryNr2": lambda nr: int(nr) + off2,
-                        "RelType": lambda rel: (
-                            relEnum[rel[::read_dir].decode()] if len(rel) <= 3 else relEnum[rel.decode()]
-                        ),
+                        "RelType": reltype_converter,
                         "Score": lambda score: float(score) / 100,
                     },
                 )

@@ -959,9 +959,9 @@ class Database(object):
             condvars=condvars,
         )
         data.sort(order=["LocusStart"])
-        idx = int((data["EntryNr"] == entry_nr).nonzero()[0])
+        idx = numpy.argmax(data["EntryNr"] == entry_nr)
         res = data[max(0, idx - window) : idx + window + 1]
-        idx = int((res["EntryNr"] == entry_nr).nonzero()[0])
+        idx = numpy.argmax(res["EntryNr"] == entry_nr)
         return res, idx
 
     def parse_hog_id(self, hog_id):
@@ -3247,25 +3247,69 @@ class Taxonomy(object):
         return self.tax_table.take(idx)
 
     def _get_taxids_from_any(self, it, skip_missing=True):
+        """
+        Convert input iterable of tax IDs or names to NumPy array of tax IDs.
+
+        Parameters
+        ----------
+        it : int, str, list, or np.ndarray
+            Tax IDs (integers) or taxonomy names (strings).
+        skip_missing : bool
+            If False, raises KeyError when a name is not found.
+
+        Returns
+        -------
+        np.ndarray
+        Array of NCBI tax IDs corresponding to input.
+        """
+
+        # ----------------------------
+        # 1️⃣ Convert input to a flat NumPy array
+        # ----------------------------
         if not isinstance(it, numpy.ndarray):
             try:
-                it = numpy.fromiter(it, dtype="i4")
-            except ValueError:
-                it = numpy.fromiter(it, dtype="S255")
+                # Flatten if it is a nested list or list of arrays
+                it = numpy.asarray(
+                    [x for sub in it for x in (sub if isinstance(sub, (list, numpy.ndarray)) else [sub])]
+                )
+            except TypeError:
+                # Handle single scalar
+                it = numpy.asarray([it])
+
+        # Determine dtype
+        if numpy.issubdtype(it.dtype, numpy.integer):
+            dtype = "i4"
+        elif numpy.issubdtype(it.dtype, numpy.str_):
+            dtype = "S255"
+            it = it.astype(dtype)
+        else:
+            # fallback: treat as string
+            it = it.astype("S255")
+
+        # ----------------------------
+        # 2️⃣ If input is strings, map to tax IDs
+        # ----------------------------
         if it.dtype.type is numpy.bytes_:
             try:
                 ns = self.name_key
             except AttributeError:
                 ns = self.name_key = self.tax_table.argsort(order="Name")
+
+            # Locate indices in tax_table
             idxs = self.tax_table["Name"].searchsorted(it, sorter=ns)
             idxs = numpy.clip(idxs, 0, len(ns) - 1)
+
+            # Get tax table entries
             taxs = self.tax_table[ns[idxs]]
             keep = taxs["Name"] == it
+
             if not skip_missing and not keep.all():
                 raise KeyError("not all taxonomy names could be found")
+
             res = taxs["NCBITaxonId"][keep]
         else:
-            res = it
+            # Already numeric tax IDs
+            res = it.astype("i4")
         return res
 
     def get_subtaxonomy_rooted_at(self, root, collapse=True):
@@ -3284,6 +3328,11 @@ class Taxonomy(object):
         return self.get_induced_taxonomy(subtree, collapse=collapse)
 
     def get_taxnode_from_name_or_taxid(self, query):
+        # Convert digit-only str or bytes to int
+        if isinstance(query, str) and query.isdigit():
+            query = int(query)
+        elif isinstance(query, bytes) and query.isdigit():
+            query = int(query)
         if isinstance(query, (bytes, str, int)):
             query = [query]
         tids = self._get_taxids_from_any(query, skip_missing=False)
@@ -3354,7 +3403,7 @@ class Taxonomy(object):
                 continue
             # get all the parents and check which ones we keep in the new taxonomy.
             parents = self.get_parent_taxa(cur_tax)["NCBITaxonId"]
-            mask = numpy.in1d(parents, taxids_to_keep)
+            mask = numpy.isin(parents, taxids_to_keep)
             # find the position of them in subtaxdata (note: subtaxdata and
             # taxids_to_keep have the same ordering).
             new_idx = taxids_to_keep.searchsorted(parents[mask])

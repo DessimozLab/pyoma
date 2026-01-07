@@ -54,7 +54,7 @@ oma-build = "pyoma.browser.build.main:build_database"
 
 
 [tool.setuptools.packages.find]
-include = ["pyoma"]
+include = ["pyoma*"]
 exclude = ["notebooks"]
 
 

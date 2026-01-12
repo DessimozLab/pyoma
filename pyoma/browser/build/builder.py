@@ -898,11 +898,61 @@ class DBBuilder(DarwinExporter):
         self.h5.create_carray("/Protein", name="SuffixArrayIndexKeys", obj=chunk_keys, title="suffix array keys")
         self.h5.create_carray("/Protein", name="SuffixArrayIndexPos", obj=chunk_pos, title="suffix array positions")
 
-    def add_protein_hog_ids(self, hog_ids: numpy.array) -> None:
+    def add_protein_hog_ids(self, hog_ids: numpy.ndarray) -> None:
         entries_tab = self.h5.get_node("/Protein/Entries")
         assert len(hog_ids) == len(entries_tab)
         entries_tab.modify_column(0, len(entries_tab), 1, column=hog_ids, colname="OmaHOG")
         create_index_for_columns(entries_tab, "OmaHOG")
+        self._add_compressed_inverted_index_for_family(hog_ids)
+
+    def _add_compressed_inverted_index_for_family(self, hog_ids: numpy.ndarray):
+        self.logger.info("creating compressed inverted index for families")
+        fam_idx_group = self.h5.create_group(
+            "/Protein", name="FamIndex", title="compressed inverted index for Families/RootHOGs"
+        )
+        # extract family numbers from HOG IDs in an efficient way
+        b = hog_ids.view(numpy.uint8).reshape(len(hog_ids), -1)
+        # Find the first non-empty row
+        first_valid_idx = numpy.flatnonzero(b.sum(axis=1) != 0)[0]
+        is_digit = b[first_valid_idx, 4] >= ord("0") and b[first_valid_idx, 4] <= ord("9")
+
+        valid = b.sum(axis=1) != 0
+        if is_digit:
+            digits = b[valid, 4:11] - ord("0")
+        else:
+            digits = b[valid, 5:12] - ord("0")
+        digits = digits.astype(numpy.int32)
+        fam = numpy.zeros(len(hog_ids), dtype=numpy.uint32)
+        fam[valid] = (
+            digits[:, 0] * 1_000_000
+            + digits[:, 1] * 100_000
+            + digits[:, 2] * 10_000
+            + digits[:, 3] * 1_000
+            + digits[:, 4] * 100
+            + digits[:, 5] * 10
+            + digits[:, 6] * 1
+        )
+        idx = numpy.argsort(fam, kind="stable")
+        fam_sorted = fam[idx]
+        families, offsets, counts = numpy.unique(fam_sorted, return_index=True, return_counts=True)
+        if families[0] != 0:
+            families = numpy.insert(families, 0, 0)
+            offsets = numpy.insert(offsets, 0, 0)
+            counts = numpy.insert(counts, 0, 0)
+        self.logger.info("%d unique families, %d entries: ", len(families), len(hog_ids))
+        self.logger.info("families: %s", numpy.array2string(families, threshold=12, edgeitems=3))
+        self.logger.info("offsets: %s", numpy.array2string(offsets, threshold=12, edgeitems=3))
+        self.logger.info("counts: %s", numpy.array2string(counts, threshold=12, edgeitems=3))
+        lookup = numpy.empty(len(families), dtype=[("offset", numpy.uint32), ("count", numpy.uint32)])
+        lookup["offset"] = offsets
+        lookup["count"] = counts
+        self.h5.create_table(
+            fam_idx_group, name="Lookup", obj=lookup, title="Compressed inverted index for EntryIdx ranges per family"
+        )
+        self.h5.create_carray(fam_idx_group, name="EntryIdx", obj=idx, title="Indices to sort OmaHOG array by Family")
+        self.logger.info(
+            "finished creating compressed inverted index for families. Contains %d families", len(families)
+        )
 
     def identify_and_store_splice_variants(self, splice_json):
         with open(splice_json, "rt") as f:

@@ -1254,7 +1254,9 @@ class Database(object):
                 members = self.db.root.Protein.Entries[entry_nrs]
                 exp_fam_prefix = self.format_hogid(fam).encode("utf-8")
                 L = len(exp_fam_prefix)
-                if not numpy.all(members["OmaHOG"][:, :L] == exp_fam_prefix):
+                hog = members["OmaHOG"]
+                hog_b = numpy.frombuffer(hog.tobytes(), dtype=numpy.uint8).reshape(len(hog), hog.dtype.itemsize)
+                if not numpy.all(hog_b[:, :L] == numpy.frombuffer(exp_fam_prefix, dtype=numpy.uint8)):
                     raise DBConsistencyError("family index inconsistent with hogid column")
             else:
                 members = numpy.array([], dtype=self.db.root.Protein.Entries.dtype)

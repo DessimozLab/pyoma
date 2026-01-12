@@ -379,11 +379,7 @@ class CacheBuilder:
     @log_timing
     def load_fam_members(self, fam):
         members = []
-        vals = {k: self.db.format_hogid(x).encode("utf-8") for k, x in zip(("fam", "fam_next"), (fam, fam + 1))}
-        for row in self.h5.get_node("/Protein/Entries").where(
-            "(fam <= OmaHOG) & (OmaHOG < fam_next)",
-            condvars=vals,
-        ):
+        for row in self.db.member_of_fam(fam):
             subhog_tokens = row["OmaHOG"].decode().split(".")[1:]
             parsed_parts = []
             for part in subhog_tokens:
@@ -394,7 +390,7 @@ class CacheBuilder:
                     parsed_parts.append((num, char))
                 else:
                     raise ValueError(f"Invalid part format in '{part}'")
-            members.append(Protein(row["EntryNr"], parsed_parts, row["OmaGroup"]))
+            members.append(Protein(int(row["EntryNr"]), parsed_parts, int(row["OmaGroup"])))
         return members
 
     def load_vps(self, entry_nr):

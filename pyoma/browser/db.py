@@ -1241,7 +1241,24 @@ class Database(object):
         """returns an array of protein entries which belong to a given fam"""
         if not isinstance(fam, (int, numpy.number)):
             raise ValueError("expect a numeric family id")
-        return self.member_of_hog_id(self.format_hogid(fam))
+        try:
+            family_idx = self.db.get_node("/Protein/FamIndex/Lookup")
+            entry_idx = self.db.get_node("/Protein/FamIndex/EntryIdx")
+        except tables.NoSuchNodeError:
+            # fallback using OmaHOG column with index
+            return self.member_of_hog_id(self.format_hogid(fam))
+        else:
+            if 0 < fam < len(family_idx):
+                offset, nr_entries = family_idx[fam]
+                entry_nrs = entry_idx[offset : offset + nr_entries]
+                members = self.db.root.Protein.Entries[entry_nrs]
+                exp_fam_prefix = self.format_hogid(fam).encode("utf-8")
+                L = len(exp_fam_prefix)
+                if not numpy.all(members["OmaHOG"][:, :L] == exp_fam_prefix):
+                    raise DBConsistencyError("family index inconsistent with hogid column")
+            else:
+                members = numpy.array([], dtype=self.db.root.Protein.Entries.dtype)
+            return members
 
     def hog_members(self, entry, level):
         """get hog members with respect to a given taxonomic level.

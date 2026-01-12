@@ -223,11 +223,9 @@ def find_best_keyword(descs: List[str]) -> str:
     """
     n, score, topkw = 2, 0, ""
     while True:
-        print(n)
         kws = collections.Counter()
         for desc in descs:
             kws.update(set(generate_ngrams(desc, n)))
-        print(kws.most_common(4))
         if len(kws) == 0 or score_kw(n, kws.most_common(1)[0][1]) < score:
             break
         score = score_kw(n, kws.most_common(1)[0][1])

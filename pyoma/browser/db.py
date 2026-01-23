@@ -1819,6 +1819,11 @@ class Database(object):
             hist = self.group_size_histogram("oma")
             return int(hist["Count"].sum())
 
+    @LazyProperty
+    def nr_proteins(self) -> int:
+        tab = self.db.get_node("/Protein/Entries")
+        return int(tab[-1]["EntryNr"])
+
     def get_nr_toplevel_hogs(self):
         """returns the number of toplevel hogs, i.e. roothogs"""
         try:

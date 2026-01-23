@@ -51,6 +51,7 @@ test = ["pytest"]
 
 [project.scripts]
 oma-build = "pyoma.browser.build.main:build_database"
+oma-dump  = "pyoma.browser.build.dump:dump_files"
 
 
 [tool.setuptools.packages.find]

@@ -485,7 +485,7 @@ class AnnotationParser(object):
     def __init__(self, fp, factory=GOA_Annotation._make):
         self._needs_close = False
         if isinstance(fp, str):
-            fp = auto_open(fp, "rt")
+            fp = auto_open(fp, "rt", encoding="utf-8-sig")
             self._needs_close = True
         self.fp = fp
         self.factory = factory

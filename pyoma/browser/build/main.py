@@ -269,6 +269,7 @@ def import_go(conf):
         relevant_taxid=rel_taxids,
         clades=clades,
         out=conf.out,
+        nr_procs=conf.nr_procs,
     )
 
 
@@ -613,6 +614,7 @@ def parse_command_line_args():
         "clades from OMA pipeline are used.",
     )
     go_import_parser.add_argument("--out", required=True, help="Output path for the hdf5 file")
+    go_import_parser.add_argument("--nr-procs", type=int, default=1, help="Number of processes to use")
 
     gen_aux_file_parser = subparsers.add_parser("generate-aux-files", help="Generate auxiliary files")
     gen_aux_file_parser.set_defaults(func=gen_aux_files)

@@ -78,24 +78,36 @@ class FunctionPredictor:
     def __init__(
         self,
         db_h5_path: os.PathLike,
-        anno_tab: tables.Table,
+        go_h5_path: os.PathLike,
         ontology: GeneOntology,
+        anno_path: str = "/Annotations/GeneOntology",
         clades: Optional[List[str]] = None,
     ):
         self.db_h5_path = db_h5_path
-        self.anno_tab = anno_tab
+        self.go_h5_path = go_h5_path
+        self.anno_tab_path = anno_path
         self.ontology = ontology
         self.clades = clades if clades is not None else CLADES
+        self.anno_tab = None
+        self.go_h5 = None
+        self._trust_ref_bytes = None
 
     def __enter__(self):
         with tables.open_file(self.db_h5_path) as db:
             self.clade_ranges = map_clades_to_entrynr_ranges(db, self.clades)
             self.oma_groups = self.load_oma_groups(db.get_node("/Protein/Entries"))
+        self.go_h5 = tables.open_file(self.go_h5_path, mode="r")
+        self.anno_tab: tables.Table = self.go_h5.get_node(self.anno_tab_path)
         self.clade2terms = collect_terms_per_clade(self.anno_tab, self.ontology, self.clade_ranges)
+        self._entrynr_index = self.build_entrynr_index(self.anno_tab)
+        self._trust_ref_bytes = numpy.array(
+            [x.encode("utf-8") for x in AnnotationFilter.TRUST_IEA_REFS],
+            dtype=self.anno_tab.coldescrs["Reference"].dtype,
+        )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        self.go_h5.close()
 
     def load_oma_groups(self, tab: tables.Table) -> Dict[int, List[int]]:
         grps = collections.defaultdict(list)
@@ -113,11 +125,29 @@ class FunctionPredictor:
         else:
             return numpy.zeros_like(enrs, numpy.str_)
 
+    def build_entrynr_index(self, anno_tab: tables.Table) -> Dict[int, Tuple[int, int]]:
+        enr_col = anno_tab.col("EntryNr")
+        nrows = len(enr_col)
+
+        # find indices where EntryNr changes
+        change_idx = numpy.flatnonzero(enr_col[1:] != enr_col[:-1]) + 1
+        starts = numpy.concatenate(([0], change_idx))
+        ends = numpy.concatenate((change_idx, [nrows]))
+        entry_nrs = enr_col[starts]
+        return {enr: (start, end) for enr, start, end in zip(entry_nrs, starts, ends)}
+
     def reliable_annotations_of_entry(self, enr: int) -> Set[GOterm]:
         terms = set()
-        for row in self.anno_tab.where("EntryNr == enr", {"enr": enr}):
-            if row["Evidence"] != b"IEA" or row["Reference"].decode() in AnnotationFilter.TRUST_IEA_REFS:
-                terms.add(self.ontology.term_by_id(row["TermNr"]))
+        if enr not in self._entrynr_index:
+            return terms
+
+        start, stop = self._entrynr_index[enr]
+        if start <= stop:
+            return terms
+
+        rows = self.anno_tab[start:stop]
+        mask = (rows["Evidence"] != b"IEA") | numpy.isin(rows["Reference"], self._trust_ref_bytes)
+        terms.update(self.ontology.term_by_id(t) for t in rows[mask]["TermNr"])
         return terms
 
     def implied_terms(self, terms: Iterable[Union[int, GOterm]]) -> Set[GOterm]:

@@ -257,6 +257,10 @@ def iter_extant_unique(lst):
 
 def map_gtdb_and_ncbi(tax: Taxonomy, gs: pandas.DataFrame, db_path: str, gtdb2ncbi: dict) -> dict:
     gtdb_mask = gs["NCBITaxonId"] < 0
+    if gtdb_mask.sum() == 0:
+        logger.info("No GTDB genomes found in OMA GenomeSet. Skipping GTDB to NCBI mapping.")
+        return {}
+
     oma_gtdb = list(gs.loc[gtdb_mask, "NCBITaxonId"])
     oma_ncbi = list(gtdb2ncbi.get(id_, [0])[0] for id_ in oma_gtdb)
     oma_ncbi.extend(list(gs.loc[~gtdb_mask, "NCBITaxonId"]))

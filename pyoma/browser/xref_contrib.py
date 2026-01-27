@@ -126,12 +126,14 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
 
     def _add_to_buffer(self, e):
         self._buffer.append(e)
-        if len(self._buffer) >= 2 * self.xref_idx.chunkshape[0]:
+        if len(self._buffer) >= 100 * self.xref_idx.chunkshape[0]:
             self._flush()
 
     def _flush(self):
+        if not self._buffer:
+            return
         self.xref_idx.append(self._buffer)
-        self._buffer = []
+        self._buffer.clear()
 
     def add_xref(self, xref, enr, xref_row):
         xref = xref.lower()
@@ -145,9 +147,9 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         self.genenames[id.lower()].append((enr, xref_row))
         self.add_xref(id, enr, xref_row)
 
-    def handle_input(self, item: Tuple[pandas.DataFrame, List]):
-        df, desc = item
-        for row in df.to_records(index=False):
+    def handle_input(self, recs: numpy.ndarray):
+        print(recs)
+        for row in recs:
             if row["XRefSource"] == 0:
                 self.add_swissprot(row["XRefId"], row["EntryNr"], row["xref_row"])
             elif row["XRefSource"] in (110, 115):
@@ -174,19 +176,27 @@ def rem_vers(x: bytes) -> bytes:
 
 
 class GeneGenerator(SourceProcess):
-    def __init__(self, h5_path, **kwargs):
+    def __init__(self, h5_path, batch_size=200, **kwargs):
         super().__init__(**kwargs)
         self.h5_path = h5_path
         self.h5 = None
         self.splice_helper = None
+        self.batch_size = batch_size
 
     def setup(self):
         self.h5 = tables.open_file(self.h5_path)
         self.splice_helper = SpliceVariantHelper(self.h5)
+        logger.info("initialized GeneGenerator")
 
     def generate_data(self):
+        batch = []
         for gene in self.splice_helper.iter_genes():
-            yield gene
+            batch.append(gene)
+            if len(batch) >= self.batch_size:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
 
     def finalize(self):
         self.h5.close()
@@ -222,6 +232,7 @@ class XRefReducer(BaseProfileBuilderProcess):
             self._xref_eof = self._build_xref_eof()
         self._prot_entries = self.db.get_node("/Protein/Entries")
         self._desc_buf = self.db.get_node("/Protein/DescriptionBuffer")
+        logger.info("initialized XRefReducer")
 
     def finalize(self):
         # release cached columns
@@ -232,6 +243,7 @@ class XRefReducer(BaseProfileBuilderProcess):
         if self.db != self.xref:
             self.db.close()
         self.xref.close()
+        logger.info("finalized XRefReducer")
 
     def _build_xref_eof(self):
         enr_col = self.xref_tab.col("EntryNr")
@@ -241,23 +253,23 @@ class XRefReducer(BaseProfileBuilderProcess):
         idx = numpy.searchsorted(enr_col, enrs).astype("i4")
         return idx
 
-    def _load_xrefs(self, slices: List[slice]) -> Tuple[numpy.ndarray | None, numpy.ndarray | None]:
-        blocks = []
-        row_blocks = []
-        for s in slices:
-            lo = self._xref_eof[s.start]
-            hi = self._xref_eof[s.stop]
-            if lo == hi:
-                continue
+    def _load_xrefs(self, genes: List[GeneEntries]) -> Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+        min_enr = min(gene.enrs[0] for gene in genes)
+        max_enr = max(gene.enrs[-1] for gene in genes)
 
-            blocks.append(self.xref_tab[lo:hi])
-            row_blocks.append(numpy.arange(lo, hi, dtype=numpy.int64))
-
-        if not blocks:
-            return None, None
-        data = numpy.concatenate(blocks)
-        rows = numpy.concatenate(row_blocks)
-        return data, rows
+        # map entry_nr -> gene_id (the main entry_nr)
+        enr2gene = {enr: gene.main for gene in genes for enr in gene.enrs}
+        lo = self._xref_eof[min_enr]
+        hi = self._xref_eof[max_enr + 1]
+        xref_block = self.xref_tab[lo:hi]
+        row_block = numpy.arange(lo, hi, dtype=numpy.int64)
+        gene_id = numpy.fromiter(
+            (enr2gene.get(enr, 0) for enr in xref_block["EntryNr"]),
+            dtype=numpy.int32,
+            count=len(xref_block),
+        )
+        mask = gene_id != 0
+        return xref_block[mask], row_block[mask], gene_id[mask]
 
     def _load_descriptions(self, slices: List[slice]):
         descriptions = []
@@ -270,16 +282,11 @@ class XRefReducer(BaseProfileBuilderProcess):
                 descriptions.append((r["EntryNr"], desc))
         return descriptions
 
-    def handle_input(self, gene):
-        slices = gene.entrynr_slices()
-        xref_data, xref_rows = self._load_xrefs(slices)
-        descs = self._load_descriptions(slices)
-
-        if xref_data is None:
-            return pandas.DataFrame(), descs
-
+    def handle_input(self, genes: List[GeneEntries]) -> numpy.ndarray:
+        # load all xrefs for the range of entry numbers
+        xref_data, xref_rows, gene_id = self._load_xrefs(genes)
         # compute is_main mask
-        is_main = xref_data["EntryNr"] == gene.main
+        is_main = xref_data["EntryNr"] == gene_id
 
         # normalize XRefIds (lowercase, remove version suffix)
         norm = [rem_vers(x.lower()) for x in xref_data["XRefId"]]
@@ -288,6 +295,8 @@ class XRefReducer(BaseProfileBuilderProcess):
 
         # --------------------------------------------------- sort keys
         # sort priority:
+        #   XRefId ASC
+        #   GeneId ASC
         #   Verification ASC
         #   is_main DESC
         #   XRefSource ASC
@@ -296,28 +305,39 @@ class XRefReducer(BaseProfileBuilderProcess):
                 xref_data["XRefSource"],
                 ~is_main,
                 xref_data["Verification"],
+                gene_id,
+                xref_id,
             )
         )
 
-        data = xref_data[order]
-        rows = xref_rows[order]
-        xref_id = xref_id[order]
-        is_main = is_main[order]
+        # deduplicate by taking the first occurrence per
+        # (xref_id + gene_id) tuple.
+        same = (xref_id[order][1:] == xref_id[order][:-1]) & (gene_id[order][1:] == gene_id[order][:-1])
+        keep = numpy.concatenate(([True], ~same))
+        idx = order[keep]
 
-        # ---------------------------------------- deduplicate by XRefId
-        _, idx = numpy.unique(xref_id, return_index=True)
-        data = data[idx]
-        rows = rows[idx]
+        data = xref_data[idx]
+        rows = xref_rows[idx]
         xref_id = xref_id[idx]
-        is_main = is_main[idx]
+        gene_id = gene_id[idx]
 
-        # ---------------------------------------- build pandas dataframe
-        df = pandas.DataFrame.from_records(data)
-        df["xref_row"] = rows
-        df["XRefId"] = xref_id
-        df["is_main"] = is_main
+        new_dtype = numpy.dtype(
+            [
+                ("XRefId", xref_id.dtype),
+                ("EntryNr", data["EntryNr"].dtype),
+                ("XRefSource", data["XRefSource"].dtype),
+                ("xref_row", rows.dtype),
+                ("gene_id", gene_id.dtype),
+            ]
+        )
 
-        return df.reset_index(drop=True), descs
+        out = numpy.empty(len(data), dtype=new_dtype)
+        out["XRefId"] = xref_id
+        out["EntryNr"] = data["EntryNr"]
+        out["XRefSource"] = data["XRefSource"]
+        out["xref_row"] = rows
+        out["gene_id"] = gene_id
+        return out
 
 
 def reduce_xrefs(h5_path, xref_path=None, outpath=None, nr_procs=None):

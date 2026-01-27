@@ -62,21 +62,6 @@ class SpliceVariantHelper:
                 yield GeneEntries(res + 1, main + 1)
 
 
-class KeywordIndexer:
-    def __init__(self, stopwords: Union[os.PathLike, Set[str]]):
-        self.kw = collections.defaultdict(set)
-        if isinstance(stopwords, set):
-            self.stopwords = set(stopwords)
-        else:
-            self.stopwords = set()
-            with open(stopwords, "rt") as fh:
-                for line in fh:
-                    self.stopwords.union(line.split())
-
-    def process(self, desc, enr):
-        pass
-
-
 class XRefIndexHandler(BaseProfileBuilderProcess):
     def __init__(self, outfile, **kwargs):
         super().__init__(**kwargs)
@@ -99,7 +84,6 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         self.genenames = collections.defaultdict(list)
         self.spids = collections.defaultdict(list)
         self._buffer = []
-        self.kwi = KeywordIndexer(stopwords=set([]))
 
     def _sort_and_store_xrefs(self):
         data = self.xref_idx.read()
@@ -160,9 +144,6 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
     def add_gene_name(self, id, enr, xref_row):
         self.genenames[id.lower()].append((enr, xref_row))
         self.add_xref(id, enr, xref_row)
-
-    def add_keyword(self, enr: int, desc: str):
-        self.kwi.process(desc, enr)
 
     def handle_input(self, item: Tuple[pandas.DataFrame, List]):
         df, desc = item

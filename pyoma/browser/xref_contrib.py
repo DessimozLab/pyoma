@@ -148,7 +148,6 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         self.add_xref(id, enr, xref_row)
 
     def handle_input(self, recs: numpy.ndarray):
-        print(recs)
         for row in recs:
             if row["XRefSource"] == 0:
                 self.add_swissprot(row["XRefId"], row["EntryNr"], row["xref_row"])

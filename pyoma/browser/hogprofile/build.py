@@ -387,7 +387,7 @@ class PipelineControllerThread(threading.Thread):
         logger.info("killed %d orphan processes", len(to_rem))
 
     def run(self):
-        logger.info("starting controler thread")
+        logger.info("starting controller thread")
         nr_empty_cnt = 0
         while len(self.processes) > 0:
             try:
@@ -407,6 +407,9 @@ class PipelineControllerThread(threading.Thread):
             if time.time() - self._last_timeout_check > 10:
                 self._kill_orphan_procs()
                 self._last_timeout_check = time.time()
+            if all(not p.is_alive() for _, p in self.processes.values()):
+                logger.warning("All processes exited but controller still running — forcing shutdown")
+                break
         logger.info("control thread finished")
 
 
@@ -472,13 +475,14 @@ class Pipeline(object):
             for p in procs:
                 p.join()
         except KeyboardInterrupt:
-            print("keyboard interupt in main loop")
+            print("keyboard interrupt in main loop")
             time.sleep(20)
-        log_queue.put(None)
+
         control_queue.put(None)
-        logger_process.join()
         control_thread.join()
 
+        log_queue.put(None)
+        logger_process.join()
         print("successfully joined all processes")
 
 

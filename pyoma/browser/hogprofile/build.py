@@ -72,6 +72,7 @@ class BaseProfileBuilderProcess(mp.Process):
         self.quit_req = True
 
     def run(self):
+        rootlogger_configurer(self.log_queue)
         self.setup()
         # Set signals for worker process
         signal.signal(signal.SIGINT, self._handle_signal)
@@ -331,6 +332,7 @@ class HogGenerator(SourceProcess):
 def rootlogger_configurer(queue):
     h = QueueHandler(queue)
     root = logging.getLogger()
+    root.handlers.clear()
     root.addHandler(h)
     root.setLevel(logging.DEBUG)
 
@@ -360,7 +362,7 @@ class PipelineControllerThread(threading.Thread):
         proc_id, flag = item
         logger.debug(item)
         if flag == "DONE":
-            self.processes.pop(proc_id)
+            self.processes.pop(proc_id, None)
         else:
             self.processes[proc_id][0] = time.time()
 
@@ -405,6 +407,7 @@ class PipelineControllerThread(threading.Thread):
             if time.time() - self._last_timeout_check > 10:
                 self._kill_orphan_procs()
                 self._last_timeout_check = time.time()
+        logger.info("control thread finished")
 
 
 class Stage(object):

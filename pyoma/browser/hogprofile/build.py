@@ -361,6 +361,9 @@ class PipelineControllerThread(threading.Thread):
     def _process_alive_info(self, item):
         proc_id, flag = item
         logger.debug(item)
+        if proc_id not in self.processes:
+            logger.debug("received message for already finished process: %s %s", proc_id, flag)
+            return
         if flag == "DONE":
             self.processes.pop(proc_id, None)
         else:

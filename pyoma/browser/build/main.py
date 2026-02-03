@@ -113,13 +113,19 @@ def phase_add_domains(conf):
             )
 
 
-def phase_select_alt_splice_variants(conf):
+def phase_combine_and_select_splice(conf):
+    """Combines splice information, selects main variants, adds divergence
+    times of species and updates the database accordingly.
+    """
     with DBBuilder(conf.db, mode="append", logger=logger) as db:
         prot_hogid_arr = db.h5.get_node("/OmaHOG")
         hogids = prot_hogid_arr.read()
         db.add_protein_hog_ids(hogids)
         prot_hogid_arr.remove()
         db.identify_and_store_splice_variants(conf.splice_json)
+        if conf.divergence_times is not None:
+            db.set_divergence_times(conf.divergence_times)
+            logger.info("updated divergence times")
 
 
 def cache_build_job_generator(conf):
@@ -439,9 +445,10 @@ def parse_command_line_args():
     )
 
     splice_parser = subparsers.add_parser("splice", help="Adding alternative splice information - set main variant")
-    splice_parser.set_defaults(func=phase_select_alt_splice_variants)
+    splice_parser.set_defaults(func=phase_combine_and_select_splice)
     splice_parser.add_argument("--db", required=True, help="Path to database - will be modified")
     splice_parser.add_argument("--splice-json", required=True, help="Path to splice json file")
+    splice_parser.add_argument("--divergence-times", required=False, help="Path to divergence times file in tsv format")
 
     # cache builder commands
     cache_job_parser = subparsers.add_parser("cache-job", help="Generate job files for cache building")

@@ -513,6 +513,26 @@ class DBBuilder(DarwinExporter):
         create_index_for_columns(gstab, "NCBITaxonId", "UniProtSpeciesCode", "EntryOff")
         return name2code
 
+    def set_divergence_times(self, divergence_tsv):
+        """parses the divergence times from the tsv file and adds it to the database"""
+        taxtab: tables.Table = self.h5.get_node("/Taxonomy")
+        tax_table = taxtab.read()
+        taxid_to_row = {int(row["NCBITaxonId"]): row_nr for row_nr, row in enumerate(tax_table)}
+        age_col = tax_table["Age"].astype(float)
+        with open(divergence_tsv, "rt", newline="") as f:
+            reader = csv.DictReader(f, dialect="excel-tab")
+            for row in reader:
+                try:
+                    i = taxid_to_row[int(row["OMATaxonID"])]
+                    age_col[i] = float(row["DivergenceTime_MYA"])
+                except KeyError:
+                    self.logger.warning(
+                        "OMATaxonID %s from divergence times file not found in taxonomy table, skipping",
+                        row["OMATaxonID"],
+                    )
+        taxtab.modify_column(column=age_col, colname="Age")
+        taxtab.flush()
+
     def add_orthologs(
         self,
         basedir: Optional[Union[str, os.PathLike]],

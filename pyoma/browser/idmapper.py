@@ -99,21 +99,37 @@ class XRefSearchHelper:
         return stmt, condvals
 
     def _prefix_reduced_search(self, query, entrynr_range, limit=None, exact=False):
-        query = self._version_free_query(query).lower().encode("utf-8")
-        if query in self.gene_name_lookup:
-            return self.gene_name_lookup.get_matching_xref_row_nrs(query, entrynr_range)
-        red_tab_it = self.reduced_xref_tab.where(*self._query_prefix(query, entrynr_range, exact))
-        xref_rows = numpy.fromiter(itertools.islice((row["XRefRow"] for row in red_tab_it), limit), dtype="i4")
+        def _search(query):
+            if query in self.gene_name_lookup:
+                return self.gene_name_lookup.get_matching_xref_row_nrs(query, entrynr_range)
+            red_tab_it = self.reduced_xref_tab.where(*self._query_prefix(query, entrynr_range, exact))
+            xref_rows = numpy.fromiter(itertools.islice((row["XRefRow"] for row in red_tab_it), limit), dtype="i4")
+            return xref_rows
+
+        query_lower = query.lower().encode("utf-8")
+        xref_rows = _search(query_lower)
+        if len(xref_rows) == 0:
+            query_lower_without_version = self._version_free_query(query).lower().encode("utf-8")
+            if query_lower_without_version != query_lower:
+                xref_rows = _search(query_lower_without_version)
         return xref_rows
 
     def _prefix_reducecd_count(self, query, entrynr_range=None):
         from .db import count_elements
 
-        query = self._version_free_query(query).lower().encode("utf-8")
-        cnts = self.gene_name_lookup.count(query)
-        if cnts == 0:
-            cnts = count_elements(self.reduced_xref_tab.where(*self._query_prefix(query, entrynr_range)))
-        return cnts
+        def _count(query):
+            cnts = self.gene_name_lookup.count(query)
+            if cnts == 0:
+                cnts = count_elements(self.reduced_xref_tab.where(*self._query_prefix(query, entrynr_range)))
+            return cnts
+
+        query_lower = query.lower().encode("utf-8")
+        count = _count(query_lower)
+        if count == 0:
+            query_lower_without_version = self._version_free_query(query).lower().encode("utf-8")
+            if query_lower_without_version != query_lower:
+                count = _count(query_lower_without_version)
+        return count
 
     def _suffix_search(self, query, limit=None, unspecific_exception=50000):
         cnts = self.fulltext_index.count(query)

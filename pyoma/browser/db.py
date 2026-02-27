@@ -2972,19 +2972,29 @@ class Taxonomy(object):
         elif i2 - i1 == 1:
             res = self.tax_table[self.parent_key[i1]]
         else:
-            res = numpy.array([(0, -1, b"LUCA", 4250)[: len(self.tax_table.dtype)]], dtype=self.tax_table.dtype)[0]
+            i0 = self.tax_table["NCBITaxonId"].searchsorted(0, sorter=self.taxid_key)
+            res = self.tax_table[self.taxid_key[i0]]
+            if res["NCBITaxonId"] != 0:
+                res = self._create_luca()
         return res
 
     def _add_luca_if_needed(self):
         i1 = self.tax_table["ParentTaxonId"].searchsorted(0, sorter=self.parent_key)
         i2 = self.tax_table["ParentTaxonId"].searchsorted(0, sorter=self.parent_key, side="right")
         if i2 - i1 > 1:
-            self.tax_table = numpy.append(
-                self.tax_table,
-                numpy.array([(0, -1, b"LUCA", 4250)[: len(self.tax_table.dtype)]], dtype=self.tax_table.dtype),
-            )
-            self.taxid_key = self.tax_table.argsort(order=("NCBITaxonId"))
-            self.parent_key = self.tax_table.argsort(order=("ParentTaxonId"))
+            i0 = self.tax_table["NCBITaxonId"].searchsorted(0, sorter=self.taxid_key)
+            if self.tax_table[self.taxid_key[i0]]["NCBITaxonId"] != 0:
+                self.tax_table = numpy.append(self.tax_table, self._create_luca())
+                self.taxid_key = self.tax_table.argsort(order=("NCBITaxonId"))
+                self.parent_key = self.tax_table.argsort(order=("ParentTaxonId"))
+
+    def _create_luca(self):
+        luca_fields = {"NCBITaxonId": 0, "ParentTaxonId": -1, "Name": b"LUCA", "IsGenome": False, "Age": 4250}
+        luca_row = numpy.zeros((1,), dtype=self.tax_table.dtype)
+        for k, v in luca_fields.items():
+            if k in res.dtype.fields:
+                luca_row[k] = v
+        return luca_row
 
     def _taxon_from_numeric(self, tid):
         idx = self._table_idx_from_numeric(tid)

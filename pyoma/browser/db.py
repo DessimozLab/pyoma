@@ -3024,9 +3024,10 @@ class Taxonomy(object):
 
     def _create_luca(self):
         luca_fields = {"NCBITaxonId": 0, "ParentTaxonId": -1, "Name": b"LUCA", "IsGenome": False, "Age": 4250}
-        luca_row = numpy.zeros((1,), dtype=self.tax_table.dtype)
+        dtyp = self.tax_table.dtype
+        luca_row = numpy.zeros((1,), dtype=dtyp)
         for k, v in luca_fields.items():
-            if k in res.dtype.fields:
+            if k in dtyp.fields:
                 luca_row[k] = v
         return luca_row
 

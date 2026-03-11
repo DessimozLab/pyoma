@@ -13,6 +13,7 @@ import logging
 from logging.handlers import QueueListener, QueueHandler
 
 import networkx as nx
+import numpy
 import pandas as pd
 import tables
 from Bio import SeqIO
@@ -336,7 +337,7 @@ def map_xrefs(
 def _filter_graph(G):
     def graph_to_tuples(G):
         for u, v, data in G.edges(data=True):
-            if isinstance(u, int):
+            if isinstance(u, (int, numpy.integer)):
                 u, v = v, u
             yield BestMatch(u, v, data["weight"], data.get("propagate", True))
 

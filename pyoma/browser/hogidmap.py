@@ -1,7 +1,6 @@
 import collections
 import itertools
 import logging
-import multiprocessing
 import os
 import pickle
 import re
@@ -12,9 +11,9 @@ from tqdm import tqdm
 import numpy
 import tables
 from datasketch import MinHash, MinHashLSH, LeanMinHash
+from mpire import WorkerPool
 
 from .db import Database
-from .hogprofile.build import BaseProfileBuilderProcess, SourceProcess, Pipeline, Stage
 
 logger = logging.getLogger(__name__)
 MinHash256 = partial(MinHash, seed=1, num_perm=256)
@@ -64,8 +63,8 @@ class LSHBuilder(object):
             self.lsh = MinHashLSH(threshold=threshold, num_perm=256)
             self.hogid2row = {}
             self.h5 = self.init_hash_table_file(hash_file)
-        self.hashes = self.h5.get_node("/hashes")
-        self.hogids = self.h5.get_node("/hogids")
+        self.hashes: tables.EArray = self.h5.get_node("/hashes")
+        self.hogids: tables.EArray = self.h5.get_node("/hogids")
         self.threshold = threshold
         self._readonly = mode == "r"
 
@@ -77,13 +76,13 @@ class LSHBuilder(object):
 
     def init_hash_table_file(self, hash_file):
         h5 = self._open_hdf5(hash_file, mode="w")
-        h5.create_earray("/", "hashes", atom=tables.Int64Atom(), shape=(0, 256), expectedrows=1e6)
+        h5.create_earray("/", "hashes", atom=tables.Int64Atom(), shape=(0, 256), expectedrows=1_000_000)
         h5.create_earray(
             "/",
             "hogids",
             atom=tables.StringAtom(itemsize=255),
             shape=(0,),
-            expectedrows=1e6,
+            expectedrows=1_000_000,
         )
         # Use VLArray of UInt8Atom to store serialized LSH object
         h5.create_vlarray("/", "lsh_obj", atom=tables.UInt8Atom())
@@ -139,77 +138,18 @@ class LSHBuilder(object):
             yield key, c, minhash.jaccard(h)
 
 
-class FamGenerator(SourceProcess):
-    def __init__(self, fam_generator=None, **kwargs):
-        super().__init__(**kwargs)
-        self.fams_to_process = fam_generator
-
-    def generate_data(self):
-        for fam in self.fams_to_process:
-            yield fam
-        logger.info("all families put to queue")
-
-
-class HashWorker(BaseProfileBuilderProcess):
-    def __init__(self, db_path, **kwargs):
-        super().__init__(**kwargs)
-        self.db_path = db_path
-        self.db = None
-        self.hasher = None
-        self.handled_queries = None
-
-    def setup(self):
-        self.db = Database(self.db_path)
-        self.hasher = HogHasher(self.db)
-        self.handled_queries = 0
-
-    def handle_input(self, fam):
-        logger.info("computing hashes for family %s", fam)
-        if self.handled_queries > 10000:
-            self.db.close()
-            logger.info("resetting database handle")
-            self.setup()
-        logger.info("start chewing on fam %s...", fam)
-        t0 = time.time()
-        hashes = self.hasher.analyze_fam(fam)
-        logger.info("... done with fam %s. Took %f sec", fam, time.time() - t0)
-        self.handled_queries += 1
-        return hashes
-
-    def finalize(self):
-        self.db.close()
-
-
-class Collector(BaseProfileBuilderProcess):
-    def __init__(self, output_path, **kwargs):
-        super().__init__(**kwargs)
-        self.output_path = output_path
-
-    def setup(self):
-        self.lsh_builder = LSHBuilder(self.output_path, mode="a")
-
-    def handle_input(self, hashes):
-        logger.info("build lsh for {} hashes ({})".format(len(hashes), next(iter(hashes))))
-        self.lsh_builder.add_minhashes(hashes.items())
-
-    def finalize(self):
-        self.lsh_builder.close()
-
-
 def generator_of_unprocessed_fams(db_path, lsh_path=None):
     def _get_nr_families(db_path):
-        db = Database(db_path)
-        nr_hogs = db.get_nr_toplevel_hogs()
-        db.close()
+        with Database(db_path) as db:
+            nr_hogs = db.get_nr_toplevel_hogs()
         logger.info("Found %d families to process", nr_hogs)
         return nr_hogs
 
     def _load_unprocessed_fams(db_path, lsh_path):
-        db = Database(db_path)
-        with tables.open_file(lsh_path, "r") as lsh_h5:
-            processed_fams = set(db.parse_hog_id(x) for x in lsh_h5.get_node("/hogids"))
-        remaining = set(range(1, db.get_nr_toplevel_hogs() + 1)) - processed_fams
-        db.close()
+        with Database(db_path) as db:
+            with tables.open_file(lsh_path, "r") as lsh_h5:
+                processed_fams = set(db.parse_hog_id(x) for x in lsh_h5.get_node("/hogids"))
+            remaining = set(range(1, db.get_nr_toplevel_hogs() + 1)) - processed_fams
         logger.info("Found %d unprocessed families", len(remaining))
         return remaining
 
@@ -220,24 +160,58 @@ def generator_of_unprocessed_fams(db_path, lsh_path=None):
     return fams_to_process
 
 
+def hasher_worker_init(db_path, worker_state):
+    worker_state["db"] = Database(db_path)
+    worker_state["hasher"] = HogHasher(worker_state["db"])
+    logger.info("initializing hasher worker %s", worker_state)
+
+
+def hash_worker_exit(worker_state):
+    logger.info("exiting hash worker, closing database handle")
+    del worker_state["hasher"]
+    worker_state["db"].close()
+    del worker_state["db"]
+
+
+def hash_worker_fn(worker_state, fam):
+    logger.info("computing hashes for family %s", fam)
+    t0 = time.time()
+    hashes = worker_state["hasher"].analyze_fam(fam)
+    logger.info("... done with fam %s. Took %f sec", fam, time.time() - t0)
+    return hashes
+
+
 def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
-    if nr_procs is None:
-        nr_procs = multiprocessing.cpu_count()
-
     fams_to_process = generator_of_unprocessed_fams(db_path, output_path)
-    while True:
-        pipeline = Pipeline()
-        pipeline.add_stage(Stage(FamGenerator, nr_procs=1, fam_generator=fams_to_process))
-        pipeline.add_stage(Stage(HashWorker, nr_procs=nr_procs, db_path=db_path))
-        pipeline.add_stage(Stage(Collector, nr_procs=1, output_path=output_path))
-        print("setup pipeline, about to start it.")
-        pipeline.run()
-        print("finished with computing the MinHashLSH for {}".format(db_path))
+    collector = LSHBuilder(output_path, mode="a")
+    with WorkerPool(n_jobs=nr_procs, use_worker_state=True, keep_alive=True, start_method="spawn") as pool:
+        worker_init_ = partial(hasher_worker_init, db_path)
+        results = pool.imap_unordered(
+            hash_worker_fn,
+            fams_to_process,
+            worker_init=worker_init_,
+            worker_exit=hash_worker_exit,
+            worker_lifespan=10000,
+            chunk_size=100,
+            progress_bar=True,
+        )
+        for hashes in results:
+            collector.add_minhashes(hashes.items())
+    collector.close()
 
-        fams_to_process = set(generator_of_unprocessed_fams(db_path, output_path))
-        if len(fams_to_process) == 0:
-            break
-    print("for sure all families processes. we're done!")
+    # while True:
+    #     pipeline = Pipeline()
+    #     pipeline.add_stage(Stage(FamGenerator, nr_procs=1, fam_generator=fams_to_process))
+    #     pipeline.add_stage(Stage(HashWorker, nr_procs=nr_procs, db_path=db_path))
+    #     pipeline.add_stage(Stage(Collector, nr_procs=1, output_path=output_path))
+    #     print("setup pipeline, about to start it.")
+    #     pipeline.run()
+    #     print("finished with computing the MinHashLSH for {}".format(db_path))
+    #
+    #     fams_to_process = set(generator_of_unprocessed_fams(db_path, output_path))
+    #     if len(fams_to_process) == 0:
+    #         break
+    # print("for sure all families processes. we're done!")
 
 
 def compare_versions(output_file, target_path, *old_path):

@@ -113,9 +113,13 @@ class LSHBuilder(object):
         self.h5.close()
 
     def add_minhashes(self, it):
+        hash_buffer = []
+        hogid_buffer = []
         for hogid, minhash in it:
-            self.hashes.append([minhash.digest()])
-            self.hogids.append([hogid])
+            hash_buffer.append(minhash.digest())
+            hogid_buffer.append(hogid)
+        self.hashes.append(hash_buffer)
+        self.hogids.append(hogid_buffer)
         self.hashes.flush()
         self.hogids.flush()
 
@@ -160,7 +164,8 @@ def generator_of_unprocessed_fams(db_path, lsh_path=None):
     return fams_to_process
 
 
-def hasher_worker_init(db_path, worker_state):
+def hasher_worker_init(worker_state, db_path, log_conf):
+    logging.basicConfig(level=log_conf["level"] + 5, format=log_conf["format"], datefmt=log_conf["datefmt"])
     worker_state["db"] = Database(db_path)
     worker_state["hasher"] = HogHasher(worker_state["db"])
     logger.info("initializing hasher worker %s", worker_state)
@@ -174,18 +179,33 @@ def hash_worker_exit(worker_state):
 
 
 def hash_worker_fn(worker_state, fam):
-    logger.info("computing hashes for family %s", fam)
+    logger.debug("computing hashes for family %s", fam)
     t0 = time.time()
-    hashes = worker_state["hasher"].analyze_fam(fam)
-    logger.info("... done with fam %s. Took %f sec", fam, time.time() - t0)
-    return hashes
+    try:
+        hashes = worker_state["hasher"].analyze_fam(fam)
+        logger.debug("... done with fam %s. Took %f sec", fam, time.time() - t0)
+        return hashes
+    except Exception:
+        logger.exception("Error processing family %s", fam)
+        raise
+
+
+def get_logging_config():
+    root = logging.getLogger()
+    handler = next(h for h in root.handlers if h.formatter is not None)
+    log_config = {
+        "level": root.level,
+        "format": handler.formatter._fmt,
+        "datefmt": handler.formatter.datefmt,
+    }
+    return log_config
 
 
 def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
     fams_to_process = generator_of_unprocessed_fams(db_path, output_path)
     collector = LSHBuilder(output_path, mode="a")
     with WorkerPool(n_jobs=nr_procs, use_worker_state=True, keep_alive=True, start_method="spawn") as pool:
-        worker_init_ = partial(hasher_worker_init, db_path)
+        worker_init_ = partial(hasher_worker_init, db_path=db_path, log_conf=get_logging_config())
         results = pool.imap_unordered(
             hash_worker_fn,
             fams_to_process,

@@ -133,19 +133,20 @@ class GeneOntologyManager:
     def flush(self):
         self.storage.flush_table(self._anno_tab_name)
 
+    def _sort_entire_table(self):
+        self.flush()
+        self.storage.create_index(self._anno_tab_name, ["EntryNr", "TermNr", "Evidence"])
+        sort_table(self.storage.tables[self._anno_tab_name], col_order=["EntryNr", "TermNr", "Evidence", "Reference"])
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.phase == 0:
             return
         if self.phase == 1:
             # we do no function prediction, but we need to copy over from collect-file
-            self.switch_collect_to_inference_phase(create_index=False)
+            self.switch_collect_to_inference_phase()
         # now, we are for sure in phase 2
         if self.phase == 2:
-            self.flush()
-            self.storage.create_index(self._anno_tab_name, ["EntryNr", "TermNr", "Evidence"])
-            sort_table(
-                self.storage.tables[self._anno_tab_name], col_order=["EntryNr", "TermNr", "Evidence", "Reference"]
-            )
+            self._sort_entire_table()
             self.storage.__exit__(exc_type, exc_val, exc_tb)
 
         # merge collect and inference files
@@ -179,8 +180,7 @@ class GeneOntologyManager:
         on this object. From then on, only calls to add_inference are allowed."""
         # switch to inference phase (2). build index of annotations
         assert self.phase == 1
-        self.flush()
-        self.storage.create_index(self._anno_tab_name, ["EntryNr", "TermNr"])
+        self._sort_entire_table()
         self.storage.__exit__(None, None, None)
         self.phase = 2
         # reopen in inference mode

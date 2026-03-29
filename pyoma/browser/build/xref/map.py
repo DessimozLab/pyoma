@@ -592,7 +592,7 @@ def merge_sorted_h5_table(
     # Generator to read a table in chunks, with carryover of the last EntryNr
     def iter_sorted_chunks(h5: tables.File):
         carryover = pd.DataFrame()
-        table = h5.get_node(table_path)
+        table: tables.Table = h5.get_node(table_path)
         nrows = table.nrows
         colnames = table.colnames
         for start in range(0, nrows, chunksize):
@@ -607,8 +607,14 @@ def merge_sorted_h5_table(
                 carryover = chunk.loc[mask]
                 chunk = chunk.loc[~mask]
             if not chunk.empty:
+                logger.info(
+                    f"Read chunk from {h5.filename} with EntryNr range {chunk['EntryNr'].iloc[0]}-{chunk['EntryNr'].iloc[-1]} ({start/nrows*100:.2f}%)"
+                )
                 yield chunk
         if not carryover.empty:
+            logger.info(
+                f"Yielding final carryover from {h5.filename} with EntryNr {carryover['EntryNr'].iloc[0]}-{carryover['EntryNr'].iloc[-1]}"
+            )
             yield carryover
 
     def flush_batch(batch_rows):

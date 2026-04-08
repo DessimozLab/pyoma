@@ -142,7 +142,7 @@ class FunctionPredictor:
             return terms
 
         start, stop = self._entrynr_index[enr]
-        if start <= stop:
+        if start >= stop:
             return terms
 
         rows = self.anno_tab[start:stop]
@@ -176,7 +176,6 @@ class FunctionPredictor:
 
         # annotate all group members
         clades = self.enr2clade(list(entry_anno.keys()))
-        logger.debug(f"clades: {clades}")
         for (enr, annos_entry), clade in zip(entry_anno.items(), clades):
             if not clade:
                 continue

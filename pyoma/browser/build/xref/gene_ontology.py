@@ -443,7 +443,9 @@ def _fp_worker_process(oma_groups):
         prof.add("predict_group", time.perf_counter() - t)
     prof.add("worker_total", time.perf_counter() - t0)
     prof.add("n_groups", len(oma_groups))
-    logger.info(f"batch predicted: {len(oma_groups)} groups, {len(results)} annotations")
+    logger.info(
+        f"batch predicted: {len(oma_groups)} groups [{oma_groups[0]}..{oma_groups[-1]}], {len(results)} annotations; took {time.perf_counter() - t0:.2f}s"
+    )
     return results, prof
 
 
@@ -543,7 +545,9 @@ def import_go(
             initargs=(og_db, go_man.collect_file, obo, clades, log_queue),
         ) as pool:
             batch_iter = (range(i, min(i + 500, nr_groups + 1)) for i in range(1, nr_groups + 1, 500))
-            for batch_results, c_prf in stream_process_batches(pool, _fp_worker_process, batch_iter):
+            for batch_results, c_prof in stream_process_batches(
+                pool, _fp_worker_process, batch_iter, max_inflight=nr_procs * 2
+            ):
                 prof += c_prof
                 go_man.add_inference(batch_results)
 

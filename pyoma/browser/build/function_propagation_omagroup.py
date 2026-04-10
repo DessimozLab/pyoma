@@ -1,3 +1,4 @@
+import logging
 from logging import getLogger
 from typing import Optional, List, Dict, Tuple, Set, Iterable, Union
 import os
@@ -168,11 +169,13 @@ class FunctionPredictor:
 
         # filter common set for sufficient prevalence
         annos = {term for term, cnt in annos.items() if cnt > min(3, len(self.oma_groups[grp]))}
-        logger.debug(f"found {len(annos)} relevant GO Terms: {[str(z) for z in annos]}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"found {len(annos)} relevant GO Terms: {[str(z) for z in annos]}")
 
         # take the most specific annotations only
         specific = {a for a in annos if self.ontology.get_subterms(a, include_query=False).isdisjoint(annos)}
-        logger.debug(f"found {len(annos)} specific GO Terms: {[str(z) for z in annos]}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"found {len(specific)} specific GO Terms: {[str(z) for z in specific]}")
 
         # annotate all group members
         clades = self.enr2clade(list(entry_anno.keys()))
@@ -180,7 +183,8 @@ class FunctionPredictor:
             if not clade:
                 continue
             candidates = specific - annos_entry
-            logger.debug(f"enr {enr} [{clade}] candidates: {[str(t) for t in candidates]}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"enr {enr} [{clade}] candidates: {[str(t) for t in candidates]}")
             for candidate in candidates:
                 if candidate in self.clade2terms[clade]:
                     yield enr, candidate.id

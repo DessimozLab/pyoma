@@ -1079,10 +1079,10 @@ class DarwinExporter(object):
         return gof.cnts, gof.tot_cnts
 
     def count_gene_ontology_summary(self):
-        self.logger.info("Bulding gene ontology annotations summary info")
+        self.logger.info("Building gene ontology annotations summary info")
         go_tab = self.h5.get_node("/Annotations/GeneOntology")
         prot_tab = self.h5.get_node("/Protein/Entries")
-        exp_codes = frozenset([b"EXP", b"IDA", b"IPI", b"IMP", b"IGI" b"IEP"])
+        exp_codes = frozenset([b"EXP", b"IDA", b"IPI", b"IMP", b"IGI", b"IEP"])
         cnts = collections.Counter()
         cur_enr = None
         for (enr, term), row_iter in itertools.groupby(go_tab, operator.itemgetter("EntryNr", "TermNr")):

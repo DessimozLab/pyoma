@@ -2646,7 +2646,7 @@ class OmaIdMapper(object):
         self._genome_keys = self.genome_table.argsort(order=("UniProtSpeciesCode"))
         self._taxid_keys = self.genome_table.argsort(order=("NCBITaxonId"))
         self._sciname_keys = self.genome_table.argsort(order=("SciName"))
-        self._omaid_re = re.compile(r"(?P<genome>[A-Z][A-Z0-9]{4})(?P<nr>\d+)")
+        self._omaid_re = re.compile(r"(?P<genome>[A-Z0-9]{5})(?P<nr>\d+)")
         self._db = db
         self._approx_genome_matcher = self._init_fuzzy_matcher_with_genome_infos()
 

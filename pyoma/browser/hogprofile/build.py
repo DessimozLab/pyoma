@@ -474,12 +474,27 @@ class Pipeline(object):
         control_thread = PipelineControllerThread(control_queue=control_queue, log_queue=log_queue, processes=procs)
         control_thread.start()
         print("all processes started")
+
         try:
-            for p in procs:
-                p.join()
+            # Loop and log process status until all have joined
+            while True:
+                alive = False
+                for p in procs:
+                    logger.info("Process %s (pid=%s) alive: %s", p.name, p.pid, p.is_alive())
+                    if p.is_alive():
+                        p.join(timeout=1)
+                        alive = True
+                logger.info("Active threads: %s", threading.enumerate())
+                if not alive:
+                    break
+                time.sleep(10)  # avoid busy waiting
         except KeyboardInterrupt:
             print("keyboard interrupt in main loop")
-            time.sleep(20)
+            for p in procs:
+                if p.is_alive():
+                    print("Terminating process %s (pid=%s)", p.name, p.pid)
+                    p.terminate()
+            time.sleep(2)
 
         control_queue.put(None)
         control_thread.join()

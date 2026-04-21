@@ -23,7 +23,7 @@ dependencies = [
     "datasketch",
     "ete3",
     "networkx",
-    "property_manager"
+    "property_manager",
 ]
 
 [project.optional-dependencies]
@@ -33,7 +33,8 @@ create_db = [
     "scikit-learn",
     "scikit-fuzzy",
     "pyham",
-    "omataxonomy"
+    "omataxonomy",
+    "mpire",
 ]
 enrichment = [
     "plotly",

@@ -1,6 +1,5 @@
 import abc
 import collections
-import heapq
 import itertools
 import os
 import pickle
@@ -617,66 +616,44 @@ def merge_sorted_h5_table(
             )
             yield carryover
 
-    def flush_batch(batch_rows):
-        if not batch_rows:
-            return
-        dfs = [df.iloc[s:e] for df, s, e in batch_rows]
-        merged_df = pd.concat(dfs, ignore_index=True)
-        merged_df.sort_values(by=sort_columns, inplace=True)
-        merged_df.drop_duplicates(subset=dupl_subset_columns, keep="first", inplace=True)
-        storer_callback(merged_df.to_records(index=False))
-        batch_rows.clear()
-
-    # Prepare readers for each file
+    # active maps file_idx -> (current_df, reader)
+    # iter_sorted_chunks carryover ensures each yielded chunk contains complete
+    # EntryNr groups, so safe_cutoff = min(last EntryNr across active chunks)
+    # is guaranteed to be fully represented in the current chunks.
     readers = [iter_sorted_chunks(h5) for h5 in input_h5_handles]
-    current_chunks = [
-        (df, df["EntryNr"].to_numpy()) if not df.empty else (pd.DataFrame(), numpy.array([]))
-        for df in map(next, readers)
-    ]
-
-    # Initialize heap: (EntryNr, file_idx, row_idx)
-    heap = []
-    for i, (df, enrs) in enumerate(current_chunks):
+    active = {}
+    for i, reader in enumerate(readers):
+        df = next(reader, pd.DataFrame())
         if not df.empty:
-            assert df["EntryNr"].is_monotonic_increasing
-            heap.append((int(enrs[0]), i, 0))
-    heapq.heapify(heap)
+            active[i] = (df, reader)
 
-    batch_rows = []
-    batch_max_enr = None
+    while active:
+        safe_cutoff = min(df["EntryNr"].iloc[-1] for df, _ in active.values())
 
-    while heap:
-        min_enr, file_idx, row_idx = heapq.heappop(heap)
-        df, enrs = current_chunks[file_idx]
-        # Start a new batch if needed
-        if batch_max_enr is None:
-            batch_max_enr = min_enr + enr_batch_size
-        elif min_enr > batch_max_enr:
-            flush_batch(batch_rows)
-            batch_rows = []
-            batch_max_enr = min_enr + enr_batch_size
+        pieces = []
+        to_advance = []
+        for i, (df, reader) in list(active.items()):
+            mask = df["EntryNr"] <= safe_cutoff
+            if mask.any():
+                pieces.append(df.loc[mask])
+            remainder = df.loc[~mask]
+            if remainder.empty:
+                to_advance.append((i, reader))
+            else:
+                active[i] = (remainder, reader)
 
-        # Append all consecutive rows with the same EntryNr from the current chunk
-        start_idx = row_idx
-        while row_idx < len(enrs) and enrs[row_idx] == min_enr:
-            row_idx += 1
-        batch_rows.append((df, start_idx, row_idx))
+        for i, reader in to_advance:
+            del active[i]
+            next_df = next(reader, pd.DataFrame())
+            if not next_df.empty:
+                active[i] = (next_df, reader)
 
-        # If chunk still has rows left, we push the next row onto the heap. Otherwise,
-        # we load the next chunk from the same file.
-        if row_idx < len(enrs):
-            heapq.heappush(heap, (int(enrs[row_idx]), file_idx, row_idx))
-        else:
-            # load next chunk from this file if available
-            next_chunk = next(readers[file_idx], pd.DataFrame())
-            if next_chunk.empty:
-                continue
-            assert next_chunk["EntryNr"].is_monotonic_increasing
-            next_enrs = next_chunk["EntryNr"].to_numpy()
-
-            current_chunks[file_idx] = (next_chunk, next_enrs)
-            heapq.heappush(heap, (int(next_enrs[0]), file_idx, 0))
-    flush_batch(batch_rows)
+        if pieces:
+            merged = pd.concat(pieces, ignore_index=True)
+            merged.sort_values(by=sort_columns, inplace=True)
+            merged.drop_duplicates(subset=dupl_subset_columns, keep="first", inplace=True)
+            logger.info(f"Stored {len(merged)} rows for EntryNr up to {safe_cutoff}")
+            storer_callback(merged.to_records(index=False))
 
 
 def combine_xrefs(xrefs: List[os.PathLike], out: os.PathLike):

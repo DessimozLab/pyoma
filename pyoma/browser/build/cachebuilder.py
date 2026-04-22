@@ -576,19 +576,23 @@ def combine_results(job_results, out):
         cnts, offsets, cur_off = [], [], 0
         for fn in job_results:
             with tables.open_file(fn, "r") as fin:
-                json_buffer.append(fin.get_node("/family_json/buffer").read())
+                buf = fin.get_node("/family_json/buffer").read()
                 off = fin.get_node("/family_json/offset").read()
+                json_buffer.append(buf)
                 off["offset"] += cur_off
-                cur_off += len(fin.get_node("/family_json/offset"))
                 offsets.append(off)
+                cur_off += len(buf)
                 cnts.append(fin.get_node("/ortholog_counts").read())
+                logger.info(f"loaded {len(buf)} bytes from {fn}. cur_off: {cur_off} bytes")
 
         off = numpy.concatenate(offsets)
-        if off["length"].sum() != len(json_buffer):
+        if off["length"].sum() != len(json_buffer) or len(json_buffer) != cur_off:
             logger.error(
                 "Cached json seems broken. inconsistent lengths: %d <--> %d", off["length"].sum(), len(json_buffer)
             )
             raise DBConsistencyError("Cached json seems broken")
+
+        logger.info("sorting and writing offsets to /RootHOG/MetaData")
         off.sort(order="Fam")
         rhog_meta = numpy.zeros(len(off), dtype=tables.dtype_from_descr(RootHOGMetaTable))
         rhog_meta["FamNr"] = off["Fam"]
@@ -597,6 +601,7 @@ def combine_results(job_results, out):
         roothog_meta = fout.create_table("/RootHOG", "MetaData", RootHOGMetaTable, obj=rhog_meta)
         roothog_meta.colinstances["FamNr"].create_csindex()
 
+        logger.info("sorting and writing counts to /Protein/OrthologsCountCache")
         cnts = numpy.concatenate(cnts)
         cnts.sort(order="EntryNr")
         if cnts["EntryNr"][0] == 0:
@@ -607,3 +612,4 @@ def combine_results(job_results, out):
 
         tab = fout.create_table("/Protein", "OrthologsCountCache", ProteinCacheInfo, createparents=True, obj=cnts)
         tab.colinstances["EntryNr"].create_csindex()
+        logger.info("finished writing output file")

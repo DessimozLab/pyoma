@@ -257,18 +257,24 @@ def iter_extant_unique(lst):
 
 def map_gtdb_and_ncbi(tax: Taxonomy, gs: pandas.DataFrame, db_path: str, gtdb2ncbi: dict) -> dict:
     gtdb_mask = gs["NCBITaxonId"] < 0
-    if gtdb_mask.sum() == 0:
+    # Special genomes: small negative GenomeId (internal NCBI node), NCBITaxonId already replaced
+    # with ParentTaxonId by _load_gs_data — they must not be treated as NCBI leaf genomes.
+    special_mask = (gs["GenomeId"] < 0) & (gs["NCBITaxonId"] > 0)
+    if gtdb_mask.sum() == 0 and special_mask.sum() == 0:
         logger.info("No GTDB genomes found in OMA GenomeSet. Skipping GTDB to NCBI mapping.")
         return {}
 
     oma_gtdb = list(gs.loc[gtdb_mask, "NCBITaxonId"])
     oma_ncbi = list(gtdb2ncbi.get(id_, [0])[0] for id_ in oma_gtdb)
-    oma_ncbi.extend(list(gs.loc[~gtdb_mask, "NCBITaxonId"]))
+    oma_ncbi.extend(list(gs.loc[~gtdb_mask & ~special_mask, "NCBITaxonId"]))
     tax2code = collections.defaultdict(set)
     for row in gs.itertuples(index=False):
-        tax2code[row.NCBITaxonId].add(row.UniProtSpeciesCode)
-        if row.NCBITaxonId < 0:
-            tax2code[gtdb2ncbi.get(row.NCBITaxonId, 0)[0]].add(row.UniProtSpeciesCode)
+        if row.GenomeId < 0 and row.NCBITaxonId > 0:
+            tax2code[row.GenomeId].add(row.UniProtSpeciesCode)
+        else:
+            tax2code[row.NCBITaxonId].add(row.UniProtSpeciesCode)
+            if row.NCBITaxonId < 0:
+                tax2code[gtdb2ncbi.get(row.NCBITaxonId, [0])[0]].add(row.UniProtSpeciesCode)
 
     tree_gtdb = tax.get_topology(oma_gtdb, intermediate_nodes=True, annotate=True)
     tree_ncbi = tax.get_topology(oma_ncbi, intermediate_nodes=True, annotate=True)
@@ -289,6 +295,11 @@ def map_gtdb_and_ncbi(tax: Taxonomy, gs: pandas.DataFrame, db_path: str, gtdb2nc
     ncbi_maps = collect_ncbi_map_info(ncbi_to_gtdb_cand, tax2code, code2tax, tax, taxtab, tree_ncbi)
     ancestral.extend(ncbi_maps[0])
     extant.extend(ncbi_maps[1])
+
+    for _, row in gs[special_mask].iterrows():
+        extant.append(
+            {"gtdb_taxid": int(row["GenomeId"]), "ncbi_taxid": int(row["NCBITaxonId"]), "sciname": row["SciName"]}
+        )
 
     map_data = {"ancestral": ancestral, "extant": list(iter_extant_unique(extant))}
     return map_data

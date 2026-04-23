@@ -42,9 +42,8 @@ class HogHasher(object):
                 minhashes[hog_id[: p.start()]].update(prot_id)
             minhashes[hog_id].update(prot_id)
             if time.time() - t0 > 10:
-                logger.debug(
-                    f"working since {time.time()-t_start}sec on fam {fam_nr}. Done {i} out of {len(members)} proteins"
-                )
+                _log = logger.info if (time.time() - t_start) > 120 else logger.debug
+                _log(f"working since {time.time()-t_start}sec on fam {fam_nr}. Done {i} out of {len(members)} proteins")
                 t0 = time.time()
         return minhashes
 

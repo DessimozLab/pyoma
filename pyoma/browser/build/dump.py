@@ -4,6 +4,7 @@ import warnings
 from contextlib import ExitStack
 from collections import defaultdict
 from textwrap import dedent
+from typing import Tuple
 
 import tables
 from tables import PerformanceWarning
@@ -11,6 +12,7 @@ from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 from .main import setup_logging
 from ..db import Database
+from ..models import ProteinEntry
 from ..build.taxonomy_alignment import produce_mapping_and_download_files
 from ...common import auto_open
 
@@ -95,6 +97,86 @@ def dump_species_and_taxmapping(conf):
     produce_mapping_and_download_files(conf.db, conf.tax_sqlite, conf.out_species, conf.out_tax_mapping)
 
 
+def _iter_protein_entries(db, chunk_size=500_000):
+    """Yield :class:`~pyoma.browser.models.ProteinEntry` for every protein in the database.
+
+    Reads the entries table in chunks of `chunk_size` rows so only a small
+    number of raw numpy rows live in Python at any one time.  Each row is
+    passed directly to ProteinEntry, so the entry fields are already loaded —
+    only lazily accessed properties (sequence, exons, …) touch the disk later.
+    """
+    prot_tab = db.db.get_node("/Protein/Entries")
+    xref_tab = db.db.get_node("/XRef")
+    src_enum = xref_tab.get_enum("XRefSource")
+    sourceCode = src_enum["SourceID"]
+
+    n = len(prot_tab)
+    for start in range(0, n, chunk_size):
+        prot_chunk = prot_tab[start : start + chunk_size]
+        cond_vars = {
+            "enr_min": prot_chunk["EntryNr"].min(),
+            "enr_max": prot_chunk["EntryNr"].max(),
+            "sourceCode": sourceCode,
+        }
+        prot_chunk_xrefs = {
+            row["EntryNr"]: row["XRefId"].decode("utf-8")
+            for row in xref_tab.where(
+                f"(EntryNr >= enr_min) & (EntryNr <= enr_max) & (XRefSource == sourceCode)", condvars=cond_vars
+            )
+        }
+
+        for row in prot_chunk:
+            yield ProteinEntry(db, row), prot_chunk_xrefs[row["EntryNr"]]
+
+
+def _write_fasta_record(fh, header, seq, line_width=80):
+    fh.write(f">{header}\n")
+    for i in range(0, len(seq), line_width):
+        fh.write(seq[i : i + line_width])
+        fh.write("\n")
+
+
+def _format_main_isoform(prot):
+    return "self" if prot.is_main_isoform else prot.get_main_isoform().omaid
+
+
+def dump_sequences_and_protein_annotations(conf):
+    with Database(conf.db) as db:
+        with ExitStack() as stack:
+            prot_fh = stack.enter_context(auto_open(conf.out_proteins, "wt")) if conf.out_proteins else None
+            cdna_fh = stack.enter_context(auto_open(conf.out_cdna, "wt")) if conf.out_cdna else None
+            annot_fh = stack.enter_context(auto_open(conf.out_annotations, "wt")) if conf.out_annotations else None
+
+            if prot_fh:
+                logger.info("writing protein sequences to %s", conf.out_proteins)
+            if cdna_fh:
+                logger.info("writing cDNA sequences to %s", conf.out_cdna)
+            if annot_fh:
+                logger.info("writing protein annotations to %s", conf.out_annotations)
+                annot_fh.write(
+                    "# Dump of protein annotations (taken from original genome source, except for\n"
+                    '# "MainIsoform", which is the splicing form that has the most homologous matches).\n'
+                    "#   Note: MainIsoform=='self' indicates that this protein is OMA's main isoform,\n"
+                    "#         otherwise it is an OMA ID of the main isoform.\n"
+                    "# Format: OMA ID\tOriginal ID\tChromosome/Scaffold\tLocation\tMainIsoform\tDescription\n"
+                )
+
+            for prot, src_xref in _iter_protein_entries(db):
+                if prot_fh is not None:
+                    seq = prot.sequence
+                    if seq:
+                        _write_fasta_record(prot_fh, prot.omaid, seq)
+                if cdna_fh is not None:
+                    cdna = prot.cdna
+                    if cdna:
+                        _write_fasta_record(cdna_fh, prot.omaid, cdna)
+                if annot_fh is not None:
+                    annot_fh.write(
+                        f"{prot.omaid}\t{src_xref}\t{prot.chromosome}\t"
+                        f"{prot.exons}\t{_format_main_isoform(prot)}\t{prot.description}\n"
+                    )
+
+
 def parse_command_line_args():
     parser = ArgumentParser(description="Dump various files from the OMA database")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
@@ -132,6 +214,17 @@ def parse_command_line_args():
     species_parser.add_argument(
         "--out-tax-mapping", required=True, help="Path where the GTDB / NCBI taxonomy mapping is stored as pickle file."
     )
+
+    seq_parser = subparsers.add_parser(
+        "sequences",
+        help="Dump protein/cDNA sequences as FASTA and protein annotations as TSV",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    seq_parser.set_defaults(func=dump_sequences_and_protein_annotations)
+    seq_parser.add_argument("--db", required=True, help="Path to database")
+    seq_parser.add_argument("--out-proteins", help="Output path for protein sequences in FASTA format")
+    seq_parser.add_argument("--out-cdna", help="Output path for cDNA sequences in FASTA format")
+    seq_parser.add_argument("--out-annotations", help="Output path for protein annotations in TSV format")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

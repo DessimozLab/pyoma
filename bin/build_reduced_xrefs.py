@@ -21,5 +21,5 @@ if __name__ == "__main__":
     if conf.db == conf.out:
         raise Exception("db and out parameters must be different")
 
-    pyoma.browser.xref_contrib.reduce_xrefs(conf.db, conf.out, nr_procs=conf.nr_procs)
+    pyoma.browser.xref_contrib.reduce_xrefs(conf.db, outpath=conf.out, nr_procs=conf.nr_procs)
     print("done... bye bye")

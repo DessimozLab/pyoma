@@ -23,7 +23,7 @@ dependencies = [
     "datasketch",
     "ete3",
     "networkx",
-    "property_manager"
+    "property_manager",
 ]
 
 [project.optional-dependencies]
@@ -34,7 +34,7 @@ create_db = [
     "scikit-fuzzy",
     "pyham",
     "omataxonomy",
-    "familyanalyzer"
+    "mpire",
 ]
 enrichment = [
     "plotly",
@@ -52,6 +52,7 @@ test = ["pytest"]
 
 [project.scripts]
 oma-build = "pyoma.browser.build.main:build_database"
+oma-dump  = "pyoma.browser.build.dump:dump_files"
 
 
 [tool.setuptools.packages.find]

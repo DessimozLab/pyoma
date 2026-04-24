@@ -706,7 +706,12 @@ class TaxonomyTestInternalLevelSpecies(unittest.TestCase):
     <sciname> (disambiguate <code>) leaf."""
 
     taxtab = numpy.array(
-        [(10, 0, b"Root", 30), (20, 10, b"Outgroup", 25), (30, 10, b"A", 10), (40, 30, b"B", 5)],
+        [
+            (10, 0, b"Root", False, 30),
+            (20, 10, b"Outgroup", False, 25),
+            (30, 10, b"A", False, 10),
+            (40, 30, b"B", True, 5),
+        ],
         dtype=tables.dtype_from_descr(tablefmt.TaxonomyTable),
     )
 
@@ -918,7 +923,7 @@ class LucaWithNegTaxIDGenomeTaxonomyTests(LucaBasedTaxonomyTests):
         taxtab = _get_taxtab()
         taxtab = numpy.append(
             taxtab,
-            numpy.array([(-2, 451864, b"Some Random Genome", 352)], dtype=taxtab.dtype),
+            numpy.array([(-2, 451864, b"Some Random Genome", False, 352)], dtype=taxtab.dtype),
         )
         self.tax = Taxonomy(taxtab)
         self.nr_species = 31

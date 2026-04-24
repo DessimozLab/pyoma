@@ -2396,6 +2396,9 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
                             nr_gains += 1
                     changes["gained"] = nr_gains
                     node["nr_genes"] = nr_genes
+                    node["nr_proteins"] = int(g["TotEntries"])
+                    node["last_updated"] = time.strftime("%Y-%b-%d", time.localtime(float(g["Date"])))
+                    node["release"] = g["Release"].decode()
                 if syn_graph is not None:
                     # Filter nodes with completeness_score >= alpha
                     filtered_nodes = [

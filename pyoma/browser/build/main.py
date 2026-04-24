@@ -333,6 +333,7 @@ def gen_aux_files(conf):
             "name": g.sciname,
             "last_updated": g.modification_date("%b %d, %Y"),
             "nr_proteins": g.nr_entries,
+            "nr_genes": g.nr_genes,
             "source": g.release,
             "taxid": g.ncbi_taxon_id,
         }

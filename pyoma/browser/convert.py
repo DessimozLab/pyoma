@@ -2385,7 +2385,7 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
                     # dealing with an extent species, special way to assess gains, based on
                     # HOG singletons that are main isoforms
                     assert changes["gained"] == 0
-                    g = numpy.extract(gs["UniProtSpeciesCode"] == node["id"].encode("utf-8"), gs)[0]
+                    g = numpy.extract(gs["UniProtSpeciesCode"] == node["code"].encode("utf-8"), gs)[0]
                     query_main_iso_of_genome = "(EntryNr > {}) & (EntryNr <= {}) & ((AltSpliceVariant == 0) | (AltSpliceVariant == EntryNr))".format(
                         g["EntryOff"], g["EntryOff"] + g["TotEntries"]
                     )

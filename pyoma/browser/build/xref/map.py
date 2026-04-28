@@ -7,7 +7,7 @@ import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Queue
 
-from typing import Mapping, Set, Union, List, Tuple, Callable
+from typing import Mapping, Set, Union, List, Tuple, Callable, Generator
 import logging
 from logging.handlers import QueueListener, QueueHandler
 
@@ -17,7 +17,6 @@ import pandas as pd
 import tables
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
-from tqdm import tqdm
 
 from ...db import SequenceSearch
 from ...db import Database, OmaIdMapper
@@ -461,7 +460,7 @@ class UniProtKBCrossRefsExtractor(CrossRefsExtractor):
         self.key_map = {k: self.storer.source_enum[v] for k, v in key_map.items()}
         return self
 
-    def iter_gene_names(self, annotations: Mapping) -> List[Tuple[int, str]]:
+    def iter_gene_names(self, annotations: Mapping) -> Generator[Tuple[int, str]]:
         """extract the gene names (Name, Synonyms, OrderedLocusNames, ORFNames)"""
         try:
             gene_names = annotations["gene_name"]
@@ -475,6 +474,7 @@ class UniProtKBCrossRefsExtractor(CrossRefsExtractor):
                     continue
                 value = [value] if isinstance(value, str) else value
                 for val in value:
+                    val = val.partition("{ECO:")[0].strip()
                     yield typ, val
 
     def iter_parsed_description(self, desc: str):

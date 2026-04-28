@@ -934,6 +934,7 @@ class DarwinExporter(object):
         if unknown:
             raise ValueError(f"Unknown XRefSource(s): {unknown}. Valid: {list(source_enum._names)}")
         canonical_sources = [source_enum[z] for z in xrefsource_order]
+        swissprot_idx = canonical_sources.index(source_enum["UniProtKB/SwissProt"])  # used to select name, not acc
         max_acceptable_verif_value = xrefs.get_enum("Verification")["unchecked"]
         current_xref = (1000, "")
         current_protein = None
@@ -950,7 +951,9 @@ class DarwinExporter(object):
                 current_xref = (1000, b"")
             try:
                 rank = canonical_sources.index(xref["XRefSource"])
-                if rank < current_xref[0]:
+                if rank < current_xref[0] or (
+                    current_xref[0] == rank and rank == swissprot_idx and b"_" in xref["XRefId"]
+                ):
                     current_xref = (rank, xref["XRefId"])
             except ValueError:
                 pass

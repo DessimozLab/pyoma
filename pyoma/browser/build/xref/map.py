@@ -460,7 +460,7 @@ class UniProtKBCrossRefsExtractor(CrossRefsExtractor):
         self.key_map = {k: self.storer.source_enum[v] for k, v in key_map.items()}
         return self
 
-    def iter_gene_names(self, annotations: Mapping) -> Generator[Tuple[int, str]]:
+    def iter_gene_names(self, annotations: Mapping) -> Generator[Tuple[int, str], None, None]:
         """extract the gene names (Name, Synonyms, OrderedLocusNames, ORFNames)"""
         try:
             gene_names = annotations["gene_name"]

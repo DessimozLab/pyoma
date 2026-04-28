@@ -309,6 +309,10 @@ def build_profiles(conf):
 
 def store_summary_info(conf):
     with DBBuilder(conf.db) as db:
+        if conf.canonical_id_source != ["SourceAC"]:
+            db.add_canonical_id(xrefsource_order=conf.canonical_id_source)
+        else:
+            logger.info("Using existing canonical ids (SourceAC) in database.")
         db.update_summary_stats()
         db.add_hog_domain_prevalence()
         db.add_group_metadata()
@@ -658,6 +662,15 @@ def parse_command_line_args():
     update_summary_parser.set_defaults(func=store_summary_info)
     update_summary_parser.add_argument(
         "--db", required=True, help="Path to database hdf5 database. This file will be modified!"
+    )
+    update_summary_parser.add_argument(
+        "--canonical-id-source",
+        nargs="+",
+        metavar="SOURCE",
+        default=None,
+        dest="canonical_id_source",
+        help="Ordered list of XRefSources for CanonicalId selection (highest priority first). "
+        "Defaults to the built-in order (UniProtKB/SwissProt, UniProtKB/TrEMBL, ...).",
     )
 
     hogmap_lsh_parser = subparsers.add_parser(

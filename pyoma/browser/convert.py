@@ -907,61 +907,63 @@ class DarwinExporter(object):
         domprev_tab = self.h5.get_node("/HOGAnnotations/DomainArchPrevalence")
         create_index_for_columns(domprev_tab, "Fam")
 
-    def _iter_canonical_xref(self):
-        """extract one canonical xref id for each protein.
+    DEFAULT_XREFSOURCE_ORDER = (
+        "UniProtKB/SwissProt",
+        "UniProtKB/TrEMBL",
+        "Ensembl Protein",
+        "Ensembl Gene",
+        "FlyBase",
+        "WormBase",
+        "EnsemblGenomes",
+        "RefSeq",
+        "SourceAC",
+    )
 
-        We take the first valid xref per gene with the ordering of xrefsources
-        as given in the xrefsource_order."""
-        xrefsource_order = (
-            "UniProtKB/SwissProt",
-            "UniProtKB/TrEMBL",
-            "Ensembl Gene",
-            "Ensembl Protein",
-            "FlyBase",
-            "WormBase",
-            "EnsemblGenomes",
-            "RefSeq",
-            "SourceID",
-        )
+    def _iter_canonical_xref(self, xrefsource_order=None):
+        """Extract one canonical xref id per protein.
 
-        xrefs = self.h5.get_node("/XRef")
+        Yields (EntryNr, XRefId) using the priority order given by xrefsource_order
+        (highest priority first). Defaults to DEFAULT_XREFSOURCE_ORDER."""
+        if xrefsource_order is None:
+            xrefsource_order = self.DEFAULT_XREFSOURCE_ORDER
+
+        self.logger.info(f"using priority order: {xrefsource_order}")
+        xrefs: tables.Table = self.h5.get_node("/XRef")
         source_enum = xrefs.get_enum("XRefSource")
+        unknown = [s for s in xrefsource_order if s not in source_enum]
+        if unknown:
+            raise ValueError(f"Unknown XRefSource(s): {unknown}. Valid: {list(source_enum._names)}")
         canonical_sources = [source_enum[z] for z in xrefsource_order]
         max_acceptable_verif_value = xrefs.get_enum("Verification")["unchecked"]
+        current_xref = (1000, "")
         current_protein = None
-        past_proteins = set([])
         for xref in xrefs:
             if xref["Verification"] > max_acceptable_verif_value:
                 continue
             if xref["EntryNr"] != current_protein:
-                if current_protein:
-                    past_proteins.add(current_protein)
-                    yield (current_protein, current_xref[1])
-                current_protein = xref["EntryNr"]
-                current_xref = (1000, b"")  # init with a sentinel
-                if current_protein in past_proteins:
+                if current_protein is not None:
+                    yield current_protein, current_xref[1]
+                enr = xref["EntryNr"]
+                if current_protein is not None and enr <= current_protein:
                     raise DataImportError("Data in /XRef is not grouped w.r.t. EntryNr")
+                current_protein = enr
+                current_xref = (1000, b"")
             try:
                 rank = canonical_sources.index(xref["XRefSource"])
                 if rank < current_xref[0]:
                     current_xref = (rank, xref["XRefId"])
             except ValueError:
                 pass
-        if current_protein:
-            yield (current_protein, current_xref[1])
+        if current_protein is not None:
+            yield current_protein, current_xref[1]
 
-    def add_canonical_id(self):
-        """add one canonical xref id to the /Protein/Entries table."""
+    def add_canonical_id(self, xrefsource_order=None):
+        """Add one canonical xref id to the /Protein/Entries table."""
         self.logger.info("adding canonical ids for each protein...")
-        prot_tab = self.h5.get_node("/Protein/Entries")
+        prot_tab: tables.Table = self.h5.get_node("/Protein/Entries")
         canonical_ids = numpy.chararray(shape=(len(prot_tab),), itemsize=prot_tab.cols.CanonicalId.dtype.itemsize)
-        for eNr, canonical_id in self._iter_canonical_xref():
-            row_nr = eNr - 1
-            row = prot_tab[row_nr]
-            if row["EntryNr"] != eNr:
-                self.logger.warn("Entries table not properly sorted: {}, expected {}".format(row["EntryNr"], eNr))
-                raise DataImportError("Entries table not properly sorted")
-            canonical_ids[row_nr] = canonical_id
+        for eNr, canonical_id in self._iter_canonical_xref(xrefsource_order):
+            canonical_ids[eNr - 1] = canonical_id
         prot_tab.modify_column(0, len(prot_tab), 1, column=canonical_ids, colname="CanonicalId")
         prot_tab.flush()
 

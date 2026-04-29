@@ -1087,30 +1087,70 @@ class DarwinExporter(object):
         self.logger.info("Building gene ontology annotations summary info")
         go_tab = self.h5.get_node("/Annotations/GeneOntology")
         prot_tab = self.h5.get_node("/Protein/Entries")
-        exp_codes = frozenset([b"EXP", b"IDA", b"IPI", b"IMP", b"IGI", b"IEP"])
+        exp_codes = [b"EXP", b"IDA", b"IPI", b"IMP", b"IGI", b"IEP"]
         cnts = collections.Counter()
-        cur_enr = None
-        for (enr, term), row_iter in itertools.groupby(go_tab, operator.itemgetter("EntryNr", "TermNr")):
-            evidences = {row["Evidence"] for row in row_iter}
-            is_iea = b"IEA" in evidences
-            evidences.discard(b"IEA")
-            is_exp = not exp_codes.isdisjoint(evidences)
-            is_cur = len(evidences.difference(exp_codes)) > 0
-            cnts["annotations_any"] += 1
-            if is_exp:
-                cnts["annotations_exp"] += 1
-            if is_cur:
-                cnts["annotations_currated"] += 1
-            if is_iea:
-                cnts["annotations_iea"] += 1
-            if cur_enr != enr:
-                e = next(prot_tab.where("EntryNr == {}".format(enr))).fetch_all_fields()
-                cnts["proteins_any"] += 1
-                if e["OmaGroup"] != 0:
-                    cnts["protein_OmaGroup"] += 1
-                if len(e["OmaHOG"]) > 0:
-                    cnts["protein_HOG"] += 1
-                cur_enr = enr
+
+        # ProteinTable is dense, sorted, 1-indexed: row i holds EntryNr == i+1.
+        # Build O(1) lookup arrays directly by row position; no need to read EntryNr.
+        max_enr = prot_tab.nrows  # EntryNr runs 1..nrows
+        oma_group_arr = numpy.empty(max_enr + 1, dtype=numpy.uint32)
+        oma_group_arr[1:] = prot_tab.read(field="OmaGroup")  # ~100 MB
+        has_hog_arr = numpy.zeros(max_enr + 1, dtype=bool)
+        hog_chunk = 200_000
+        for s in range(0, max_enr, hog_chunk):
+            has_hog_arr[s + 1 : s + 1 + hog_chunk] = prot_tab.read(s, s + hog_chunk, field="OmaHOG") != b""
+        seen_enrs = numpy.zeros(max_enr + 1, dtype=bool)
+
+        # Process GO table in column-wise chunks (skips the 255-byte Reference column).
+        # Carry a tail across chunk boundaries so no (EntryNr, TermNr) group is split.
+        go_chunk = 5_000_000
+        n_go = go_tab.nrows
+        tail = {k: numpy.empty(0, dtype=dt) for k, dt in (("enr", numpy.uint32), ("tnr", numpy.uint32), ("evid", "S3"))}
+
+        for start in range(0, n_go, go_chunk):
+            stop = min(start + go_chunk, n_go)
+            enr = numpy.concatenate([tail["enr"], go_tab.read(start, stop, field="EntryNr")])
+            tnr = numpy.concatenate([tail["tnr"], go_tab.read(start, stop, field="TermNr")])
+            evid = numpy.concatenate([tail["evid"], go_tab.read(start, stop, field="Evidence")])
+
+            pair_change = numpy.empty(len(enr), dtype=bool)
+            pair_change[0] = True
+            pair_change[1:] = (enr[1:] != enr[:-1]) | (tnr[1:] != tnr[:-1])
+            group_starts = numpy.where(pair_change)[0]
+
+            if stop < n_go:
+                cut = int(group_starts[-1])
+                tail = {"enr": enr[cut:].copy(), "tnr": tnr[cut:].copy(), "evid": evid[cut:].copy()}
+                enr, evid = enr[:cut], evid[:cut]
+                group_starts = group_starts[:-1]
+            else:
+                tail = {
+                    k: numpy.empty(0, dtype=dt)
+                    for k, dt in (("enr", numpy.uint32), ("tnr", numpy.uint32), ("evid", "S3"))
+                }
+
+            if len(group_starts) == 0:
+                continue
+
+            is_iea = evid == b"IEA"
+            is_exp = numpy.isin(evid, exp_codes)
+            is_cur = ~is_iea & ~is_exp
+
+            cnts["annotations_any"] += len(group_starts)
+            cnts["annotations_iea"] += int(
+                numpy.add.reduceat(is_iea.view(numpy.uint8), group_starts).astype(bool).sum()
+            )
+            cnts["annotations_exp"] += int(
+                numpy.add.reduceat(is_exp.view(numpy.uint8), group_starts).astype(bool).sum()
+            )
+            cnts["annotations_currated"] += int(
+                numpy.add.reduceat(is_cur.view(numpy.uint8), group_starts).astype(bool).sum()
+            )
+            seen_enrs[enr[group_starts]] = True
+
+        cnts["proteins_any"] = int(seen_enrs.sum())
+        cnts["protein_OmaGroup"] = int(numpy.sum(oma_group_arr[seen_enrs] != 0))
+        cnts["protein_HOG"] = int(has_hog_arr[seen_enrs].sum())
         return cnts
 
     def count_xref_summary(self):

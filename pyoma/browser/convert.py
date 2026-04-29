@@ -1061,9 +1061,12 @@ class DarwinExporter(object):
         dom_cov_hist_tab = self.create_table_if_needed(
             summary, "Domain_coverage_hist", drop_data=True, obj=cov_hist_data
         )
-        dom_cov_hist_tab.set_attr("frac_genes_w_domain", len(cov_fracs[cov_fracs > 0]) / len(cov_fracs))
+        fracs_w_domain = cov_fracs[cov_fracs > 0]
+        dom_cov_hist_tab.set_attr("frac_genes_w_domain", len(fracs_w_domain) / len(cov_fracs))
         dom_cov_hist_tab.set_attr("mean_coverage_overall", numpy.mean(cov_fracs))
-        dom_cov_hist_tab.set_attr("mean_coverage_w_domain", numpy.mean(cov_fracs[cov_fracs > 0]))
+        dom_cov_hist_tab.set_attr(
+            "mean_coverage_w_domain", numpy.mean(fracs_w_domain) if len(fracs_w_domain) > 0 else 0.0
+        )
 
     def collect_goterm_freqs(self):
         self.logger.info("Computing gene ontology annotations term frequencies")
@@ -1221,7 +1224,7 @@ class DarwinExporter(object):
         # sum all parts of each domain region and store total length in DLen column
         domains = domains.assign(DLen=domains["Coords"].apply(dlen))
         # sum over all domains per protein
-        cov_sites = domains.groupby("EntryNr").agg({"DLen": sum})
+        cov_sites = domains.groupby("EntryNr").agg({"DLen": "sum"})
         return cov_sites
 
     def add_domain_covered_sites_counts(self):

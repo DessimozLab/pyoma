@@ -2313,24 +2313,37 @@ class PerGenomeOMAGroupAuxDataAdder(object):
         gs = self.h5.get_node("/Genome").read()
         Goff = gs["EntryOff"]
         etab = self.h5.get_node("/Protein/Entries")
-        shared_ogs = numpy.zeros((len(gs), len(gs)), dtype="i4")
-        in_groups = numpy.zeros(len(gs), dtype="i4")
+        n_genomes = len(gs)
+        shared_ogs = numpy.zeros((n_genomes, n_genomes), dtype="i4")
 
-        def enr_to_gnr(entry_nr):
-            return Goff.searchsorted(entry_nr, side="left") - 1
+        entry_nrs, grp_ids = self.get_group_members(etab)
 
-        grp_members = self.get_group_members(etab)
-        for grp, memb in tqdm(grp_members.items()):
-            t0 = time.time()
-            gnrs = collections.Counter(map(enr_to_gnr, memb))
-            for gn, cnts in gnrs.items():
-                in_groups[gn] += cnts
-            for g1, g2 in itertools.combinations(gnrs, 2):
-                shared_ogs[g1, g2] += 1
-                shared_ogs[g2, g1] += 1
-            common.package_logger.info(
-                "grp {} with {} members took {:.1f}msec".format(grp, len(memb), 1000 * (time.time() - t0))
-            )
+        # Map all entry numbers to genome numbers at once
+        gnrs = Goff.searchsorted(entry_nrs, side="left").astype("i4") - 1
+
+        # in_groups: total proteins in any group per genome — one bincount replaces the Counter loop
+        in_groups = numpy.bincount(gnrs, minlength=n_genomes).astype("i4")
+
+        # Sort by group id so we can slice out each group's genome numbers with a boundary scan
+        order = numpy.argsort(grp_ids, kind="stable")
+        grp_ids_s = grp_ids[order]
+        gnrs_s = gnrs[order]
+
+        group_change = numpy.empty(len(grp_ids_s), dtype=bool)
+        group_change[0] = True
+        group_change[1:] = grp_ids_s[1:] != grp_ids_s[:-1]
+        group_starts = numpy.where(group_change)[0]
+        group_ends = numpy.concatenate((group_starts[1:], [len(grp_ids_s)]))
+
+        for s, e in tqdm(zip(group_starts, group_ends), total=len(group_starts)):
+            unique_gnrs = numpy.unique(gnrs_s[s:e])
+            if len(unique_gnrs) < 2:
+                continue
+            # triu_indices enumerates all unordered pairs without a Python combinations loop
+            ii, jj = numpy.triu_indices(len(unique_gnrs), k=1)
+            shared_ogs[unique_gnrs[ii], unique_gnrs[jj]] += 1
+            shared_ogs[unique_gnrs[jj], unique_gnrs[ii]] += 1
+
         self.shared_ogs = shared_ogs
         self.in_groups = in_groups
 
@@ -2348,21 +2361,30 @@ class PerGenomeOMAGroupAuxDataAdder(object):
             self.h5.create_array(root, node_full_name, obj=data)
 
     def get_group_members(self, etab):
-        grp_members = collections.defaultdict(list)
-        for row in etab.where("OmaGroup > 0"):
-            grp_members[row["OmaGroup"]].append(row["EntryNr"])
-        return grp_members
+        # Entry table is dense 1-indexed: entry nr == row index + 1
+        oma_groups = etab.read(field="OmaGroup")
+        mask = oma_groups > 0
+        entry_nrs = numpy.where(mask)[0].astype(numpy.uint32) + 1
+        return entry_nrs, oma_groups[mask]
 
 
 class PerGenomeHOGAuxAdder(PerGenomeOMAGroupAuxDataAdder):
     node_postfix = "hog"
 
     def get_group_members(self, etab):
-        grp_members = collections.defaultdict(list)
-        for row in etab.where('OmaHOG != b""'):
-            fam = int(hog_re.match(row["OmaHOG"]).group("fam"))
-            grp_members[fam].append(row["EntryNr"])
-        return grp_members
+        # OmaHOG is 255 B/row so read in chunks rather than loading the full column
+        n_rows = etab.nrows
+        chunk_size = 200_000
+        all_enrs, all_fams = [], []
+        for start in range(0, n_rows, chunk_size):
+            stop = min(start + chunk_size, n_rows)
+            hogs = etab.read(start, stop, field="OmaHOG")
+            mask = hogs != b""
+            if not mask.any():
+                continue
+            all_fams.append(numpy.array([int(hog_re.match(h).group("fam")) for h in hogs[mask]], dtype=numpy.uint32))
+            all_enrs.append(numpy.arange(start + 1, stop + 1, dtype=numpy.uint32)[mask])
+        return numpy.concatenate(all_enrs), numpy.concatenate(all_fams)
 
 
 class InvarianceException(Exception):

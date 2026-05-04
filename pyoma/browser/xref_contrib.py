@@ -77,7 +77,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         grp = self.xref_h5.create_group("/", "XRefIndex", title="auxiliary lookup tables with deduplicated xrefs")
         self.xref_idx = self.xref_h5.create_table(
             grp,
-            "XRefs",
+            "XRef_reduced",
             description=xref_dtype,
             chunkshape=(16384,),
         )
@@ -91,7 +91,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         self.xref_h5.close()
         self.xref_h5 = tables.open_file(self.outfile, "w", filters=tables.Filters(7, complib="blosc2"))
         xref_idx = self.xref_h5.create_table(
-            "/XRefIndex", "XRefs", obj=data, expectedrows=len(data), createparents=True
+            "/XRefIndex", "XRef_reduced", obj=data, expectedrows=len(data), createparents=True
         )
         xref_idx.colinstances["XRefId"].create_csindex()
         self.xref_idx = xref_idx

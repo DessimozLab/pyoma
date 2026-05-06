@@ -64,6 +64,8 @@ class LSHBuilder(object):
             self.h5 = self.init_hash_table_file(hash_file)
         self.hashes: tables.EArray = self.h5.get_node("/hashes")
         self.hogids: tables.EArray = self.h5.get_node("/hogids")
+        self.hash_buffer = []
+        self.hogid_buffer = []
         self.threshold = threshold
         self._readonly = mode == "r"
 
@@ -107,20 +109,23 @@ class LSHBuilder(object):
             lsh_obj_arr.append(numpy.frombuffer(lsh_bytes, dtype=numpy.uint8))
             lsh_obj_arr.append(numpy.frombuffer(hogid2row_bytes, dtype=numpy.uint8))
             lsh_obj_arr.flush()
-            self.hashes.flush()
-            self.hogids.flush()
+            self.flush()
         self.h5.close()
 
     def add_minhashes(self, it):
-        hash_buffer = []
-        hogid_buffer = []
         for hogid, minhash in it:
-            hash_buffer.append(minhash.digest())
-            hogid_buffer.append(hogid)
-        self.hashes.append(hash_buffer)
-        self.hogids.append(hogid_buffer)
-        self.hashes.flush()
-        self.hogids.flush()
+            self.hash_buffer.append(minhash.digest())
+            self.hogid_buffer.append(hogid)
+        if len(self.hash_buffer) > 10000:
+            self.flush()
+
+    def flush(self):
+        if self.hash_buffer:
+            self.hashes.append(self.hash_buffer)
+            self.hogids.append(self.hogid_buffer)
+            self.h5.flush()
+            self.hash_buffer.clear()
+            self.hogid_buffer.clear()
 
     def compute_lsh(self):
         lsh = MinHashLSH(threshold=self.threshold, num_perm=256)
@@ -156,11 +161,21 @@ def generator_of_unprocessed_fams(db_path, lsh_path=None):
         logger.info("Found %d unprocessed families", len(remaining))
         return remaining
 
+    def _sort_by_size_descending(db_path, fams):
+        with Database(db_path) as db:
+            try:
+                family_idx = db.get_hdf5_handle().get_node("/Protein/FamIndex/Lookup")
+                sizes = family_idx.col("count")
+                return sorted(fams, key=lambda f: sizes[f], reverse=True)
+            except tables.NoSuchNodeError:
+                logger.warning("FamIndex not available; processing families in default order")
+        return list(fams)
+
     if lsh_path is None or not os.path.exists(lsh_path):
         fams_to_process = range(1, _get_nr_families(db_path) + 1)
     else:
         fams_to_process = _load_unprocessed_fams(db_path, lsh_path)
-    return fams_to_process
+    return _sort_by_size_descending(db_path, fams_to_process)
 
 
 def hasher_worker_init(worker_state, db_path, log_conf):
@@ -211,26 +226,13 @@ def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
             worker_init=worker_init_,
             worker_exit=hash_worker_exit,
             worker_lifespan=10000,
-            chunk_size=100,
+            chunk_size=10,
             progress_bar=True,
         )
         for hashes in results:
             collector.add_minhashes(hashes.items())
+        collector.flush()
     collector.close()
-
-    # while True:
-    #     pipeline = Pipeline()
-    #     pipeline.add_stage(Stage(FamGenerator, nr_procs=1, fam_generator=fams_to_process))
-    #     pipeline.add_stage(Stage(HashWorker, nr_procs=nr_procs, db_path=db_path))
-    #     pipeline.add_stage(Stage(Collector, nr_procs=1, output_path=output_path))
-    #     print("setup pipeline, about to start it.")
-    #     pipeline.run()
-    #     print("finished with computing the MinHashLSH for {}".format(db_path))
-    #
-    #     fams_to_process = set(generator_of_unprocessed_fams(db_path, output_path))
-    #     if len(fams_to_process) == 0:
-    #         break
-    # print("for sure all families processes. we're done!")
 
 
 def compare_versions(output_file, target_path, *old_path):

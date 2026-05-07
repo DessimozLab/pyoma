@@ -7,6 +7,8 @@ import re
 import signal
 import time
 from functools import partial
+import random
+
 from tqdm import tqdm
 
 import numpy
@@ -169,7 +171,9 @@ def generator_of_unprocessed_fams(db_path, lsh_path=None):
                 sizes = family_idx.col("count")
                 return sorted(fams, key=lambda f: sizes[f], reverse=True)
             except tables.NoSuchNodeError:
-                logger.warning("FamIndex not available; processing families in default order")
+                logger.warning("FamIndex not available; processing families in random order")
+                fams = list(fams)
+                random.shuffle(fams)
         return list(fams)
 
     if lsh_path is None or not os.path.exists(lsh_path):

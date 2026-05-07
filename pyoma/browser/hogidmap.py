@@ -4,6 +4,7 @@ import logging
 import os
 import pickle
 import re
+import signal
 import time
 from functools import partial
 from tqdm import tqdm
@@ -178,11 +179,32 @@ def generator_of_unprocessed_fams(db_path, lsh_path=None):
     return _sort_by_size_descending(db_path, fams_to_process)
 
 
-def hasher_worker_init(worker_state, db_path, log_conf):
+class FamilyTimeoutError(Exception):
+    pass
+
+
+def hasher_worker_init(worker_state, db_path, log_conf, per_fam_timeout=1800):
     logging.basicConfig(level=log_conf["level"] + 5, format=log_conf["format"], datefmt=log_conf["datefmt"])
+    worker_state["db_path"] = db_path
     worker_state["db"] = Database(db_path)
     worker_state["hasher"] = HogHasher(worker_state["db"])
+    worker_state["per_fam_timeout"] = per_fam_timeout
     logger.info("initializing hasher worker %s", worker_state)
+
+
+def _reinit_worker_db(worker_state):
+    """Close and reopen the database after a timeout interruption.
+
+    SIGALRM can leave the HDF5 file handle in an inconsistent state, so we
+    must replace it before the worker picks up the next family.
+    """
+    try:
+        worker_state["db"].close()
+    except Exception:
+        pass
+    worker_state["db"] = Database(worker_state["db_path"])
+    worker_state["hasher"] = HogHasher(worker_state["db"])
+    logger.info("Worker database connection reinitialized after timeout")
 
 
 def hash_worker_exit(worker_state):
@@ -195,13 +217,29 @@ def hash_worker_exit(worker_state):
 def hash_worker_fn(worker_state, fam):
     logger.debug("computing hashes for family %s", fam)
     t0 = time.time()
+    timeout = worker_state.get("per_fam_timeout", 1200)
+
+    def _timeout_handler(signum, frame):
+        raise FamilyTimeoutError(fam)
+
+    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+    signal.alarm(timeout)
     try:
         hashes = worker_state["hasher"].analyze_fam(fam)
+        signal.alarm(0)
         logger.debug("... done with fam %s. Took %f sec", fam, time.time() - t0)
         return hashes
+    except FamilyTimeoutError:
+        logger.warning("Skipping family %s: still running after %ds (likely PyTables index busy-loop)", fam, timeout)
+        _reinit_worker_db(worker_state)
+        return {}
     except Exception:
+        signal.alarm(0)
         logger.exception("Error processing family %s", fam)
         raise
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
 
 
 def get_logging_config():
@@ -215,24 +253,39 @@ def get_logging_config():
     return log_config
 
 
-def compute_minhashes_for_db(db_path, output_path, nr_procs=None):
+def compute_minhashes_for_db(db_path, output_path, nr_procs=None, per_fam_timeout=600):
+    """Compute minhashes for all HOG families in db_path.
+
+    per_fam_timeout: seconds before a stuck worker is interrupted and the family skipped.
+                     Addresses the PyTables busy-loop bug on databases without FamIndex.
+                     SIGALRM interrupts Python-level loops; C-level loops inside HDF5/numexpr
+                     are not interruptible this way and would require a SIGKILL watchdog.
+    """
     fams_to_process = generator_of_unprocessed_fams(db_path, output_path)
     collector = LSHBuilder(output_path, mode="a")
-    with WorkerPool(n_jobs=nr_procs, use_worker_state=True, keep_alive=True, start_method="spawn") as pool:
-        worker_init_ = partial(hasher_worker_init, db_path=db_path, log_conf=get_logging_config())
-        results = pool.imap_unordered(
-            hash_worker_fn,
-            fams_to_process,
-            worker_init=worker_init_,
-            worker_exit=hash_worker_exit,
-            worker_lifespan=10000,
-            chunk_size=10,
-            progress_bar=True,
-        )
-        for hashes in results:
-            collector.add_minhashes(hashes.items())
-        collector.flush()
-    collector.close()
+    try:
+        with WorkerPool(n_jobs=nr_procs, use_worker_state=True, keep_alive=True, start_method="spawn") as pool:
+            worker_init_ = partial(
+                hasher_worker_init,
+                db_path=db_path,
+                log_conf=get_logging_config(),
+                per_fam_timeout=per_fam_timeout,
+            )
+            results = pool.imap_unordered(
+                hash_worker_fn,
+                fams_to_process,
+                worker_init=worker_init_,
+                worker_exit=hash_worker_exit,
+                worker_lifespan=10000,
+                chunk_size=10,
+                progress_bar=True,
+            )
+            for hashes in results:
+                if hashes:
+                    collector.add_minhashes(hashes.items())
+            collector.flush()
+    finally:
+        collector.close()
 
 
 def compare_versions(output_file, target_path, *old_path):

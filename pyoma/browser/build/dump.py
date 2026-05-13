@@ -14,6 +14,8 @@ from .main import setup_logging
 from ..db import Database
 from ..models import ProteinEntry
 from ..build.taxonomy_alignment import produce_mapping_and_download_files
+from ..linkout import ncbi as ncbi_linkout
+from ..linkout import uniprot as uniprot_linkout
 from ...common import auto_open
 
 logger = logging.getLogger(__name__)
@@ -177,6 +179,18 @@ def dump_sequences_and_protein_annotations(conf):
                     )
 
 
+def dump_ncbi_linkout(conf):
+    if not conf.skip_find:
+        ncbi_linkout.prepare_linkout_files(conf.out, conf.db)
+    if conf.push:
+        ncbi_linkout.copy_to_ncbi(conf.out, conf.password)
+
+
+def dump_uniprot_crosslinks(conf):
+    with auto_open(conf.out, "wt", encoding="utf-8", newline="") as fout:
+        uniprot_linkout.write_omagrp_xref_map(fout, conf.db)
+
+
 def parse_command_line_args():
     parser = ArgumentParser(description="Dump various files from the OMA database")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
@@ -225,6 +239,27 @@ def parse_command_line_args():
     seq_parser.add_argument("--out-proteins", help="Output path for protein sequences in FASTA format")
     seq_parser.add_argument("--out-cdna", help="Output path for cDNA sequences in FASTA format")
     seq_parser.add_argument("--out-annotations", help="Output path for protein annotations in TSV format")
+
+    ncbi_parser = subparsers.add_parser(
+        "ncbi-linkout",
+        help="Generate and optionally push NCBI LinkOut XML files",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    ncbi_parser.set_defaults(func=dump_ncbi_linkout)
+    ncbi_parser.add_argument("--db", required=True, help="Path to the HDF5 database")
+    ncbi_parser.add_argument("--out", default="./", help="Folder where output XML files are written")
+    ncbi_parser.add_argument("--skip-find", action="store_true", help="Skip generating the linkout files")
+    ncbi_parser.add_argument("--push", action="store_true", help="Push XML files to NCBI FTP host")
+    ncbi_parser.add_argument("-p", "--password", help="Password for the NCBI FTP account")
+
+    uniprot_parser = subparsers.add_parser(
+        "uniprot-crosslinks",
+        help="Generate UniProtKB → OMA group crosslink mapping",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    uniprot_parser.set_defaults(func=dump_uniprot_crosslinks)
+    uniprot_parser.add_argument("--db", required=True, help="Path to the HDF5 database")
+    uniprot_parser.add_argument("--out", default="./UniProtKB-OMA.txt.gz", help="Output file for the crosslink mapping")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

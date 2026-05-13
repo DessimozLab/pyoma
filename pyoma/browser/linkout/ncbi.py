@@ -1,3 +1,5 @@
+"""Generate external data and crosslinks for NCBI LinkOut."""
+
 import collections
 import operator
 import os
@@ -8,13 +10,9 @@ import ftplib
 
 from tqdm import tqdm
 from lxml import etree
-from .db import Database
+from ..db import Database
 
 logger = logging.getLogger(__name__)
-
-"""Module to generate external data and crosslinks for NCBI.
-
-"""
 
 
 class NCBILinkOutXML(object):
@@ -328,4 +326,4 @@ def copy_to_ncbi(dir, password, host="ftp-private.ncbi.nlm.nih.gov", user="omabr
                 with open(os.path.join(dir, fname), "rb") as fh:
                     cmd = "STOR {}".format(fname)
                     session.storbinary(cmd, fp=fh)
-                logger.info("finished transfering " + fname)
+                logger.info("finished transferring " + fname)

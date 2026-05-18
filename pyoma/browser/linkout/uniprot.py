@@ -31,9 +31,10 @@ class OmaGroupMapper(object):
 def iter_uniprot_entries(xref_tab):
     enum = xref_tab.get_enum("XRefSource")
     tr = enum["UniProtKB/TrEMBL"]
-    for row in xref_tab:
-        if row["XRefSource"] == tr:
-            yield int(row["EntryNr"]), row["XRefId"].decode()
+    for row in xref_tab.where(f"XRefSource <= {tr}"):
+        if b"_" in row["XRefId"]:
+            continue
+        yield int(row["EntryNr"]), row["XRefId"].decode()
 
 
 def iter_uniprot_omagrp_mapping(hdf5):

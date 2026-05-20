@@ -2327,6 +2327,12 @@ class PerGenomeOMAGroupAuxDataAdder(object):
         # in_groups: total proteins in any group per genome — one bincount replaces the Counter loop
         in_groups = numpy.bincount(gnrs, minlength=n_genomes).astype("i4")
 
+        if len(grp_ids) == 0:
+            # no OMA Groups stored.
+            self.in_groups = in_groups
+            self.shared_ogs = shared_ogs
+            return
+
         # Sort by group id so we can slice out each group's genome numbers with a boundary scan
         order = numpy.argsort(grp_ids, kind="stable")
         grp_ids_s = grp_ids[order]

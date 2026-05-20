@@ -27,8 +27,9 @@ jobs:
         pip install .[create_db,enrichment]
     - name: Download test database
       run: |
-        curl https://zoo.cs.ucl.ac.uk/annex/TestDb.h5 -o TestDb.h5
-        curl https://zoo.cs.ucl.ac.uk/annex/TestDb.h5.idx -o TestDb.h5.idx
+        curl -L --fail https://zenodo.org/records/20310433/files/TestDb.h5?download=1 -o tests/browser/TestDb.h5
+        curl -L --fail https://zenodo.org/records/20310433/files/TestDb.h5.idx?download=1 -o tests/browser/TestDb.h5.idx
+        ls -l tests/browser/TestDb.h5*
     - name: Check versions of installed libraries/systems
       run: python -c "import sys, tables; print(sys.version); tables.print_versions()"
     - name: Test with pytest

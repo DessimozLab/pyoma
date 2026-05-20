@@ -2587,7 +2587,7 @@ class SequenceSearch(object):
             low, high = entrynr_range
             mask_tax = (uniq_enrs >= low) & (uniq_enrs <= high)
         elif isinstance(entrynr_range, set):
-            mask_tax = numpy.isin(uniq_enrs, entrynr_range)
+            mask_tax = numpy.array([e in entrynr_range for e in uniq_enrs])
         else:
             raise TypeError("entrynr_range must be None, tuple, or set")
 

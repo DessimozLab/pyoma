@@ -97,9 +97,11 @@ class GOEnrichmentAnalysis(object):
                     b = study_n - study_count
                     c = pop_count - study_count
                     d = pop_n - pop_count - b
-
-                    p = fisher_exact([[a, b], [c, d]], alternative="greater")[1]
-                    yield (t, study_count, pop_count, study_entries, study_n, pop_n, p)
+                    try:
+                        p = fisher_exact([[a, b], [c, d]], alternative="greater")[1]
+                        yield (t, study_count, pop_count, study_entries, study_n, pop_n, p)
+                    except ValueError:
+                        logger.exception(f"fisher exact failed for a={a}, b={b}, c={c}, d={d}. Ignoring {t}")
 
         if correction is None:
             correction = "fdr_bh"

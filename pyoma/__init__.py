@@ -1,5 +1,7 @@
-__author__ = "Adrian Altenhoff"
-__version__ = "0.13.5"
+from importlib.metadata import version as lib_version
+
+_author__ = "Adrian Altenhoff"
+__version__ = lib_version("pyoma")
 
 
 def version():

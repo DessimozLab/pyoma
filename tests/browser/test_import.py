@@ -19,9 +19,13 @@ from pyoma.browser.convert import (
     DarwinExporter,
     compute_ortholog_types,
     load_tsv_to_numpy,
-    HogConverter,
 )
 from .test_db import find_path_to_test_db
+
+try:
+    import pytest
+except ImportError:
+    pytest = None
 
 
 def store_in_json(data, fn):
@@ -92,6 +96,8 @@ class ImportIntegrationBase(ImportDummyBase):
                 test_data_available = True
                 break
         if not test_data_available:
+            if pytest is not None:
+                pytest.skip("data not available")
             raise unittest.SkipTest("data not available")
         os.environ["DARWIN_BROWSERDATA_PATH"] = os.path.join(folder, "Test.Jul2014", "data")
 
@@ -282,45 +288,6 @@ class H5HelpersTests(ImportDummyBase):
         self.darwin_exporter.create_table_if_needed("/", "Example", obj=data, dump_data=False)
         res = self.darwin_exporter.h5.get_node("/Example").read()
         numpy.testing.assert_equal(res, expected)
-
-
-class HogConverterTest(unittest.TestCase):
-    orthoxml_file = os.path.join(os.path.dirname(__file__), "hog-example.orthoXML")
-
-    def setUp(self):
-        self.h5 = tables.open_file("test", "w", driver="H5FD_CORE", driver_core_backing_store=0)
-        self.h5.create_table(
-            "/",
-            "Entries",
-            tablefmt.ProteinTable,
-            obj=numpy.zeros(6, tables.dtype_from_descr(tablefmt.ProteinTable)),
-        )
-
-    def tearDown(self):
-        self.h5.close()
-
-    def test_extract_levels(self):
-        conv = HogConverter(self.h5.root.Entries)
-        levels = conv.convert_file(self.orthoxml_file)
-        self.assertEqual(9, len(levels), "levels is broken: {}".format(levels))
-        self.assertEqual(len(tables.dtype_from_descr(tablefmt.HOGsTable)), len(levels[0]))
-        mammalia = next((x for x in levels if x[2] == "Mammalia"), None)
-        self.assertAlmostEqual(1, mammalia[3], msg="CompletenessScore not what is expected")
-        self.assertEqual(1, mammalia[4], "ImpliedLosses was not read from input xml")
-        rodents = [x for x in levels if x[2] == "Rodents"]
-        self.assertEqual(2, len(rodents), "expect 2 subhogs at level of Rodents")
-        self.assertEqual([1, 0.5], [z[3] for z in rodents], "CompletenessScore does not match")
-
-    def test_set_release_char(self):
-        conv = HogConverter(self.h5.root.Entries, release_char="B")
-        levels = conv.convert_file(self.orthoxml_file)
-        self.assertTrue(all(map(lambda row: row[1].startswith("HOG:B0"), levels)))
-
-    def test_invalid_release_char(self):
-        for release_char in ("a", "AB", " "):
-            with self.subTest(release_char=release_char):
-                with self.assertRaises(ValueError):
-                    conv = HogConverter(self.h5.root.Entries, release_char=release_char)
 
 
 class ReadOnlyTestDbImporter(unittest.TestCase):

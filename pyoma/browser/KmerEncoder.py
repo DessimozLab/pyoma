@@ -45,14 +45,14 @@ class KmerEncoder(object):
                 self._prot[i] = self.digits[seq % self.digits.size]
                 seq //= self.digits.size
                 i -= 1
-            return self._prot.tostring()
+            return self._prot.tobytes()
         else:
             raise ValueError("{} Larger than largest kmer of size {}".format(seq, self.k))
 
     def decode(self, seq):
         """
         Decode a protein kmer -> integer. NOTE: sanitisation to a byte
-        string required first.
+        string is required first.
         """
         x = 0
         for digit in seq[: self.k].decode("ascii"):

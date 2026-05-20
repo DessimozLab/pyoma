@@ -15,6 +15,7 @@ from bisect import bisect_left
 from builtins import chr, range, object, zip, bytes, str
 from xml.etree import ElementTree as et
 from typing import Union, Tuple, Optional, AnyStr, Set, Generator, Mapping
+from pathlib import Path
 
 import dateutil
 import fuzzyset
@@ -28,6 +29,8 @@ import tables
 import tables.file as _tables_file
 from Bio.UniProt import GOA
 from datasketch import MinHash
+from property_manager import lazy_property
+from tables import NoSuchNodeError
 from tqdm import tqdm
 
 from .KmerEncoder import KmerEncoder
@@ -62,6 +65,7 @@ from .idmapper import (
     DomainNameIdMapper,
 )
 from .. import version
+from ..common import count_elements
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings(
@@ -75,18 +79,6 @@ threading.stack_size(4096 * 100000)
 
 # Global initialisations
 GAF_VERSION = "2.1"
-
-
-def count_elements(iterable):
-    """return the number of elements in an iterator in the most efficient way.
-
-    Be aware that for unbound iterators, this method won't terminate!
-    :param iterable: an iterable object.
-    """
-    counter = itertools.count()
-    collections.deque(zip(iterable, counter), maxlen=0)  # (consume at C speed)
-    return next(counter)
-
 
 _first_cap_re = re.compile("(.)([A-Z][a-z]+)")
 _all_cap_re = re.compile("([a-z0-9])([A-Z])")
@@ -235,7 +227,7 @@ class Database(object):
     will typically be issued by methods of this object. Typically,
     the result of queries will be :py:class:`numpy.recarray` objects."""
 
-    EXPECTED_DB_SCHEMA = "3.7"
+    EXPECTED_DB_SCHEMA = "3.8"
 
     def __init__(self, db):
         if isinstance(db, str):
@@ -282,7 +274,7 @@ class Database(object):
         try:
             self.seq_search = SequenceSearch(self)
         except DBConsistencyError as e:
-            logger.exception("Cannot load SequenceSearch. Any future call to seq_search will fail!")
+            logger.warning("Cannot load SequenceSearch. Any future call to seq_search will fail!")
             self.seq_search = None
         self.id_resolver = IDResolver(self)
         self.id_mapper = IdMapperFactory(self)
@@ -556,17 +548,12 @@ class Database(object):
                 raise InvalidId(f"Center gene {center_entry} is not a valid for genome {identified_genome}")
             all_genes = all_genes[idx - window : idx + window + 1]
             all_genes = all_genes[numpy.where(all_genes["Chromosome"] == ref["Chromosome"])]
-        oma_ids = list(
-            map(
-                lambda x: f"{gs['UniProtSpeciesCode'].decode()}{x - gs['EntryOff']:05d}",
-                all_genes["EntryNr"],
-            )
-        )
+        oma_ids = {x: f"{gs['UniProtSpeciesCode'].decode()}{x - gs['EntryOff']:05d}" for x in all_genes["EntryNr"]}
 
         def node_data_generator(genes):
-            for id_, g in zip(oma_ids, genes):
+            for g in genes:
                 yield (
-                    id_,
+                    oma_ids[g["EntryNr"]],
                     {
                         "chromosome": g["Chromosome"].decode(),
                         "start": int(g["LocusStart"]),
@@ -578,9 +565,30 @@ class Database(object):
 
         G = nx.Graph()
         G.add_nodes_from(node_data_generator(all_genes))
-        for i in range(len(all_genes) - 1):
-            if all_genes[i]["Chromosome"] == all_genes[i + 1]["Chromosome"]:
-                G.add_edge(oma_ids[i], oma_ids[i + 1], weight=1)
+
+        try:
+            synteny_rels = self.db.get_node(f"/ExtantGenomes/{gs['UniProtSpeciesCode'].decode()}/Synteny").read()
+        except NoSuchNodeError:
+            synteny_rels = None
+        if synteny_rels is not None:
+            synteny_rels = synteny_rels[
+                numpy.logical_and(
+                    numpy.isin(synteny_rels["EntryNr1"], all_genes["EntryNr"]),
+                    numpy.isin(synteny_rels["EntryNr2"], all_genes["EntryNr"]),
+                )
+            ]
+            for rel in synteny_rels:
+                G.add_edge(
+                    oma_ids[rel["EntryNr1"]],
+                    oma_ids[rel["EntryNr2"]],
+                    weight=float(rel["Weight"]),
+                    age=float(self.tax.taxid_to_age.get(rel["LCA_taxid"], -1)),
+                )
+        else:
+            # fall back without any additional data
+            for i in range(len(all_genes) - 1):
+                if all_genes[i]["Chromosome"] == all_genes[i + 1]["Chromosome"]:
+                    G.add_edge(oma_ids[all_genes[i]["EntryNr"]], oma_ids[all_genes[i + 1]["EntryNr"]], weight=1)
         return G
 
     def _get_vptab(self, entry_nr):
@@ -1233,7 +1241,26 @@ class Database(object):
         """returns an array of protein entries which belong to a given fam"""
         if not isinstance(fam, (int, numpy.number)):
             raise ValueError("expect a numeric family id")
-        return self.member_of_hog_id(self.format_hogid(fam))
+        try:
+            family_idx = self.db.get_node("/Protein/FamIndex/Lookup")
+            entry_idx = self.db.get_node("/Protein/FamIndex/EntryIdx")
+        except tables.NoSuchNodeError:
+            # fallback using OmaHOG column with index
+            return self.member_of_hog_id(self.format_hogid(fam))
+        else:
+            if 0 < fam < len(family_idx):
+                offset, nr_entries = family_idx[fam]
+                entry_nrs = entry_idx[offset : offset + nr_entries]
+                members = self.db.root.Protein.Entries[entry_nrs]
+                exp_fam_prefix = self.format_hogid(fam).encode("utf-8")
+                L = len(exp_fam_prefix)
+                hog = members["OmaHOG"]
+                hog_b = numpy.frombuffer(hog.tobytes(), dtype=numpy.uint8).reshape(len(hog), hog.dtype.itemsize)
+                if not numpy.all(hog_b[:, :L] == numpy.frombuffer(exp_fam_prefix, dtype=numpy.uint8)):
+                    raise DBConsistencyError("family index inconsistent with hogid column")
+            else:
+                members = numpy.array([], dtype=self.db.root.Protein.Entries.dtype)
+            return members
 
     def hog_members(self, entry, level):
         """get hog members with respect to a given taxonomic level.
@@ -1533,7 +1560,18 @@ class Database(object):
         except KeyError:
             raise ValueError(f"Invalid evidence value {evidence}")
         edge_data = read_table_where(ancestral_node.Synteny, "Evidence <= {}".format(evidence))
-        edges = ((e[0], e[1], {"weight": int(e[2]), "evidence": evidence_enum(e[3])}) for e in edge_data)
+        edges = (
+            (
+                e[0],
+                e[1],
+                {
+                    "weight": int(e[2]),
+                    "evidence": evidence_enum(e["Evidence"]),
+                    "age": float(self.tax.taxid_to_age.get(e["LCA_taxid"], -1)),
+                },
+            )
+            for e in edge_data
+        )
         if hog_id is not None:
             hog_row = self.get_hog(hog_id, tab=ancestral_node.Hogs, field="_NROW")
             hogs = ancestral_node.Hogs
@@ -1781,10 +1819,20 @@ class Database(object):
             hist = self.group_size_histogram("oma")
             return int(hist["Count"].sum())
 
+    @LazyProperty
+    def nr_proteins(self) -> int:
+        tab = self.db.get_node("/Protein/Entries")
+        return int(tab[-1]["EntryNr"])
+
     def get_nr_toplevel_hogs(self):
         """returns the number of toplevel hogs, i.e. roothogs"""
-        hist = self.group_size_histogram("hog")
-        return int(hist["Count"].sum())
+        try:
+            hist = self.group_size_histogram("hog")
+            cnt = int(hist["Count"].sum())
+        except tables.NoSuchNodeError:
+            hl: tables.Table = self.db.get_node("/HogLevel")
+            cnt = int(hl[hl.colindexes["Fam"][-1]]["Fam"])
+        return cnt
 
     def group_size_histogram(self, typ=None):
         """returns a table with two columns, e.g. Size and Count.
@@ -2317,17 +2365,20 @@ class SequenceSearch(object):
     PROTEIN_CHARS = frozenset(map(lambda x: x.decode(), DIGITS_AA))
     PAM100 = pyopa.generate_env(pyopa.load_default_environments()["log_pam1"], 100)
 
-    def __init__(self, db):
+    def __init__(self, db: Database, seq_idx_fpath=None):
         # Backup reference to used DB method.
         self.get_sequence = db.get_sequence
-
-        # Assume the index is stored in the main DB if there is no .idx file
         self.db = db.get_hdf5_handle()
-        self.db_idx = (
-            self.db
-            if not os.path.isfile(self.db.filename + ".idx")
-            else tables.open_file(self.db.filename + ".idx", "r")
-        )
+
+        if seq_idx_fpath is None:
+            # Assume the index is stored in the main DB if there is no .idx file
+            self.db_idx = (
+                self.db
+                if not os.path.isfile(self.db.filename + ".idx")
+                else tables.open_file(self.db.filename + ".idx", "r")
+            )
+        else:
+            self.db_idx = tables.open_file(seq_idx_fpath, "r")
 
         # Protein search arrays.
         try:
@@ -2339,14 +2390,51 @@ class SequenceSearch(object):
                 self.kmer_lookup = self.kmer_lookup()
         except (AttributeError, OSError) as e:
             raise DBConsistencyError("Suffix index for protein sequences is not available: " + str(e))
-        self.seq_buff = self.db.root.Protein.SequenceBuffer
+        seq_buf_path = Path(self.db.filename).parent / "sequences.bin"
+        if seq_buf_path.exists():
+            self.seq_buff = numpy.memmap(seq_buf_path, dtype=numpy.uint8, mode="r")
+            logger.info("Using memmap for the sequence search.")
+        else:
+            self.seq_buff = self.db.root.Protein.SequenceBuffer
         self.n_entries = len(self.db.root.Protein.Entries)
+        # suffix array index
+        try:
+            self.sa_idx_key = self.db_idx.get_node("/Protein/SuffixArrayIndexKeys")[:]
+            self.sa_idx_pos = self.db_idx.get_node("/Protein/SuffixArrayIndexPos")[:]
+            logger.info("Successfully loaded suffix array index.")
+        except (AttributeError, OSError) as e:
+            self.sa_idx_key = None
+            self.sa_idx_pos = None
+            logger.warning("Suffix array index not available.")
 
         # Kmer lookup arrays / kmer setup
         self.k = self.kmer_lookup._f_getattr("k")
         self.encoder = KmerEncoder(self.k)
         logger.info("KmerLookup of size k=%s loaded", self.k)
         self.multienv_align = None
+        try:
+            db.register_on_close(self.close)
+        except Exception:
+            pass
+
+    def close(self):
+        # Close secondary index file if it's a real file handle we opened
+        try:
+            if hasattr(self, "db_idx") and self.db_idx is not None:
+                # If we borrowed the main DB handle, Database.close() will handle it.
+                if isinstance(self.db_idx, tables.File) and self.db_idx is not self.db:
+                    self.db_idx.close()
+        finally:
+            try:
+                # Help the GC release the memmap and any buffers quickly
+                self.seq_buff = None
+                # unregister the close handler in the main database
+                if isinstance(self.db, Database):
+                    self.db.unregister_on_close(self.close)
+            except Exception:
+                pass
+            self.db_idx = None
+            self.multienv_align = None
 
     def get_entry_length(self, ii):
         """Get length of a particular entry."""
@@ -2424,16 +2512,19 @@ class SequenceSearch(object):
         else:
             return "exact", m
 
-    def exact_search(self, seq, only_full_length=True, is_sanitised=None, entrynr_range=None):
+    def exact_search(self, seq, only_full_length=True, max_len_diff=0, is_sanitised=None, entrynr_range=None):
         """
         Performs an exact match search using the suffix array.
         """
         seq = seq if is_sanitised else self._sanitise_seq(seq)
         filt = self._tax_filter_range if isinstance(entrynr_range, tuple) else self._tax_filter_set
         nn = len(seq)
+        lo, hi = self.n_entries, len(self.seq_idx)
+        if nn >= self.k and self.sa_idx_pos is not None:
+            lo, hi = self._get_suffix_array_range(kmer=self.encoder.decode(seq[: self.k]))
         if nn > 0:
             z = KeyWrapper(self.seq_idx, key=lambda i: self.seq_buff[i : (i + nn)].tobytes())
-            ii = bisect_left(z, seq, lo=self.n_entries)
+            ii = bisect_left(z, seq, lo=lo, hi=hi)
 
             if ii and ii < len(self.seq_idx) and (z[ii] == seq):
                 # Left most found.
@@ -2446,7 +2537,7 @@ class SequenceSearch(object):
                 return list(
                     filter(
                         lambda e: (
-                            ((not only_full_length) or self.get_entry_length(e) == nn)
+                            ((not only_full_length) or self.get_entry_length(e) - nn <= max_len_diff)
                             and (entrynr_range is None or filt(e, entrynr_range))
                         ),
                         self.get_entrynr(self.seq_idx[ii:jj]),
@@ -2463,7 +2554,7 @@ class SequenceSearch(object):
 
         :param seq: the sequence to be searched
         :type seq: str, bytes
-        :param is_sanitised: whether or not the sequence is already sanitised. defaults to false.
+        :param is_sanitised: whether the sequence is already sanitised. defaults to false.
         :type is_sanitised: bool
         :param coverage: the minimum fraction of covered kmers by the target sequence
         :type coverage: float
@@ -2472,24 +2563,42 @@ class SequenceSearch(object):
         :returns: A list of tuples with (entry_nr, fraction_of_matched_kmers)
         """
         seq = seq if is_sanitised else self._sanitise_seq(seq)
-        tax_filt = self._tax_filter_range if isinstance(entrynr_range, tuple) else self._tax_filter_set
 
-        # 1. Do kmer counting vs entry numbers TODO: switch to np.unique?
-        c = collections.Counter()
-        for z in map(
-            lambda kmer: numpy.unique(self.kmer_lookup[int(kmer)]),
-            self.encoder.decompose(seq),
-        ):
-            c.update(z)
+        # 1. Decompose the sequence into kmers, sort them and unique!
+        kmers, occ = numpy.unique(numpy.fromiter(self.encoder.decompose(seq), dtype=numpy.int32), return_counts=True)
 
-        # 2. Filter to top n if necessary
-        z = len(seq) - self.k + 1
-        cut_off = coverage * z
-        entries = [
-            (enr, (cnts / z))
-            for enr, cnts in c.items()
-            if cnts >= cut_off and (entrynr_range is None or tax_filt(enr, entrynr_range))
-        ]
+        # 2. Concatenate all arrays of unique (by kmer) "enrs" from kmers
+        all_enrs = numpy.concatenate([numpy.unique(enrs) for enrs in self.kmer_lookup[kmers]])
+
+        # 3. Count occurrences per entry number
+        uniq_enrs, counts = numpy.unique(all_enrs, return_counts=True)
+
+        # 4. Filter by coverage and taxonomic range
+        len_kmers = len(kmers)
+        cut_off = coverage * len_kmers
+
+        # Boolean mask for counts >= cutoff
+        mask_counts = counts >= cut_off
+
+        # build taxonomic mask
+        if entrynr_range is None:
+            mask_tax = numpy.ones_like(uniq_enrs, dtype=bool)
+        elif isinstance(entrynr_range, tuple):
+            low, high = entrynr_range
+            mask_tax = (uniq_enrs >= low) & (uniq_enrs <= high)
+        elif isinstance(entrynr_range, set):
+            mask_tax = numpy.array([e in entrynr_range for e in uniq_enrs])
+        else:
+            raise TypeError("entrynr_range must be None, tuple, or set")
+
+        # combine masks
+        mask = mask_counts & mask_tax
+        masked_counts = counts[mask]
+        masked_uniq_enrs = uniq_enrs[mask]
+
+        # sort (desc by count)
+        sorted_idx = numpy.argsort(-masked_counts)
+        entries = list(zip(masked_uniq_enrs[sorted_idx], masked_counts[sorted_idx] / len_kmers))
         return entries
 
     def approx_search(
@@ -2501,6 +2610,7 @@ class SequenceSearch(object):
         compute_distance=False,
         entrynr_range=None,
         return_kmer_hits=False,
+        alignment="local",
     ):
         """
         Performs an approximate match search using the kmer index.
@@ -2513,12 +2623,14 @@ class SequenceSearch(object):
         :param seq: the query sequence to be searched
         :type seq: str, bytes
         :param int n: number of maximum returned entries that match query
-        :param bool is_sanitised: whether or not the sequence is already sanitised. defaults to false.
+        :param bool is_sanitised: whether the sequence is already sanitised. defaults to false.
         :param float coverage: the minimum fraction of covered kmers by the target sequence
         :param entrynr_range: target entry number range as a tuple (min, max) or set for filtering
         :type entrynr_range: set[int], tuple[int, int]
         :param bool return_kmer_hits: whether or not the full list of matched kmer entries should be
         returned. if set to True, the return value will be a tuple instead of a single list
+        :param alignment: the type of alignment to be computed. needs to be either 'global' or 'local'.
+        :type alignment: str
 
         :returns: list of matched entries, each element is a tuple with the entry_nr and a dictionary
         containing the score, alignment and distance estimates.
@@ -2527,15 +2639,16 @@ class SequenceSearch(object):
         seq = seq if is_sanitised else self._sanitise_seq(seq)
         n = n if n is not None else 50
         coverage = 0.0 if coverage is None else coverage
+        if alignment not in ("global", "local"):
+            raise ValueError("alignment must be either 'global' or 'local'")
 
         kmer_hits = self.approx_search_no_align(seq, is_sanitised=True, coverage=coverage, entrynr_range=entrynr_range)
-        c = sorted(kmer_hits, reverse=True, key=lambda x: x[1])
         if n > 0:
-            c = c[:n]
+            kmer_hits = kmer_hits[:n]
 
         # 3. Do local alignments and return count / score / alignment
         res = []
-        if len(c) > 0:
+        if len(kmer_hits) > 0:
             res = sorted(
                 [
                     (
@@ -2548,7 +2661,7 @@ class SequenceSearch(object):
                             "distvar": a[3] if compute_distance else None,
                         },
                     )
-                    for (m, a) in self._align_entries(seq, c, compute_distance)
+                    for (m, a) in self._align_entries(seq, kmer_hits, compute_distance, alignment == "global")
                 ],
                 key=lambda q: q[1]["score"],
                 reverse=True,
@@ -2558,12 +2671,12 @@ class SequenceSearch(object):
         else:
             return res
 
-    def _align_entries(self, seq, matches, compute_distance=False):
+    def _align_entries(self, seq, matches, compute_distance=False, global_alignment=False):
         # Does the alignment for the approximate search
-        def align(s1, s2s, env, aligned):
+        def align(s1, s2s, env, aligned, global_alignment):
             for s2 in s2s:
-                z = pyopa.align_double(s1, s2, env, False, False, True)
-                a = pyopa.align_strings(s1, s2, env, False, z)
+                z = pyopa.align_double(s1, s2, env, False, global_alignment, True)
+                a = pyopa.align_strings(s1, s2, env, global_alignment, z)
                 if compute_distance:
                     score, pam, pamvar = self.multienv_align.estimate_pam(*a[0:2])
                     res_ds = (
@@ -2598,11 +2711,26 @@ class SequenceSearch(object):
                 matches,
             )
         )
-        t = threading.Thread(target=align, args=(query, entries, self.PAM100, aligned))
+        t = threading.Thread(target=align, args=(query, entries, self.PAM100, aligned, global_alignment))
         t.start()
         t.join()
         assert len(aligned) > 0, "Alignment thread crashed."
         return zip(matches, aligned)
+
+    def _get_suffix_array_range(self, kmer):
+        """
+        Returns the range of suffix array indices that match the given kmer.
+        Uses the precomputed index
+        """
+        if self.sa_idx_key is None or self.sa_idx_pos is None:
+            raise DBConsistencyError("Suffix array index is not available.")
+        idx = numpy.searchsorted(self.sa_idx_key, kmer, side="right")
+        assert 0 <= idx < len(self.sa_idx_key), "Suffix array index out of range."
+        if idx == 0:
+            # kmer does not exist in suffix array.
+            return 0, len(self.sa_idx_pos[idx])
+        else:
+            return self.sa_idx_pos[idx - 1], self.sa_idx_pos[idx]
 
 
 class OmaIdMapper(object):
@@ -2612,7 +2740,7 @@ class OmaIdMapper(object):
         self._genome_keys = self.genome_table.argsort(order=("UniProtSpeciesCode"))
         self._taxid_keys = self.genome_table.argsort(order=("NCBITaxonId"))
         self._sciname_keys = self.genome_table.argsort(order=("SciName"))
-        self._omaid_re = re.compile(r"(?P<genome>[A-Z][A-Z0-9]{4})(?P<nr>\d+)")
+        self._omaid_re = re.compile(r"(?P<genome>[A-Z0-9]{5})(?P<nr>\d+)")
         self._db = db
         self._approx_genome_matcher = self._init_fuzzy_matcher_with_genome_infos()
 
@@ -2893,7 +3021,7 @@ class IDResolver(object):
             nr = (nr, False)
         return nr
 
-    @timethis(logging.DEBUG)
+    @timethis(level=logging.DEBUG)
     def search_protein(self, query: str, limit=None, entrynr_range=None):
         candidates = collections.defaultdict(dict)
         try:
@@ -2952,8 +3080,17 @@ class Taxonomy(object):
             tax_json = json.loads(("[" + taxStr[14:-3] + "]").replace("'", '"'))
             self.all_hog_levels = frozenset([t.encode("ascii") for t in tax_json if forbidden_chars.search(t) is None])
         except (IOError, KeyError):
+            # load all levels that have at least two children
+            nr_children = collections.defaultdict(int)
+            for p in self.tax_table["ParentTaxonId"]:
+                nr_children[p] += 1
+            remove = set(p for (p, cnt) in nr_children.items() if cnt == 1 and p != 0 and p not in self.genomes)
             self.all_hog_levels = frozenset(
-                [l for l in self.tax_table["Name"] if forbidden_chars.search(l.decode()) is None]
+                [
+                    l["Name"]
+                    for l in self.tax_table
+                    if l["NCBITaxonId"] not in remove and forbidden_chars.search(l["Name"].decode()) is None
+                ]
             )
 
     def _table_idx_from_numeric(self, tids):
@@ -3009,6 +3146,14 @@ class Taxonomy(object):
             i += 1
         return self.tax_table.take(idx)
 
+    @lazy_property
+    def taxid_to_age(self):
+        return {r["NCBITaxonId"]: r["Age"] for r in self.tax_table}
+
+    @property
+    def root(self):
+        return self._get_root_taxon()
+
     def approx_search(self, pattern):
         if self._approx_matcher is None:
             valid_levels_as_str = (l.decode() for l in self.all_hog_levels)
@@ -3045,7 +3190,7 @@ class Taxonomy(object):
                 it = numpy.fromiter(it, dtype="i4")
             except ValueError:
                 it = numpy.fromiter(it, dtype="S255")
-        if it.dtype.type is numpy.string_:
+        if it.dtype.type is numpy.bytes_:
             try:
                 ns = self.name_key
             except AttributeError:
@@ -3121,6 +3266,7 @@ class Taxonomy(object):
             levels of members for the resulting taxonomy."""
 
         taxids_to_keep = numpy.sort(self._get_taxids_from_any(members))
+        taxids_to_keep = taxids_to_keep[taxids_to_keep != 0]  # remove
         if augment_parents:
             # find all the parents of all the members, add them to taxids_to_keep
             additional_levels = set([])
@@ -3137,7 +3283,7 @@ class Taxonomy(object):
         idxs = numpy.searchsorted(self.tax_table["NCBITaxonId"], taxids_to_keep, sorter=self.taxid_key)
         idxs = numpy.clip(idxs, 0, len(self.taxid_key) - 1)
         subtaxdata = self.tax_table[self.taxid_key[idxs]]
-        if not numpy.alltrue(subtaxdata["NCBITaxonId"] == taxids_to_keep):
+        if not numpy.all(subtaxdata["NCBITaxonId"] == taxids_to_keep):
             raise KeyError("not all levels in members exists in this taxonomy")
 
         updated_parent = numpy.zeros(len(subtaxdata), "bool")
@@ -3166,6 +3312,32 @@ class Taxonomy(object):
                 idx = taxids_to_keep.searchsorted(rem)
                 return self.get_induced_taxonomy(numpy.delete(taxids_to_keep, idx))
         return Taxonomy(subtaxdata, genomes=self.genomes, _valid_levels=self.all_hog_levels)
+
+    def traverse(self, strategy="preorder"):
+        """traverse the taxonomy either in pre- or post-order.
+
+        The method returns a generator that yields tuples of the form:
+           (node, is_leaf).
+
+        is_leaf is a boolean value whether the node is a leaf in the taxonomy or not.
+
+        :param strategy: either `preorder` or `postorder`. defaults to preorder traversal.
+        """
+        if strategy not in ("preorder", "postorder"):
+            raise ValueError(f"unknown strategy: {strategy}")
+        to_visit = [self._get_root_taxon()]
+        while len(to_visit) > 0:
+            node = to_visit.pop(-1)
+            if isinstance(node, tuple):
+                # postorder action
+                if strategy == "postorder":
+                    yield node[1], False
+            else:
+                children = self._direct_children_taxa(node["NCBITaxonId"])
+                if strategy == "preorder" or len(children) == 0:
+                    yield node, len(children) > 0
+                if len(children) > 0:
+                    to_visit.extend(reversed([c for c in children] + [(1, node)]))
 
     def newick(self, leaf=None, internal="name", quoted=False):
         """Get a Newick representation of the Taxonomy
@@ -3361,7 +3533,7 @@ class DescriptionSearcher(object):
         self.entry_tab = db.get_hdf5_handle().get_node("/Protein/Entries")
         self.desc_index = SuffixSearcher.from_tablecolumn(self.entry_tab, "DescriptionOffset")
 
-    @timethis(logging.DEBUG)
+    @timethis(level=logging.DEBUG)
     def search_term(self, term, limit=None):
         return self.desc_index.find(term, limit=limit)
 

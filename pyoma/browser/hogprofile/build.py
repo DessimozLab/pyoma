@@ -3,6 +3,7 @@ import queue
 import signal
 import threading
 import uuid
+import pickle
 
 import tables
 import ete3
@@ -10,6 +11,8 @@ import multiprocessing as mp
 import time
 import tempfile
 import pandas as pd
+import numpy
+
 from datasketch import WeightedMinHashGenerator, MinHashLSHForest
 from .pyhamutils import get_ham_treemap_from_row
 from .hashutils import generate_treeweights, row2hash
@@ -69,6 +72,7 @@ class BaseProfileBuilderProcess(mp.Process):
         self.quit_req = True
 
     def run(self):
+        rootlogger_configurer(self.log_queue)
         self.setup()
         # Set signals for worker process
         signal.signal(signal.SIGINT, self._handle_signal)
@@ -97,7 +101,12 @@ class BaseProfileBuilderProcess(mp.Process):
                 self.control_queue.put((self.proc_id, "DONE"))
                 logger.debug("sent DONE info to control queue (%s)", self.proc_id)
             else:
-                result = self.handle_input(item)
+                try:
+                    result = self.handle_input(item)
+                except Exception as e:
+                    logger.exception("Exception while handling input [%s]: %s", item, e)
+                    self.control_queue.put((self.proc_id, "ERROR"))
+                    continue
                 if result is not None:
                     self.out_queue.put(result)
                 self.control_queue.put((self.proc_id, "JOB_HANDELED"))
@@ -169,7 +178,7 @@ class ProfileBuilder(BaseProfileBuilderProcess):
         self.builder.db.close()
 
     def handle_input(self, df):
-        print("handling df: {}".format(df))
+        logger.info("handling df: {}".format(df))
         df["tree"] = df[["Fam", "ortho"]].apply(self.ham_pipeline, axis=1)
         df[["hash", "rows", "species"]] = df[["Fam", "tree"]].apply(self.hash_pipeline, axis=1)
         return df[["Fam", "hash", "species"]]
@@ -192,7 +201,7 @@ class Collector(BaseProfileBuilderProcess):
                 self.builder.db.get_nr_toplevel_hogs() + 1,
                 self.builder.numperm * 2,
             ),
-            filters=tables.Filters(complevel=3, complib="blosc"),
+            filters=tables.Filters(complevel=7, complib="blosc2"),
         )
         species = self.h5.create_carray(
             root,
@@ -205,11 +214,12 @@ class Collector(BaseProfileBuilderProcess):
             ),
             filters=tables.Filters(complevel=3, complib="blosc"),
         )
-        lsh_forest = self.h5.create_vlarray(
+        lsh_forest = self.h5.create_earray(
             root,
             "min_hash_lsh_forest",
             createparents=True,
-            atom=tables.ObjectAtom(),
+            atom=tables.UInt8Atom(),
+            shape=(0,),
             filters=tables.Filters(complevel=3, complib="blosc"),
         )
         lsh_tree = self.h5.create_vlarray(
@@ -241,7 +251,7 @@ class Collector(BaseProfileBuilderProcess):
         print("Collector process initialized")
 
     def handle_input(self, df: pd.DataFrame):
-        print("handling hash df: {}".format(df))
+        logger.info("handling hash df: {}".format(df))
         if not df.empty:
             hashes = df["hash"].to_dict()
             hashes = {fam: hashes[fam] for fam in hashes if hashes[fam]}
@@ -267,7 +277,12 @@ class Collector(BaseProfileBuilderProcess):
         print("received all results. wrapping up...")
         print("computed minhashes: {}".format(self.count))
         self.forest.index()
-        self.forest_arr.append(self.forest)
+        # Serialize the object
+        serialized = pickle.dumps(self.forest, protocol=pickle.HIGHEST_PROTOCOL)
+        # Convert to uint8 array
+        data = numpy.frombuffer(serialized, dtype=numpy.uint8)
+        # Append
+        self.forest_arr.append(data)
         self.h5.flush()
         self.h5.close()
         self.builder.db.close()
@@ -317,6 +332,7 @@ class HogGenerator(SourceProcess):
 def rootlogger_configurer(queue):
     h = QueueHandler(queue)
     root = logging.getLogger()
+    root.handlers.clear()
     root.addHandler(h)
     root.setLevel(logging.DEBUG)
 
@@ -345,8 +361,11 @@ class PipelineControllerThread(threading.Thread):
     def _process_alive_info(self, item):
         proc_id, flag = item
         logger.debug(item)
+        if proc_id not in self.processes:
+            logger.debug("received message for already finished process: %s %s", proc_id, flag)
+            return
         if flag == "DONE":
-            self.processes.pop(proc_id)
+            self.processes.pop(proc_id, None)
         else:
             self.processes[proc_id][0] = time.time()
 
@@ -371,7 +390,7 @@ class PipelineControllerThread(threading.Thread):
         logger.info("killed %d orphan processes", len(to_rem))
 
     def run(self):
-        logger.info("starting controler thread")
+        logger.info("starting controller thread")
         nr_empty_cnt = 0
         while len(self.processes) > 0:
             try:
@@ -391,6 +410,10 @@ class PipelineControllerThread(threading.Thread):
             if time.time() - self._last_timeout_check > 10:
                 self._kill_orphan_procs()
                 self._last_timeout_check = time.time()
+            if all(not p.is_alive() for _, p in self.processes.values()):
+                logger.warning("All processes exited but controller still running — forcing shutdown")
+                break
+        logger.info("control thread finished")
 
 
 class Stage(object):
@@ -451,42 +474,76 @@ class Pipeline(object):
         control_thread = PipelineControllerThread(control_queue=control_queue, log_queue=log_queue, processes=procs)
         control_thread.start()
         print("all processes started")
+
         try:
-            for p in procs:
-                p.join()
+            # Loop and log process status until all have joined
+            while True:
+                alive = False
+                for p in procs:
+                    logger.info("Process %s (pid=%s) alive: %s", p.name, p.pid, p.is_alive())
+                    if p.is_alive():
+                        p.join(timeout=1)
+                        alive = True
+                logger.info("Active threads: %s", threading.enumerate())
+                if not alive:
+                    break
+                time.sleep(10)  # avoid busy waiting
         except KeyboardInterrupt:
-            print("keyboard interupt in main loop")
-            time.sleep(20)
-        log_queue.put(None)
+            print("keyboard interrupt in main loop")
+            for p in procs:
+                if p.is_alive():
+                    print("Terminating process %s (pid=%s)", p.name, p.pid)
+                    p.terminate()
+            time.sleep(2)
+
         control_queue.put(None)
-        logger_process.join()
         control_thread.join()
 
+        log_queue.put(None)
+        logger_process.join()
         print("successfully joined all processes")
 
 
-def compute_profiles(db_path, min_hogsize=100, max_hogsize=None, nr_procs=None):
-    pipeline = Pipeline()
-    with tempfile.NamedTemporaryFile(suffix=".h5", delete=False) as h5_tmp:
-        tmp_file = h5_tmp.name
+def compute_profiles(db_path, out_h5=None, min_hogsize=100, max_hogsize=None, nr_procs=None):
+    """computes HOG profiles for all HOGs in the database
+
+    Note that if out_h5 is not provided, the profiles are written back to the input database.
+
+    Arguments:
+    :params str db_path: path to the database containing the HOGs and Taxonomy information
+    :params str out_h5: path to the output file. If None, the profiles are written back to the input database
+    :params int min_hogsize: minimum number of species in a HOG to be considered
+    :params int max_hogsize: maximum number of species in a HOG to be considered
+    :params int nr_procs: number of processes to use for parallel computation
+    """
+
     if nr_procs is None:
         nr_procs = mp.cpu_count()
 
-    pipeline.add_stage(
-        Stage(
-            HogGenerator,
-            nr_procs=1,
-            db_path=db_path,
-            min_hogsize=min_hogsize,
-            max_hogsize=max_hogsize,
+    def run_pipeline(output):
+        pipeline = Pipeline()
+        pipeline.add_stage(
+            Stage(
+                HogGenerator,
+                nr_procs=1,
+                db_path=db_path,
+                min_hogsize=min_hogsize,
+                max_hogsize=max_hogsize,
+            )
         )
-    )
-    pipeline.add_stage(Stage(ProfileBuilder, nr_procs=nr_procs, db_path=db_path))
-    pipeline.add_stage(Stage(Collector, nr_procs=1, db_path=db_path, tmp_file=tmp_file))
-    print("generated pipeline. about to starting it")
-    pipeline.run()
-    print("finished computing profiles")
+        pipeline.add_stage(Stage(ProfileBuilder, nr_procs=nr_procs, db_path=db_path))
+        pipeline.add_stage(Stage(Collector, nr_procs=1, db_path=db_path, tmp_file=output))
+        print("generated pipeline. about to starting it")
+        pipeline.run()
+        print("finished computing profiles")
 
-    with tables.open_file(db_path, "a") as db, tables.open_file(tmp_file, "r") as tmp:
-        tmp.root._f_copy_children(db.root, recursive=True, overwrite=True)
-    print("Finished writing everything")
+    if out_h5 is None:
+        with tempfile.NamedTemporaryFile(suffix=".h5") as h5_tmp:
+            run_pipeline(h5_tmp.name)
+
+        with tables.open_file(db_path, "a") as db, tables.open_file(h5_tmp.name, "r") as tmp:
+            tmp.root._f_copy_children(db.root, recursive=True, overwrite=True)
+        print(f"Finished writing everything back to {db_path}")
+    else:
+        run_pipeline(out_h5)
+        print(f"Finished writing profiles to {out_h5}")

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from builtins import int, bytes, str
 import collections
 import csv
@@ -6,9 +7,11 @@ import math
 import re
 from functools import lru_cache
 from collections import deque
+from typing import List, Set
 
 import numpy
 
+from ..common import auto_open
 
 """
 IMPORTANT NOTE:
@@ -89,23 +92,23 @@ class GOterm(object):
         self.is_a = [validate_go_id(parent) for parent in stanza["is_a"]]
         self.min_depth = 100000
         for rel in stanza["relationship"]:
-            reltype, partner = rel.strip().split()
-            if not reltype in self.__dict__.keys():
-                self.__dict__[reltype] = list()
-            self.__dict__[reltype].append(validate_go_id(partner))
+            rel_type, partner = rel.strip().split()
+            if not hasattr(self, rel_type):
+                setattr(self, rel_type, [])
+            getattr(self, rel_type).append(validate_go_id(partner))
 
     def replace_parentnames_by_refs(self, ont):
         for rel in [("is_a", "can_be"), ("part_of", "has_part")]:
-            if rel[0] in self.__dict__.keys():
-                for i, parent_id in enumerate(self.__dict__[rel[0]]):
+            if hasattr(self, rel[0]):
+                for i, parent_id in enumerate(getattr(self, rel[0])):
                     parent_obj = ont[parent_id]
-                    self.__dict__[rel[0]][i] = parent_obj
-                    parent_obj._add_relation(self, rel[1])
+                    getattr(self, rel[0])[i] = parent_obj
+                    parent_obj.add_relation(self, rel[1])
 
-    def _add_relation(self, term, rel):
-        if rel not in self.__dict__.keys():
-            self.__dict__[rel] = list()
-        self.__dict__[rel].append(term)
+    def add_relation(self, term: GOterm, rel: str) -> None:
+        if not hasattr(self, rel):
+            setattr(self, rel, [])
+        getattr(self, rel).append(term)
 
     def get_parents(self, rels=None):
         """iterate over the direct parent GO terms.
@@ -287,24 +290,28 @@ class GeneOntology(object):
         term = self.ensure_term(term)
         return self._traverseGraph(term, max_steps, self.up_rels)
 
-    def get_subterms(self, term, max_steps=-1):
+    def get_superterms(self, term, include_query=True, max_steps=-1):
         term = self.ensure_term(term)
-        return self._traverseGraph(term, max_steps, self.down_rels)
+        parents = self._traverseGraph(term, max_steps, self.up_rels)
+        return parents if include_query else parents - {term}
+
+    def get_subterms(self, term, include_query=True, max_steps=-1):
+        term = self.ensure_term(term)
+        children = self._traverseGraph(term, max_steps, self.down_rels)
+        return children if include_query else children - {term}
 
     @lru_cache(maxsize=4048)
-    def _traverseGraph(self, node, max_steps, rels):
+    def _traverseGraph(self, node: GOterm, max_steps: int, rels: List[str]) -> Set[GOterm]:
         """_traverseGraph traverses the graph in a breath first manner
         and reports all the nodes reachable within max_steps."""
-        remain = set([node])
+        remain = {node}
         found = set()
         while len(remain) > 0 and max_steps != 0:
             novel = set()
-            for t in remain:
+            for term in remain:
                 for rel in rels:
-                    try:
-                        novel.update(t.__dict__[rel])
-                    except KeyError:
-                        pass
+                    novel.update(getattr(term, rel, set()))
+
             found.update(remain)
             remain = novel.difference(found)
             max_steps -= 1
@@ -357,7 +364,7 @@ class FreqAwareGeneOntology(GeneOntology):
         return lca
 
     def ic(self, term):
-        """returns the information content of the term based on the number of annotations in the OMA database
+        r"""returns the information content of the term based on the number of annotations in the OMA database
 
         .. math::
             ic(GO_i) = -\log_{10}(term_freq)
@@ -373,7 +380,7 @@ class FreqAwareGeneOntology(GeneOntology):
         return lca, *goterms
 
     def lin_similarity(self, term1, term2) -> float:
-        """computes the Lin similarity between two GO terms:
+        r"""computes the Lin similarity between two GO terms:
 
         .. math::
             sim(GO_i, GO_j) = \frac{2 \log_{10}(IC(GO_{LCA}}{\log_{10}(IC(GO_i) + \log_{10}(IC(GO_j))}
@@ -409,22 +416,25 @@ class DifferentAspectError(Exception):
 
 class AnnotationFilter(object):
     EXP_CODES = frozenset(["EXP", "IDA", "IPI", "IMP", "IGI", "IEP"])
+    PHYL_CODES = frozenset(["IBA", "IBD", "IKR", "IRD"])
     TRUST_IEA_REFS = frozenset(
         [
             "GO_REF:0000002",
+            "GO_REF:002",
             "GOA:interpro",
             "GOA:interpro|GO_REF:0000002",  # InterPro
             "GO_REF:0000003",
+            "GO_REF:003",
             "GOA:spec",
-            "GOA:spec|GO_REF:0000003" "GO_REF:0000004",  # EC number
+            "GOA:spec|GO_REF:0000003",  # EC number
+            "GO_REF:0000004",
+            "GO_REF:004",
             "GOA:spkw",
-            "GOA:spkw|GO_REF:0000004",
-            "GO_REF:0000037",
-            "GO_REF:0000038" "GO_REF:0000023",  # SwissProt Keywords
-            "GOA:spsl",
-            "GOA:spsl|GO_REF:0000023",
-            "GO_REF:0000039",
-            "GO_REF:0000040",  # UniProtKB Subcellular Location
+            "GOA:spkw|GO_REF:0000004",  # UniProtKB keyword mapping
+            "GO_REF:0000043",
+            "GO_REF:043",  # UniProtKB/Swiss-Prot keyword mapping
+            "GO_REF:0000044",
+            "GO_REF:044",  # UniProtKB/Swiss-Prot Subcellular Location vocabulary mapping
         ]
     )
 
@@ -475,13 +485,8 @@ class AnnotationParser(object):
     def __init__(self, fp, factory=GOA_Annotation._make):
         self._needs_close = False
         if isinstance(fp, str):
-            if fp.endswith(".gz"):
-                from gzip import GzipFile
-
-                fp = GzipFile(fp, "rb")
-                self._needs_close = True
-            else:
-                fp = open(fp, "rb")
+            fp = auto_open(fp, "rt", encoding="utf-8-sig")
+            self._needs_close = True
         self.fp = fp
         self.factory = factory
 

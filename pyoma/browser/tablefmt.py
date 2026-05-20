@@ -42,6 +42,23 @@ class AbstractSyntenyRels(tables.IsDescription):
         base="uint8",
     )
     LCA_taxid = tables.Int32Col(pos=4, dflt=-1)
+    Orientation = tables.EnumCol(
+        tables.Enum({"unidirectional": 1, "divergent": 2, "convergent": 4, "n/a": -1}),
+        pos=5,
+        dflt="n/a",
+        base="int8",
+    )
+    OrientationScore = tables.Float16Col(pos=6, dflt=-1)
+
+
+class AncestralSyntenyRels(AbstractSyntenyRels):
+    HogRow1 = tables.UInt32Col(pos=0)
+    HogRow2 = tables.UInt32Col(pos=1)
+
+
+class ExtantSyntenyRels(AbstractSyntenyRels):
+    EntryNr1 = tables.UInt32Col(pos=0)
+    EntryNr2 = tables.UInt32Col(pos=1)
 
 
 class AncestralSyntenyRels(AbstractSyntenyRels):
@@ -65,7 +82,7 @@ class ProteinTable(tables.IsDescription):
     LocusEnd = tables.UInt32Col(pos=8)
     LocusStrand = tables.Int8Col(pos=9, dflt=1)
     AltSpliceVariant = tables.Int32Col(pos=10, dflt=0)
-    CanonicalId = tables.StringCol(20, pos=11, dflt=b"")
+    CanonicalId = tables.StringCol(255, pos=11, dflt=b"")
     CDNABufferOffset = tables.UInt64Col(pos=12)
     CDNABufferLength = tables.UInt32Col(pos=13)
     MD5ProteinHash = tables.StringCol(32, pos=14)
@@ -139,6 +156,7 @@ class XRefTable(tables.IsDescription):
                 "Gene Name": 110,
                 "Synonym": 115,
                 "Protein Name": 120,
+                "Alternative Protein Name": 121,
                 "ORF Name": 125,
                 "Ordered Locus Name": 130,
                 "PDB": 148,
@@ -152,6 +170,8 @@ class XRefTable(tables.IsDescription):
                 "SwissPalm": 158,
                 "DisGeNET": 159,
                 "WikiGene": 160,
+                "KEGG": 170,
+                "AGR": 180,
                 "IPI": 240,
                 "GI": 241,
                 "n/a": 255,
@@ -168,6 +188,7 @@ class XRefTable(tables.IsDescription):
         base="uint8",
         pos=4,
     )
+    Identity = tables.Float16Col(pos=5, dflt=0)
 
 
 class GeneOntologyTable(tables.IsDescription):
@@ -215,7 +236,8 @@ class TaxonomyTable(tables.IsDescription):
     NCBITaxonId = tables.Int32Col(pos=0)
     ParentTaxonId = tables.Int32Col(pos=1)
     Name = tables.StringCol(255, pos=2)
-    Age = tables.Float16Col(pos=3, dflt=numpy.nan)
+    IsGenome = tables.BoolCol(pos=3, dflt=False)
+    Age = tables.Float16Col(pos=4, dflt=numpy.nan)
 
 
 class DomainTable(tables.IsDescription):

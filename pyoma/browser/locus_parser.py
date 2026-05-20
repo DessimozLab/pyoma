@@ -35,7 +35,7 @@ class LocusTransformer(Transformer):
         return int(vals[0])
 
     def location(self, value):
-        return Exon(value[0], value[1] if len(value) > 1 else value[0], 1)
+        return Exon(value[0], value[1] if len(value) > 1 and value[1] is not None else value[0], 1)
 
     def complement(self, value):
         rev = [e._replace(strand=-1 * e.strand) for e in value]

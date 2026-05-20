@@ -1,0 +1,63 @@
+#
+#  to be called with a given MatrixPath file, the GenomeSummariesPath file and
+#  a GenomesDir path. will overwrite DARWIN_GENOMES_PATH env variable.
+#
+
+if not assigned(MatrixPath) or not assigned(GenomeSummariesPath) or not assigned(GenomesDir) then
+    printf('not all input arguments are assigned: %A, %A, %A\n', MatrixPath, GenomeSummariesPath, GenomesDir);
+    exit(1);
+fi:
+if not assigned(outdir) then outdir := './' fi:
+CallSystem('mkdir -p '.outdir);
+
+setenv('DARWIN_GENOMES_PATH', GenomesDir);
+ReadProgram(GenomeSummariesPath);
+GS := GenomeSummaries:
+all_genomes := genomes:
+
+res := CallSystem('sed "/^tit/q" '.MatrixPath.' > /tmp/matrix_head');
+if res <> 0 then printf('cannot read %s\n', MatrixPath); exit(1); fi:
+ReadProgram('/tmp/matrix_head'):
+CallSystem('rm -f /tmp/matrix_head');
+
+NS := length(genomes):
+printf('Loading dataset %A with %d genomes\n', Class, NS):
+
+Goff := CreateArray(1..NS+1):
+for i to NS do Goff[i+1] := Goff[i]+GS[genomes[i],TotEntries] od:
+err := traperror(ReadProgram(GenomesDir.'/SubGenomes.drw'));
+if err=lasterror then
+    warning('no SubGenome data found.');
+    SubGenomes := table();
+fi:
+
+GetGenomeData := proc(outdir)
+    gs := [];
+    for gNr to NS do
+        g := genomes[gNr];
+        taxid := parse(GS[g,'TAXONID']);
+        ncbi_taxid := GS[g,'NCBITAXONID'];
+        ncbi_taxid := If(ncbi_taxid = '', taxid,  parse(ncbi_taxid));
+        genome_id  := -9 - gNr;   # numeric id starting at -10 and decreasing
+        gs := append(gs, [taxid, g, GS[g,TotEntries],
+            GS[g,TotAA], Goff[gNr],
+            GS[g,SCINAME], GS[g,COMMONNAME], GS[g, SYNNAME],
+            GS[g,DBRELEASE], GS[g,URL], GS[g,SOURCE], GS[g,DATE], SubGenomes[g]<>unassigned,
+            genomefilenames[gNr], ncbi_taxid, genome_id, g]);
+    od:
+
+    headers := ['NCBITaxonId', 'UniProtSpeciesCode', 'TotEntries', 'TotAA', 'EntryOff', 'SciName', 'CommonName', 'SynName',
+                'Release', 'Url', 'Source', 'Date', 'IsPolyploid', 'DBpath', 'OriginalNCBITaxonId', 'GenomeId', 'Name'];
+    OpenWriting(outdir.'/gs.tsv');
+    printf('%s\n', ConcatStrings(headers, '\t'));
+    for curGS in gs do
+        printf('%s\n', ConcatStrings(curGS, '\t'));
+    od:
+    OpenWriting(previous);
+end:
+err := traperror(GetGenomeData(outdir)):
+if err = lasterror then
+    printf('error while writing gs.tsv\n');
+
+    exit(1);
+fi:

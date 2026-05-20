@@ -17,22 +17,22 @@ import re
 import resource
 import subprocess
 import time
+import uuid
+from typing import List, Iterable, Tuple, Union, Mapping, Dict
 from builtins import str, chr, range, object, super, bytes
 from tempfile import NamedTemporaryFile
 
-# from pebble import ProcessExpired, ProcessPool
-
-import familyanalyzer
 import lxml.html
+import networkx as nx
 import numpy
 import numpy.lib.recfunctions
 import pandas
 import tables
 from PySAIS import sais
 from future.standard_library import hooks
+from tables import NoSuchNodeError
 from tqdm import tqdm
 
-from . import locus_parser
 from . import suffixsearch
 from . import tablefmt
 from .KmerEncoder import KmerEncoder
@@ -168,6 +168,17 @@ def load_tsv_to_numpy(args):
         ("AlignmentOverlap", "f2"),
         ("Distance", "f4"),
     ]
+
+    def reltype_converter(rel):
+        # Handle bytes (NumPy <2) and str (NumPy >=2)
+        if isinstance(rel, bytes):
+            rel_str = rel.decode()
+        else:
+            rel_str = rel
+        # Use slice direction if needed
+        key = rel_str[::read_dir] if len(rel_str) <= 3 else rel_str
+        return relEnum[key]
+
     for curNr, curFn in enumerate([fn, fn.replace(".ext.", ".")]):
         try:
             if gz_is_empty(curFn):
@@ -182,9 +193,7 @@ def load_tsv_to_numpy(args):
                     converters={
                         "EntryNr1": lambda nr: int(nr) + off1,
                         "EntryNr2": lambda nr: int(nr) + off2,
-                        "RelType": lambda rel: (
-                            relEnum[rel[::read_dir].decode()] if len(rel) <= 3 else relEnum[rel.decode()]
-                        ),
+                        "RelType": reltype_converter,
                         "Score": lambda score: float(score) / 100,
                     },
                 )
@@ -207,7 +216,7 @@ def load_tsv_to_numpy(args):
     return full_table
 
 
-def read_vps_from_tsv(gs, ref_genome, basedir=None):
+def read_vps_from_tsv(gs, ref_genome, basedir=None, check_exist_and_swap=False):
     ref_genome_idx = gs.get_where_list("(UniProtSpeciesCode==code)", condvars={"code": ref_genome})[0]
     job_args = []
     if basedir is None:
@@ -223,6 +232,15 @@ def read_vps_from_tsv(gs, ref_genome, basedir=None):
             gs.cols.UniProtSpeciesCode[g2].decode() + ".orth.txt.gz",
         )
         tup = (fn, off1, off2, g1 != ref_genome_idx)
+        if check_exist_and_swap:
+            if not os.path.exists(fn):
+                fn = os.path.join(
+                    basedir,
+                    gs.cols.UniProtSpeciesCode[g2].decode(),
+                    gs.cols.UniProtSpeciesCode[g1].decode() + ".orth.txt.gz",
+                )
+                tup = (fn, off2, off1, g1 == ref_genome_idx)
+        # tup = (fn, off1, off2, g1 != ref_genome_idx)
         common.package_logger.debug("adding job: %s", tup)
         job_args.append(tup)
 
@@ -233,7 +251,9 @@ def read_vps_from_tsv(gs, ref_genome, basedir=None):
     return numpy.lib.recfunctions.stack_arrays(all_pairs, usemask=False)
 
 
-def load_hogs_at_level(fname, level):
+def load_hogs_at_level(fname, level, outdir=None):
+    if outdir is None:
+        outdir = os.getenv("TMPDIR", "/tmp")
     with tables.open_file(fname, "r") as h5:
         lev = level.encode("utf-8") if isinstance(level, str) else level
         tab = h5.get_node("/HogLevel")
@@ -242,7 +262,10 @@ def load_hogs_at_level(fname, level):
         hogs = numpy.fromiter(hog_it, dtype=extended_dtype)
         hogs.sort(order="ID")
         hogs["IdxPerLevelTable"] = numpy.arange(len(hogs))
-        return hogs
+    tmp_id = uuid.uuid4().hex
+    out_path = os.path.join(outdir, f"hog-{tmp_id}.npz")
+    numpy.savez_compressed(out_path, hogs=hogs)
+    return level, out_path
 
 
 class DataImportError(Exception):
@@ -324,6 +347,42 @@ def create_index_for_columns(tab, *cols):
             tab.colinstances[col].reindex_dirty()
 
 
+def sort_table(tab: tables.Table, col_order: Union[List[str], str]):
+    if isinstance(col_order, List):
+        main_col, *cols = col_order
+    else:
+        main_col, cols = col_order, None
+    if not tab.colindexed[main_col]:
+        create_index_for_columns(tab, main_col)
+    parent, name = tab._v_parent, tab.name
+    tmpname = tab.name + "_not_sorted"
+    tab.rename(tmpname)
+    new_tab = tab._v_file.create_table(
+        parent,
+        name,
+        tab.description,
+        tab.title,
+        expectedrows=len(tab),
+    )
+    dtype = tab.dtype
+    it = map(lambda row: row.fetch_all_fields(), tab.itersorted(sortby=main_col))
+    buf, cnt = [], 0
+    for pivot, row_iter in itertools.groupby(it, key=lambda row: row[main_col]):
+        arr = numpy.fromiter(row_iter, dtype=dtype)
+        if cols:
+            arr.sort(order=cols)
+        buf.append(arr)
+        cnt += len(arr)
+        if cnt > 1_000_000:
+            new_tab.append(numpy.concatenate(buf))
+            buf, cnt = [], 0
+    if len(buf) > 0:
+        new_tab.append(numpy.concatenate(buf))
+    create_index_for_columns(new_tab, *col_order)
+    tab.remove()
+    return new_tab
+
+
 def create_fast_famhoglevel_lookup(hoglevtab):
     max_fam_nr = hoglevtab[hoglevtab.colindexes["Fam"][-1]]["Fam"]
     lookup = numpy.zeros(max_fam_nr + 1, dtype=[("start", "i4"), ("stop", "i4")])
@@ -350,7 +409,7 @@ def create_and_store_fast_famhoglevel_lookup(h5, hoglevtab, array_path):
 
 
 class DarwinExporter(object):
-    DB_SCHEMA_VERSION = "3.7"
+    DB_SCHEMA_VERSION = "3.8"
     DRW_CONVERT_FILE = os.path.abspath(os.path.splitext(__file__)[0] + ".drw")
 
     def __init__(self, path, logger=None, mode=None):
@@ -362,8 +421,8 @@ class DarwinExporter(object):
         self.h5 = tables.open_file(fn, mode=mode[0], filters=self._compr)
         self.logger.info("opened {} in {} mode, options {} ; pyoma {}".format(fn, mode, str(self._compr), version()))
         if mode == "write":
-            self.h5.root._f_setattr("convertion_start", time.strftime("%c"))
-            self.h5.root._f_setattr("pyoma_version", version())
+            self.h5.set_node_attr("/", "convertion_start", time.strftime("%c"))
+            self.h5.set_node_attr("/", "pyoma_version", version())
 
     def call_darwin_export(self, func):
         return callDarwinExport(func, self.DRW_CONVERT_FILE)
@@ -405,7 +464,7 @@ class DarwinExporter(object):
                         break
         raise DataImportError("No version information found")
 
-    def add_version(self, release_char=None):
+    def add_version(self, release: str = None, release_char: str = None) -> None:
         if release_char is not None:
             if not re.match(r"^[A-Z]*$", release_char):
                 raise ValueError(
@@ -413,11 +472,11 @@ class DarwinExporter(object):
                 )
         else:
             release_char = ""
-        version = self.get_version()
+        version = release if release else self.get_version()
         self.h5.set_node_attr("/", "oma_version", version)
         self.h5.set_node_attr("/", "oma_release_char", release_char)
-        self.h5.set_node_attr("/", "pytables", tables.get_pytables_version())
-        self.h5.set_node_attr("/", "hdf5_version", tables.get_hdf5_version())
+        self.h5.set_node_attr("/", "pytables", tables.__version__)
+        self.h5.set_node_attr("/", "hdf5_version", tables.hdf5_version)
         self.h5.set_node_attr("/", "db_schema_version", self.DB_SCHEMA_VERSION)
 
     def add_species_data(self):
@@ -629,12 +688,12 @@ class DarwinExporter(object):
             tab.modify_column(column=merged[source].to_numpy(), colname=target)
         tab.flush()
 
-    def _add_sequence(self, sequence, row, sequence_array, off, typ="Seq"):
+    def _add_sequence(self, sequence, row, sequence_array, typ="Seq"):
         # add ' ' after each sequence (Ascii is smaller than
         # any AA, allows to build PAT array with split between
         # sequences.
         seqLen = len(sequence) + 1
-        row[typ + "BufferOffset"] = off
+        row[typ + "BufferOffset"] = len(sequence_array)
         row[typ + "BufferLength"] = seqLen
         if typ == "CDNA":
             sequence = sequence.replace("X", "N")
@@ -646,109 +705,6 @@ class DarwinExporter(object):
         sequence_array.append(seqNumpyObj)
         if typ == "Seq":
             row["MD5ProteinHash"] = hashlib.md5(sequence.encode("utf-8")).hexdigest()
-        return seqLen
-
-    def add_proteins(self):
-        gsNode = self.h5.get_node("/Genome")
-        nrProt = sum(gsNode.cols.TotEntries)
-        nrAA = sum(gsNode.cols.TotAA)
-        protGrp = self._get_or_create_node("/Protein", "Root node for protein (oma entries) information")
-        protTab = self.h5.create_table(protGrp, "Entries", tablefmt.ProteinTable, expectedrows=nrProt)
-        seqArr = self.h5.create_earray(
-            protGrp,
-            "SequenceBuffer",
-            tables.StringAtom(1),
-            (0,),
-            "concatenated protein sequences",
-            expectedrows=nrAA + nrProt,
-        )
-        cdnaArr = self.h5.create_earray(
-            protGrp,
-            "CDNABuffer",
-            tables.StringAtom(1),
-            (0,),
-            "concatenated cDNA sequences",
-            expectedrows=3 * nrAA + nrProt,
-        )
-        seqOff = cdnaOff = 0
-        loc_parser = locus_parser.LocusParser()
-        for gs in gsNode.iterrows():
-            genome = gs["UniProtSpeciesCode"].decode()
-            cache_file = os.path.join(
-                os.getenv("DARWIN_NETWORK_SCRATCH_PATH", ""),
-                "pyoma",
-                "prots",
-                "{}.json".format(genome),
-            )
-            if os.path.exists(cache_file):
-                with open(cache_file, "r") as fd:
-                    data = json.load(fd)
-            else:
-                data = self.call_darwin_export("GetProteinsForGenome({})".format(genome))
-
-            if len(data["seqs"]) != gs["TotEntries"]:
-                raise DataImportError(
-                    "number of entries ({:d}) does "
-                    "not match number of seqs ({:d}) for {}".format(len(data["seqs"]), gs["TotEntries"], genome)
-                )
-
-            locTab = self.h5.create_table(
-                "/Protein/Locus",
-                genome,
-                tablefmt.LocusTable,
-                createparents=True,
-                expectedrows=gs["TotEntries"] * 4,
-            )
-
-            cnt_missmatch_locus = 0
-            cnt_genes = 0
-            for nr in range(gs["TotEntries"]):
-                eNr = data["off"] + nr + 1
-                protTab.row["EntryNr"] = eNr
-                protTab.row["OmaGroup"] = data["ogs"][nr]
-
-                seqOff += self._add_sequence(data["seqs"][nr], protTab.row, seqArr, seqOff)
-                cdnaOff += self._add_sequence(data["cdna"][nr], protTab.row, cdnaArr, cdnaOff, "CDNA")
-
-                protTab.row["Chromosome"] = data["chrs"][nr]
-                protTab.row["AltSpliceVariant"] = data["alts"][nr]
-                protTab.row["OmaHOG"] = b" "  # will be assigned later
-                protTab.row["CanonicalId"] = b" "  # will be assigned later
-                if protTab.row["AltSpliceVariant"] == 0 or protTab.row["AltSpliceVariant"] == protTab.row["EntryNr"]:
-                    cnt_genes += 1  # main isoforms of gene
-
-                locus_str = data["locs"][nr]
-                try:
-                    locus_tab = loc_parser.parse(locus_str, eNr)
-                    locTab.append(locus_tab)
-                    len_cds = sum(z["End"] - z["Start"] + 1 for z in locus_tab)
-                    if len_cds != protTab.row["CDNABufferLength"] - 1:
-                        self.logger.debug(
-                            "sum of exon lengths differ with cdna sequence for {}: {} vs {}".format(
-                                eNr, len_cds, protTab.row["CDNABufferLength"] - 1
-                            )
-                        )
-                        cnt_missmatch_locus += 1
-
-                    protTab.row["LocusStart"] = locus_tab["Start"].min()
-                    protTab.row["LocusEnd"] = locus_tab["End"].max()
-                    protTab.row["LocusStrand"] = locus_tab[0]["Strand"]
-                except ValueError as e:
-                    self.logger.warning(e)
-                protTab.row["SubGenome"] = data["subgenome"][nr].encode("ascii")
-                protTab.row.append()
-            protTab.flush()
-            seqArr.flush()
-            gs["TotGenes"] = cnt_genes
-            gs.update()
-            if cnt_missmatch_locus > 0:
-                self.logger.warning("{} missmatches in exon-lengths compared to locus info".format(cnt_missmatch_locus))
-            for n in (protTab, seqArr, locTab):
-                if n.size_in_memory != 0:
-                    self.logger.info(
-                        "worte %s: compression ratio %3f%%" % (n._v_pathname, 100 * n.size_on_disk / n.size_in_memory)
-                    )
-        create_index_for_columns(protTab, "EntryNr", "MD5ProteinHash")
 
     def _write_to_table(self, tab, data):
         if len(data) > 0:
@@ -758,92 +714,6 @@ class DarwinExporter(object):
             )
         else:
             self.logger.info("no data written for %s", tab._v_pathname)
-
-    def add_hogs(self, hog_path=None, hog_file=None, tree_filename=None):
-        """adds the HOGs to the database
-
-        :param str hog_path: optional, directory where the split HOG files are stored or
-                             should be stored. If directory does not exist, the hog_file
-                             is split automatically into individual files and stored there.
-
-        :param str hog_file: File containing all HOGs. if hog_path does not
-                             exist, this file is split and stored in hog_path.
-
-        :param str tree_filename: newick species tree file."""
-        if hog_path is None:
-            hog_path = os.path.normpath(os.path.join(os.environ["DARWIN_NETWORK_SCRATCH_PATH"], "pyoma", "split_hogs"))
-        entryTab = self.h5.get_node("/Protein/Entries")
-        try:
-            release = self.h5.get_node_attr("/", "oma_release_char")
-        except AttributeError:
-            release = ""
-        if tree_filename is None:
-            tree_filename = os.path.join(os.environ["DARWIN_BROWSERDATA_PATH"], "speciestree.nwk")
-        if not os.path.exists(hog_path):
-            if hog_file is None:
-                hog_file = os.path.join(
-                    os.environ["DARWIN_BROWSERDATA_PATH"],
-                    "..",
-                    "downloads",
-                    "oma-hogs.orthoXML.gz",
-                )
-            splitter = OrthoXMLSplitter(hog_file, cache_dir=hog_path, release_char=release)
-            splitter()
-        tax_tab = self.h5.get_node("/Taxonomy")
-        tax_2_code = {
-            int(row["NCBITaxonId"]): row["UniProtSpeciesCode"].decode() for row in self.h5.get_node("/Genome")
-        }
-        hog_converter = HogConverter(entryTab, release, tax_tab, tax_2_code)
-        hog_converter.attach_newick_taxonomy(tree_filename)
-        hogTab = self.h5.create_table(
-            "/",
-            "HogLevel",
-            tablefmt.HOGsTable,
-            "nesting structure for each HOG",
-            expectedrows=1e8,
-        )
-        self.orthoxml_buffer = self.h5.create_earray(
-            "/OrthoXML",
-            "Buffer",
-            tables.StringAtom(1),
-            (0,),
-            "concatenated orthoxml files",
-            expectedrows=1e9,
-            createparents=True,
-        )
-        self.orthoxml_buffer_augmented = self.h5.create_earray(
-            "/OrthoXML",
-            "BufferAugmented",
-            tables.StringAtom(1),
-            (0,),
-            "concatenated augmented orthoxml files",
-            expectedrows=1e9,
-            createparents=True,
-        )
-        self.orthoxml_index = self.h5.create_table(
-            "/OrthoXML",
-            "Index",
-            tablefmt.OrthoXmlHogTable,
-            "Range index per HOG into OrthoXML Buffer",
-            expectedrows=5e6,
-        )
-        for root, dirs, filenames in os.walk(hog_path):
-            for fn in filenames:
-                if fn.endswith(".augmented"):
-                    continue
-                try:
-                    input_file = os.path.join(root, fn)
-                    out_orthoxml = input_file + ".augmented"
-                    levels = hog_converter.convert_file(input_file, store=out_orthoxml)
-                    hogTab.append(levels)
-                    fam_nrs = set([z[0] for z in levels])
-                    self.add_orthoxml(input_file, out_orthoxml, fam_nrs)
-                except Exception as e:
-                    self.logger.error("an error occured while processing " + fn + ":")
-                    self.logger.exception(e)
-        # flushing index table
-        self.orthoxml_index.flush()
-        hog_converter.write_hogs()
 
     def add_orthoxml(self, orthoxml_path, augmented_orthoxml_path, fam_nrs):
         """append orthoxml file content to orthoxml_buffer array and add index for the HOG family"""
@@ -874,18 +744,21 @@ class DarwinExporter(object):
             row["HogAugmentedBufferLength"] = length["augmented"]
             row.append()
 
-    def add_cache_of_hogs_by_level(self, nr_procs=None):
-        self.logger.info("createing cached HogLevel table per level")
+    def add_cache_of_hogs_by_level(self, lev2tax=None, nr_procs=None):
+        self.logger.info("creating cached HogLevel table per level")
         hl_tab = self.h5.get_node("/HogLevel")
-        temp_hoglevel_file = os.path.join(os.getenv("DARWIN_NETWORK_SCRATCH_PATH"), "tmp-hoglevel.h5")
+        temp_hoglevel_file = os.path.join(os.getenv("DARWIN_NETWORK_SCRATCH_PATH", "./"), "tmp-hoglevel.h5")
         with tables.open_file(temp_hoglevel_file, "w") as hlfh:
             hl_tab._f_copy(hlfh.root)
             create_index_for_columns(hlfh.get_node("/HogLevel"), "Level")
 
         rel_levels = set(hl_tab.read(field="Level"))
-        self.logger.info("found {} levels, start extracting hogs in parallel".format(len(rel_levels)))
-        lev2tax = {row["Name"]: int(row["NCBITaxonId"]) for row in self.h5.get_node("/Taxonomy").read()}
-        lev2tax[b"LUCA"] = 0
+        remaining_levels = len(rel_levels)
+        self.logger.info("found %d levels, start extracting hogs in parallel", remaining_levels)
+
+        if lev2tax is None:
+            lev2tax = {row["Name"]: int(row["NCBITaxonId"]) for row in self.h5.get_node("/Taxonomy").read()}
+            lev2tax[b"LUCA"] = 0
         idx_per_level = numpy.zeros(len(hl_tab), "i4")
         with concurrent.futures.ProcessPoolExecutor(max_workers=nr_procs) as pool:
             future_to_level = {
@@ -894,9 +767,12 @@ class DarwinExporter(object):
             for future in concurrent.futures.as_completed(future_to_level):
                 level = future_to_level[future]
                 try:
-                    hogs = future.result()
+                    level, hog_path = future.result()
+                    hogs = numpy.load(hog_path)["hogs"]
+                    os.remove(hog_path)
                     # fallback to level if taxid is not known
                     tab_name = "tax{}".format(lev2tax.get(level, level.decode()))
+                    self.logger.info("found %d hogs at level %s; store in %s", len(hogs), level, tab_name)
                     tab = self.h5.create_table(
                         where=f"/AncestralGenomes/{tab_name}",
                         name="Hogs",
@@ -907,6 +783,10 @@ class DarwinExporter(object):
                     )
                     create_index_for_columns(tab, "Fam", "IsRoot", "NrMemberGenes", "CompletenessScore")
                     idx_per_level[hogs["HogLevelRowIdx"]] = hogs["IdxPerLevelTable"]
+                    remaining_levels -= 1
+                    self.logger.info(
+                        "Hogs_by_level created for %s. Remaining levels to process: %d", level, remaining_levels
+                    )
                 except Exception as exc:
                     msg = "cannot store cached hogs for {}".format(level)
                     self.logger.exception(msg)
@@ -1021,80 +901,73 @@ class DarwinExporter(object):
         ec_tab = self.h5.get_node("/Annotations/EC")
         create_index_for_columns(ec_tab, "EntryNr", "ECacc")
 
-        self.logger.info("creating index for domains (EntryNr)")
-        domtab = self.h5.get_node("/Annotations/Domains")
-        create_index_for_columns(domtab, "EntryNr", "DomainId")
-
         self.logger.info("creating indexes for HOG to prevalent domains " "(Fam and DomainId)")
         dom2hog_tab = self.h5.get_node("/HOGAnnotations/Domains")
         create_index_for_columns(dom2hog_tab, "DomainId")
         domprev_tab = self.h5.get_node("/HOGAnnotations/DomainArchPrevalence")
         create_index_for_columns(domprev_tab, "Fam")
 
-        self.logger.info("createing indexes for Domain Descriptions")
-        domdesc = self.h5.get_node("/Annotations/DomainDescription")
-        create_index_for_columns(domdesc, "DomainId")
-        suffixsearch.create_suffix_index(domdesc, "Description")
+    DEFAULT_XREFSOURCE_ORDER = (
+        "UniProtKB/SwissProt",
+        "UniProtKB/TrEMBL",
+        "Ensembl Protein",
+        "Ensembl Gene",
+        "FlyBase",
+        "WormBase",
+        "EnsemblGenomes",
+        "RefSeq",
+        "SourceAC",
+    )
 
-    def _iter_canonical_xref(self):
-        """extract one canonical xref id for each protein.
+    def _iter_canonical_xref(self, xrefsource_order=None):
+        """Extract one canonical xref id per protein.
 
-        We take the first valid xref per gene with the ordering of xrefsources
-        as given in the xrefsource_order."""
-        xrefsource_order = (
-            "UniProtKB/SwissProt",
-            "UniProtKB/TrEMBL",
-            "Ensembl Gene",
-            "Ensembl Protein",
-            "FlyBase",
-            "WormBase",
-            "EnsemblGenomes",
-            "RefSeq",
-            "SourceID",
-        )
+        Yields (EntryNr, XRefId) using the priority order given by xrefsource_order
+        (highest priority first). Defaults to DEFAULT_XREFSOURCE_ORDER."""
+        if xrefsource_order is None:
+            xrefsource_order = self.DEFAULT_XREFSOURCE_ORDER
 
-        xrefs = self.h5.get_node("/XRef")
+        self.logger.info(f"using priority order: {xrefsource_order}")
+        xrefs: tables.Table = self.h5.get_node("/XRef")
         source_enum = xrefs.get_enum("XRefSource")
+        unknown = [s for s in xrefsource_order if s not in source_enum]
+        if unknown:
+            raise ValueError(f"Unknown XRefSource(s): {unknown}. Valid: {list(source_enum._names)}")
         canonical_sources = [source_enum[z] for z in xrefsource_order]
         max_acceptable_verif_value = xrefs.get_enum("Verification")["unchecked"]
+        current_xref = (1000, "")
         current_protein = None
-        past_proteins = set([])
         for xref in xrefs:
             if xref["Verification"] > max_acceptable_verif_value:
                 continue
             if xref["EntryNr"] != current_protein:
-                if current_protein:
-                    past_proteins.add(current_protein)
-                    yield (current_protein, current_xref[1])
-                current_protein = xref["EntryNr"]
-                current_xref = (1000, b"")  # init with a sentinel
-                if current_protein in past_proteins:
+                if current_protein is not None:
+                    yield current_protein, current_xref[1]
+                enr = xref["EntryNr"]
+                if current_protein is not None and enr <= current_protein:
                     raise DataImportError("Data in /XRef is not grouped w.r.t. EntryNr")
+                current_protein = enr
+                current_xref = (1000, b"")
             try:
                 rank = canonical_sources.index(xref["XRefSource"])
                 if rank < current_xref[0]:
                     current_xref = (rank, xref["XRefId"])
             except ValueError:
                 pass
-        if current_protein:
-            yield (current_protein, current_xref[1])
+        if current_protein is not None:
+            yield current_protein, current_xref[1]
 
-    def add_canonical_id(self):
-        """add one canonical xref id to the /Protein/Entries table."""
+    def add_canonical_id(self, xrefsource_order=None):
+        """Add one canonical xref id to the /Protein/Entries table."""
         self.logger.info("adding canonical ids for each protein...")
-        prot_tab = self.h5.get_node("/Protein/Entries")
+        prot_tab: tables.Table = self.h5.get_node("/Protein/Entries")
         canonical_ids = numpy.chararray(shape=(len(prot_tab),), itemsize=prot_tab.cols.CanonicalId.dtype.itemsize)
-        for eNr, canonical_id in self._iter_canonical_xref():
-            row_nr = eNr - 1
-            row = prot_tab[row_nr]
-            if row["EntryNr"] != eNr:
-                self.logger.warn("Entries table not properly sorted: {}, expected {}".format(row["EntryNr"], eNr))
-                raise DataImportError("Entries table not properly sorted")
-            canonical_ids[row_nr] = canonical_id
+        for eNr, canonical_id in self._iter_canonical_xref(xrefsource_order):
+            canonical_ids[eNr - 1] = canonical_id
         prot_tab.modify_column(0, len(prot_tab), 1, column=canonical_ids, colname="CanonicalId")
         prot_tab.flush()
 
-    def add_domain_info(self, domains):
+    def add_domain_info(self, domains: Iterable, md5_to_enr: Mapping = None):
         self.logger.info("adding domain information...")
         domtab = self.h5.create_table(
             "/Annotations",
@@ -1103,10 +976,11 @@ class DarwinExporter(object):
             createparents=True,
             expectedrows=1e7,
         )
-        entrytab = self.h5.get_node("/Protein/Entries")
-        md5_to_enr = collections.defaultdict(list)
-        for e in entrytab:
-            md5_to_enr[e["MD5ProteinHash"]].append(e["EntryNr"])
+        if md5_to_enr is None:
+            entrytab = self.h5.get_node("/Protein/Entries")
+            md5_to_enr = collections.defaultdict(list)
+            for e in entrytab:
+                md5_to_enr[e["MD5ProteinHash"]].append(e["EntryNr"])
 
         buffer = []
         for i, domain in enumerate(domains):
@@ -1116,10 +990,13 @@ class DarwinExporter(object):
                     domtab.append(buffer)
                     buffer = []
             if i % 50000 == 0:
-                self.logger.info("processed %s domain annotations so far", i)
+                self.logger.info(
+                    "processed %s domain annotations so far. Added %d to database", i, len(buffer) + len(domtab)
+                )
         if len(buffer) > 0:
             domtab.append(buffer)
         domtab.flush()
+        create_index_for_columns(domtab, "EntryNr", "DomainId")
 
     def add_domainname_info(self, domainname_infos):
         self.logger.info("adding domain name information...")
@@ -1141,6 +1018,8 @@ class DarwinExporter(object):
         if len(buffer) > 0:
             self._write_to_table(dom_name_tab, buffer)
         dom_name_tab.flush()
+        create_index_for_columns(dom_name_tab, "DomainId")
+        suffixsearch.create_suffix_index(dom_name_tab, "Description")
 
     def update_summary_stats(self):
         """update the summary statistics of xrefs & go.
@@ -1168,7 +1047,8 @@ class DarwinExporter(object):
                 drop_data=True,
             )
             data = sorted(group_sizes[group_type].items())
-            grp_size_tab.append(data)
+            if len(data) > 0:
+                grp_size_tab.append(data)
 
         cov_fracs = self.add_domain_covered_sites_counts()
         cov_hist, bins = numpy.histogram(cov_fracs[cov_fracs > 0], bins=numpy.linspace(0, 1, 51))
@@ -1201,10 +1081,10 @@ class DarwinExporter(object):
         return gof.cnts, gof.tot_cnts
 
     def count_gene_ontology_summary(self):
-        self.logger.info("Bulding gene ontology annotations summary info")
+        self.logger.info("Building gene ontology annotations summary info")
         go_tab = self.h5.get_node("/Annotations/GeneOntology")
         prot_tab = self.h5.get_node("/Protein/Entries")
-        exp_codes = frozenset([b"EXP", b"IDA", b"IPI", b"IMP", b"IGI" b"IEP"])
+        exp_codes = frozenset([b"EXP", b"IDA", b"IPI", b"IMP", b"IGI", b"IEP"])
         cnts = collections.Counter()
         cur_enr = None
         for (enr, term), row_iter in itertools.groupby(go_tab, operator.itemgetter("EntryNr", "TermNr")):
@@ -1356,7 +1236,8 @@ class DarwinExporter(object):
             "GeneOntologyTermCounts",
             description=tablefmt.GeneOntologyTermCounts,
         )
-        tab.append(cnts)
+        if len(cnts) > 0:
+            tab.append(cnts)
         self.h5.set_node_attr(tab, "total_molecular_function", tot_cnts[0])
         self.h5.set_node_attr(tab, "total_biological_process", tot_cnts[1])
         self.h5.set_node_attr(tab, "total_cellular_component", tot_cnts[2])
@@ -1369,7 +1250,7 @@ class DarwinExporter(object):
         """
         # Ensure we're run in correct order...
         assert "Protein" in self.h5.root, "Add proteins before calc. SA!"
-        idx_compr = tables.Filters(complevel=6, complib="blosc")
+        idx_compr = tables.Filters(complevel=6, complib="blosc2", fletcher32=True)
 
         # Add to separate file if fn is set.
         if fn is None:
@@ -1617,15 +1498,19 @@ def download_url_if_not_present(url, force_copy=False):
 def iter_domains(url):
     DomainTuple = collections.namedtuple("DomainTuple", ("md5", "id", "coords"))
 
-    fname = download_url_if_not_present(url)
+    fname = download_url_if_not_present(url) if "://" in url else url
     if fname is None:
         return
+    if not os.path.exists(fname) or os.path.getsize(fname) == 0:
+        common.package_logger.warning("file %s is empty", fname)
+        return
+
     with common.auto_open(fname, "rt") as uncompressed:
         dialect = csv.Sniffer().sniff(uncompressed.read(4096))
         uncompressed.seek(0)
         csv_reader = csv.reader(uncompressed, dialect)
         col_md5, col_id, col_coord = (None,) * 3
-        coord_fromat_trans = str.maketrans("-,", "::")
+        coord_format_trans = str.maketrans("-,", "::")
 
         for lineNr, row in enumerate(csv_reader):
             if col_md5 is None:
@@ -1636,19 +1521,26 @@ def iter_domains(url):
                 elif len(row) == 3:
                     # additionally created ones, minimal format
                     col_md5, col_id, col_coord = 0, 1, 2
+                elif len(row) == 1 or (len(row) == 2 and row[1] == ""):
+                    common.package_logger.warning(
+                        "file %s has only one columns. Likely md5 hashes of sequences without domain annotations", fname
+                    )
+                    common.package_logger.warning("line %s: %s", lineNr, row)
+                    common.package_logger.warning("skipping this file")
+                    return
                 else:
-                    raise DataImportError("Unknown Domain Annotation format in {}".format(uncompressed.filename))
+                    raise DataImportError(f"Unknown Domain Annotation format in {fname}: {row}")
             try:
                 dom = DomainTuple(
                     row[col_md5],
                     row[col_id],
-                    row[col_coord].translate(coord_fromat_trans),
+                    row[col_coord].translate(coord_format_trans),
                 )
                 if lineNr < 10:
                     # do some sanity checks on the first few lines
                     if re.match(r"[0-9a-f]{32}$", dom.md5) is None:
                         raise DataImportError("md5 hash of line {:d} has unexpected values: {}".format(lineNr, dom.md5))
-                    if re.match(r"([1-4]\.\d+\.\d+\.\d+|PF\d+)$", dom.id) is None:
+                    if re.match(r"([1-6]\.\d+\.\d+\.\d+|PF\d+)$", dom.id) is None:
                         raise DataImportError("Domain-ID of line {:d} has unexpected value: {}".format(lineNr, dom.id))
                     if re.match(r"\d+:\d+", dom.coords) is None:
                         raise DataImportError(
@@ -1656,11 +1548,11 @@ def iter_domains(url):
                         )
                 yield dom
             except Exception:
-                common.package_logger.exception("cannot create tuple from line {}".format(lineNr))
+                common.package_logger.exception(f"cannot create tuple from line {lineNr}: {row}")
 
 
 def only_pfam_or_cath_domains(iterable):
-    cath_re = re.compile(r"[1-4]\.")
+    cath_re = re.compile(r"[1-6]\.")
     for dom in iterable:
         if dom.id.startswith("PF") or cath_re.match(dom.id) is not None:
             yield dom
@@ -1669,32 +1561,38 @@ def only_pfam_or_cath_domains(iterable):
 def filter_duplicated_domains(iterable):
     """filter duplicated domain annotations that come from different proteins
     with the exact same sequence."""
-    seen = set([])
+    max_cache_size = 2**20 - 100
+    seen_set = set()
+    seen = collections.deque(maxlen=max_cache_size + 100)  # Fixed-size cache
     ignored = 0
     for dom in iterable:
-        if not dom in seen:
-            seen.add(dom)
+        if not dom in seen_set:
             yield dom
+            seen.append(dom)
+            seen_set.add(dom)
+            if len(seen) > max_cache_size:
+                removed = seen.popleft()
+                seen_set.remove(removed)
         else:
             ignored += 1
     common.package_logger.info("skipped {} duplicated domains. {} distinct domains yielded".format(ignored, len(seen)))
 
 
 class RootHOGMetaDataLoader(object):
-    """RootHOG Meta data extractor.
+    """RootHOG metadata extractor.
 
     This class provides the means to import the Keywords of the RootHOGs
     into the hdf5 database. The data is stored under in the node defined
     by :attr:`meta_data_path`, which defaults to /RootHOG/MetaData.
     """
 
-    keyword_name = "RootHOG_Keywords.drw"
-    expected_keys = ["Keywords"]
+    expected_keys: dict[str, str] = {"Keywords": "RootHOG_Keywords.txt"}
     tab_description = tablefmt.RootHOGMetaTable
     meta_data_path = "/RootHOG/MetaData"
 
-    def __init__(self, db):
+    def __init__(self, db, src_path=None):
         self.db = db
+        self.src_path = src_path if src_path is not None else "./"
 
     def add_data(self):
         common.package_logger.info("adding %s", self.meta_data_path)
@@ -1724,14 +1622,16 @@ class RootHOGMetaDataLoader(object):
 
     def _create_db_objects(self, nrows):
         key_path = os.path.join(os.path.dirname(self.meta_data_path), "KeywordBuffer")
-        try:
-            self.db.get_node(self.meta_data_path)
-            self.db.remove_node(self.meta_data_path)
-            self.db.remove_node(key_path)
-        except tables.NoSuchNodeError:
-            pass
         root, name = self.meta_data_path.rsplit("/", 1)
-        grptab = self.db.create_table(root, name, self.tab_description, expectedrows=nrows, createparents=True)
+        try:
+            grptab = self.db.get_node(self.meta_data_path)
+        except tables.NoSuchNodeError:
+            grptab = self.db.create_table(root, name, self.tab_description, expectedrows=nrows, createparents=True)
+        else:
+            try:
+                self.db.remove_node(key_path)
+            except tables.NoSuchNodeError:
+                pass
         buffer = self.db.create_earray(
             root,
             "KeywordBuffer",
@@ -1743,25 +1643,57 @@ class RootHOGMetaDataLoader(object):
         return grptab, buffer
 
     def _fill_data_into_db(self, encoded_data, grp_tab, key_buf):
-        row = grp_tab.row
-        buf_pos = 0
-        keywords = encoded_data["Keywords"]
-        for i in range(len(keywords)):
-            row["FamNr"] = i + 1
-            row["KeywordOffset"] = buf_pos
-            row["KeywordLength"] = len(keywords[i])
-            row.append()
-            key = numpy.ndarray((len(keywords[i]),), buffer=keywords[i], dtype=tables.StringAtom(1))
-            key_buf.append(key)
-            buf_pos += len(keywords[i])
-        grp_tab.flush()
+        assert len(key_buf) == 0
+        nr_groups = len(encoded_data["Keywords"])
+        famnr = numpy.arange(1, nr_groups + 1)
+        kwoff = numpy.zeros(nr_groups, dtype=numpy.int32)
+        kwlen = numpy.zeros(nr_groups, dtype=numpy.int32)
+        for i, kw in enumerate(encoded_data["Keywords"]):
+            kwoff[i] = len(key_buf)
+            kwlen[i] = len(kw)
+            kwa = numpy.ndarray((len(kw),), buffer=kw, dtype=tables.StringAtom(1))
+            key_buf.append(kwa)
         key_buf.flush()
+
+        if len(grp_tab) > 0:
+            assert (
+                len(grp_tab) == nr_groups
+            ), f"existing {grp_tab} table has unexpected number of rows: {len(grp_tab)} vs {nr_groups}"
+            fam_nr_col = grp_tab.read(field="FamNr")
+            assert numpy.all(fam_nr_col == famnr), f"{grp_tab} is not sorted by FamNr"
+            grp_tab.modify_column(column=kwoff, colname="KeywordOffset")
+            grp_tab.modify_column(column=kwlen, colname="KeywordLength")
+        else:
+            row = grp_tab.row
+            for i in range(nr_groups):
+                row["FamNr"] = i + 1
+                row["KeywordOffset"] = kwoff[i]
+                row["KeywordLength"] = kwlen[i]
+                row.append()
+            grp_tab.flush()
 
     def _create_indexes(self, grp_tab):
         create_index_for_columns(grp_tab, "FamNr")
 
     def _load_data(self):
-        return callDarwinExport("GetRootHOGData()")
+        all_data = {}
+        for key, fn in self.expected_keys.items():
+            data = []
+            with open(fn, "rt") as fh:
+                reader = csv.reader(fh, dialect="excel-tab")
+                header_done = False
+                for row in reader:
+                    try:
+                        grp = int(row[0])
+                        header_done = True
+                    except ValueError:
+                        # if header not yet done, skip header
+                        if header_done:
+                            common.package_logger.error(f"Cannot parse line {reader.line_num} of {fn}: {row}")
+                            raise
+                    data.append((grp, row[1]))
+            all_data[key] = [x[1] for x in sorted(data)]
+        return all_data
 
     def _get_nr_of_groups(self):
         tab = self.db.get_node("/HogLevel")
@@ -1774,13 +1706,12 @@ class RootHOGMetaDataLoader(object):
         pass
 
     def _check_textfiles_avail(self):
-        rootdir = os.getenv("DARWIN_BROWSERDATA_PATH", "")
-        fn = os.path.join(rootdir, self.keyword_name)
-        return os.path.exists(fn)
+        expected_files = [os.path.join(self.src_path, fn) for fn in self.expected_keys.values()]
+        return all(os.path.exists(fn) for fn in expected_files)
 
 
 class OmaGroupMetadataLoader(RootHOGMetaDataLoader):
-    """OMA Group Meta data extractor.
+    """OMA Group metadata extractor.
 
     This class provides the means to import the Keywords and Fingerprints
     of the OMA Groups into the hdf5 database. The data is stored under
@@ -1788,9 +1719,7 @@ class OmaGroupMetadataLoader(RootHOGMetaDataLoader):
     /OmaGroups/MetaData.
     """
 
-    keyword_name = "Keywords.drw"
-    finger_name = "Fingerprints"
-    expected_keys = ["Keywords", "Fingerprints"]
+    expected_keys = {"Keywords": "Keywords.txt", "Fingerprints": "Fingerprints.txt"}
     tab_description = tablefmt.OmaGroupTable
     meta_data_path = "/OmaGroups/MetaData"
 
@@ -1814,9 +1743,6 @@ class OmaGroupMetadataLoader(RootHOGMetaDataLoader):
     def _create_indexes(self, grp_tab):
         create_index_for_columns(grp_tab, "Fingerprint", "GroupNr")
 
-    def _load_data(self):
-        return callDarwinExport("GetGroupData()")
-
     def _get_nr_of_groups(self):
         etab = self.db.get_node("/Protein/Entries")
         try:
@@ -1830,12 +1756,6 @@ class OmaGroupMetadataLoader(RootHOGMetaDataLoader):
             cnts = cnts[1:]
         assert len(cnts) == self._get_nr_of_groups()
         return cnts
-
-    def _check_textfiles_avail(self):
-        rootdir = os.getenv("DARWIN_BROWSERDATA_PATH", "")
-        fn1 = os.path.join(rootdir, self.keyword_name)
-        fn2 = os.path.join(rootdir, self.finger_name)
-        return os.path.exists(fn1) and os.path.exists(fn2)
 
 
 class DescriptionManager(object):
@@ -1977,133 +1897,6 @@ class GeneOntologyManager(object):
                     self._go_buf.append((enr, term_nr, evi, ref.encode("utf-8")))
             if len(self._go_buf) > 2e6:
                 self._flush_buffers()
-
-
-class GroupAnnotatorInclGeneRefs(familyanalyzer.GroupAnnotator):
-    def _annotateGroupR(self, node, og, idx=0):
-        is_geneRef = familyanalyzer.OrthoXMLQuery.is_geneRef_node(node)
-        is_og = self.parser.is_ortholog_group(node)
-        if is_og or is_geneRef:
-            if self.parser.is_paralog_group(node.getparent()) or node.getparent().tag == "{{{ns0}}}groups".format(
-                **self.parser.ns
-            ):
-                # direct children of a paralogGroup. set IsRoot to true in most general TaxRange property tag
-                prop_tag = "{{{ns0}}}property".format(**self.parser.ns)
-                for child in node[::-1]:
-                    if child.tag == prop_tag and child.attrib["name"] == "TaxRange":
-                        child.attrib["IsRoot"] = str(True)
-                        break
-
-        if is_geneRef:
-            node.set("LOFT", og)
-        else:
-            super()._annotateGroupR(node, og, idx)
-
-
-class HogConverter(object):
-    def __init__(self, entry_tab, release_char=None, tax_tab=None, tax_2_code=None):
-        self.fam_re = re.compile(r"HOG:(?P<release>[A-Z]+)?(?P<fam_nr>\d+)")
-        self.hogs = numpy.zeros(shape=(len(entry_tab) + 1,), dtype=entry_tab.cols.OmaHOG.dtype)
-        self.entry_tab = entry_tab
-        self.taxrange_2_taxid = self._extract_taxrange_2_taxid_map(tax_tab) if tax_tab else None
-        self.taxid_2_code = tax_2_code
-        if release_char is None:
-            self.release_char = ""
-        elif re.match(r"^[A-Z]?$", release_char):
-            self.release_char = release_char
-        else:
-            raise ValueError(
-                "invalid release_char value: {}. Expected is a single capital ascii character".format(release_char)
-            )
-
-    def _extract_taxrange_2_taxid_map(self, tax_tab):
-        return {row["Name"].decode(): int(row["NCBITaxonId"]) for row in tax_tab}
-
-    def attach_newick_taxonomy(self, tree):
-        self.taxonomy = familyanalyzer.NewickTaxonomy(tree)
-
-    def _assert_hogid_has_correct_prefix(self, fa_parser):
-        for grp in fa_parser.getToplevelGroups():
-            if not grp.get("id").startswith("HOG:{:s}".format(self.release_char)):
-                grp.set("id", "HOG:{:s}{:07d}".format(self.release_char, int(grp.get("id"))))
-
-    def convert_file(self, fn, store=None):
-        p = familyanalyzer.OrthoXMLParser(fn)
-        self._assert_hogid_has_correct_prefix(p)
-        if hasattr(self, "taxonomy"):
-            tax = self.taxonomy
-        else:
-            tax = familyanalyzer.TaxonomyFactory.newTaxonomy(p)
-        annotator = GroupAnnotatorInclGeneRefs(p, self.taxrange_2_taxid, self.taxid_2_code)
-        annotator.annotateMissingTaxRanges(tax)
-        annotator.annotateDoc()
-
-        levs = []
-        for fam in p.getToplevelGroups():
-            m = self.fam_re.match(self.get_hog_id(fam))
-            fam_nr = int(m.group("fam_nr"))
-            for taxnode in familyanalyzer.OrthoXMLQuery.getTaxRangeNodes(fam, recursively=True):
-                ognode = taxnode.getparent()
-                levs.append(
-                    (fam_nr, self.get_hog_id(ognode), taxnode.get("value"))
-                    + self.get_hog_scores(ognode, taxnode)
-                    + (
-                        self.get_nr_member_genes(ognode),
-                        bool(taxnode.get("IsRoot", False)),
-                        -1,
-                    )
-                )
-
-        geneNodes = p.root.findall(".//{{{ns0}}}geneRef".format(**familyanalyzer.OrthoXMLParser.ns))
-        for x in geneNodes:
-            self.hogs[int(x.get("id"))] = x.get("LOFT")
-        if store is not None:
-            p.write(store, pretty_print=True)
-        return levs
-
-    def write_hogs(self):
-        """update the Entry Table with the newly collected OmaHOG values for all
-        the proteins at once.
-
-        .. note: This method will overwrite any previous value of the OmaHOG column"""
-        self.entry_tab.modify_column(0, len(self.entry_tab), 1, self.hogs[1:], "OmaHOG")
-        self.entry_tab.flush()
-
-    def get_hog_id(self, node):
-        try:
-            id = node.get("id")
-            id = id.split("_")[0]
-        except AttributeError:
-            id = node.get("og")
-        return id
-
-    def get_hog_scores(self, og_node, tax_node):
-        """extract the scores associated with an orthologGroup node
-
-        only scores that are defined in HOGsTable are extract. The method
-        returns a tuple with the scores in the order of the score fields."""
-        all_score_ids = ("CompletenessScore", "ImpliedLosses")
-        parse_fun = {"CompletenessScore": float, "ImpliedLosses": int}
-        scores = collections.OrderedDict([(score, tablefmt.HOGsTable.columns[score].dflt) for score in all_score_ids])
-        for score in og_node.iterfind("{*}score"):
-            score_id = score.get("id")
-            scores[score_id] = parse_fun[score_id](score.get("value"))
-        # might be overwritten in tax_node (more specific if available)
-        for score_id in all_score_ids:
-            val = tax_node.get(score_id)
-            if val is not None:
-                scores[score_id] = parse_fun[score_id](val)
-        return tuple(scores.values())
-
-    def get_nr_member_genes(self, og_node):
-        for child in og_node:
-            if (
-                child.tag == "{{{ns0}}}property".format(**familyanalyzer.OrthoXMLParser.ns)
-                and child.get("name") == "NrMemberGenes"
-            ):
-                return int(child.get("value"))
-        common.package_logger.warning("couldn't find NrMemberGenes property. scanning xml file for geneRefs")
-        return len(familyanalyzer.OrthoXMLQuery.getGeneRefNodes(og_node))
 
 
 class XRefImporter(object):
@@ -2446,7 +2239,7 @@ class CathDomainNameParser(object):
     source = b"CATH/Gene3D"
 
     def __init__(self, url):
-        self.fname = download_url_if_not_present(url)
+        self.fname = download_url_if_not_present(url) if "://" in url else url
 
     def parse(self):
         with common.auto_open(self.fname, "rt") as fh:
@@ -2551,12 +2344,14 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
     with open(fpath, "rt") as fh:
         genomes = json.load(fh)
     os.rename(fpath, fpath + ".bak")
+    from .db import Database
 
-    def traverse(node, parent_hogs=None, parent_hogs_support=None):
+    db = Database(h5.filename)
+    completeness_cutoffs = numpy.linspace(0, 1, 10, endpoint=False)
+
+    def traverse(node, parent_hogs=None):
         if parent_hogs is None:
-            parent_hogs = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
-        if parent_hogs_support is None:
-            parent_hogs_support = numpy.array([], dtype=h5.get_node("/HogLevel").dtype)
+            parent_hogs = [numpy.array([], dtype=h5.get_node("/HogLevel").dtype) for _ in completeness_cutoffs]
 
         try:
             n = node["name"].encode("utf-8")
@@ -2573,23 +2368,26 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
                 node["nr_hogs"] = 0
                 raise ValueError("not in taxonomy: {}".format(n))
 
-            for modif, completeness, parent in zip(["", "_support"], [0.0, 0.2], [parent_hogs, parent_hogs_support]):
+            hog_level = []
+            hog_data_by_completeness = {}
+            try:
+                syn_graph = db.get_syntenic_hogs(level=n, evidence="linearized")
+            except NoSuchNodeError:
+                syn_graph = None
+
+            for completeness, parent in zip(completeness_cutoffs, parent_hogs):
                 hogs = h5.get_node(f"/AncestralGenomes/tax{taxid}/Hogs").read_where("CompletenessScore > completeness")
-                if modif == "":
-                    hog_level = hogs
-                else:
-                    hog_level_support = hogs
-                node["nr_hogs{}".format(modif)] = len(hogs)
+                hog_level.append(hogs)
                 diff_parent, dupl_events = hoghelper.compare_levels(parent, hogs, return_duplication_events=True)
                 changes = collections.defaultdict(int)
                 for x in diff_parent["Event"]:
                     changes[x.decode()] += 1
                 changes["duplications"] = dupl_events
-                if "children" not in node and modif != "_support":
-                    # dealing with an extend species, special way to assess gains, based on
+                if "children" not in node and completeness < 0.001:
+                    # dealing with an extent species, special way to assess gains, based on
                     # HOG singletons that are main isoforms
                     assert changes["gained"] == 0
-                    g = numpy.extract(gs["UniProtSpeciesCode"] == node["id"].encode("utf-8"), gs)[0]
+                    g = numpy.extract(gs["UniProtSpeciesCode"] == node["code"].encode("utf-8"), gs)[0]
                     query_main_iso_of_genome = "(EntryNr > {}) & (EntryNr <= {}) & ((AltSpliceVariant == 0) | (AltSpliceVariant == EntryNr))".format(
                         g["EntryOff"], g["EntryOff"] + g["TotEntries"]
                     )
@@ -2599,8 +2397,36 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
                         if p["OmaHOG"] == b"":
                             nr_gains += 1
                     changes["gained"] = nr_gains
-                    node["nr_genes{}".format(modif)] = nr_genes
-                node["evolutionaryEvents{}".format(modif)] = changes
+                    node["nr_genes"] = nr_genes
+                    node["nr_proteins"] = int(g["TotEntries"])
+                    node["last_updated"] = time.strftime("%Y-%b-%d", time.localtime(float(g["Date"])))
+                    node["release"] = g["Release"].decode()
+                if syn_graph is not None:
+                    # Filter nodes with completeness_score >= alpha
+                    filtered_nodes = [
+                        node
+                        for node, data in syn_graph.nodes(data=True)
+                        if data.get("completeness_score", 0) > completeness
+                    ]
+                    # Create a subgraph with these filtered nodes
+                    subgraph = syn_graph.subgraph(filtered_nodes)
+                    # Find the connected components of the subgraph with > 1 protein (no singletons)
+                    contigs = [comp for comp in nx.connected_components(subgraph) if len(comp) > 1]
+                else:
+                    contigs = [[]]
+                hog_data_by_completeness[f"{completeness:.1f}"] = {
+                    "nr_hogs": len(hogs),
+                    "evolutionaryEvents": changes,
+                    "nr_contigs": len(contigs),
+                    "hogs_on_contigs": sum(len(z) for z in contigs),
+                }
+            node["hogs_by_completeness"] = hog_data_by_completeness
+            # backward compatible lookup
+            node["nr_hogs"] = hog_data_by_completeness["0.0"]["nr_hogs"]
+            node["evolutionaryEvents"] = hog_data_by_completeness["0.0"]["evolutionaryEvents"]
+            node["nr_hogs_support"] = hog_data_by_completeness["0.2"]["nr_hogs"]
+            node["evolutionaryEvents_support"] = hog_data_by_completeness["0.2"]["evolutionaryEvents"]
+
             common.package_logger.info(
                 "node: {}: events: {}; events_support: {}".format(
                     n, node["evolutionaryEvents"], node["evolutionaryEvents_support"]
@@ -2609,11 +2435,10 @@ def augment_genomes_json_download_file(fpath, h5, backup=".bak"):
         except Exception:
             common.package_logger.exception("Cannot identify taxonomy id")
             hog_level = parent_hogs.copy()
-            hog_level_support = parent_hogs_support.copy()
 
         if "children" in node:
             for child in node["children"]:
-                traverse(child, parent_hogs=hog_level, parent_hogs_support=hog_level_support)
+                traverse(child, parent_hogs=hog_level)
 
     traverse(genomes)
     with open(fpath, "wt") as fh:

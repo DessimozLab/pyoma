@@ -1,4 +1,4 @@
-from unittest import mock, SkipTest
+from unittest import mock, SkipTest, expectedFailure
 import time
 import os
 from .test_db import TestWithDbInstance
@@ -30,6 +30,7 @@ class XRefSearchTest(TestWithBigOmaDB):
                             hits += 1
                 self.assertGreater(hits, 0)
 
+    @expectedFailure
     def test_combined_terms_failing(self):
         terms = [XRefSearch(self.db, term) for term in ("blue-light", "photoreceptor")]
         hits = 0

@@ -289,6 +289,10 @@ class ProteinEntry(object):
         else:
             return ProteinEntry(self._db, self._entry["AltSpliceVariant"])
 
+    @LazyProperty
+    def structure(self):
+        return self._db.get_structure(self._entry)
+
     def __repr__(self):
         return "<{}({}, {})>".format(self.__class__.__name__, self.entry_nr, self.omaid)
 

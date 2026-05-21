@@ -54,6 +54,7 @@ from .geneontology import GeneOntology, OntologyParser, GOAspect, FreqAwareGeneO
 from .hoghelper import compare_levels, are_orthologous
 from .hogprofile import Profiler
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
+from .structure import StructureDB, StructureInfo
 from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .idmapper import (
     XRefNoApproximateIdMapper,
@@ -284,6 +285,7 @@ class Database(object):
             self.desc_searcher = DescriptionSearcher(self)
         except SuffixIndexError:
             self.desc_searcher = None
+        self.load_structure_db()
         self.hog_profiler = None
         self._re_fam = None
         self.format_hogid = None
@@ -1865,6 +1867,32 @@ class Database(object):
         seqArr = self.db.get_node("/Protein/SequenceBuffer")
         seq = seqArr[entry["SeqBufferOffset"] : entry["SeqBufferOffset"] + entry["SeqBufferLength"] - 1]
         return seq.tobytes()
+
+    def load_structure_db(self, path: Optional[os.PathLike] = None):
+        """Load structure database from an external HDF5 file.
+
+        :param path: path to the structure HDF5 file.
+               Defaults to "structure_db.h5" in the same directory as the main database file."
+        """
+        if path is None:
+            path = Path(self.db.filename).parent / "structure_db.h5"
+        else:
+            path = Path(path)
+        if not path.is_file():
+            logger.warning(f"No structure database found: {path}")
+            return
+        self.structure_db = StructureDB(self, path)
+
+    def get_structure(self, entry) -> Optional[StructureInfo]:
+        """Return 3Di sequence, AA sequence, and source for an entry, or None if unavailable.
+
+        Requires a structure database to be loaded first via :meth:`load_structure_db`.
+
+        :param entry: the entry or entry_nr for which the structure is requested"""
+        if not hasattr(self, "structure_db") or self.structure_db is None:
+            return None
+        entry = self.ensure_entry(entry)
+        return self.structure_db.get(entry)
 
     def get_cdna(self, entry):
         """get the protein sequence of a given entry as a string"""

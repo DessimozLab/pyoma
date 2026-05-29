@@ -373,9 +373,21 @@ class Database(object):
         """return the handle to the database hdf5 file"""
         return self.db
 
-    def get_conversion_date(self):
-        """return the conversion end date from the DB attributes"""
-        return dateutil.parser.parse(self.db.root._v_attrs["conversion_end"])
+    def get_conversion_date(self, kind: Optional[str] = None):
+        """return the conversion end date from the DB attributes
+
+        :param kind: kind of the conversion, must be 'start' or 'end'
+        """
+        all_attributes = ("conversion_end", "conversion_start", "convertion_start")
+        if kind is not None:
+            all_attributes = [a for a in all_attributes if a.find(kind.lower()) >= 0]
+        for attribute in all_attributes:
+            try:
+                date_str = self.db.get_node_attr("/", attribute)
+                return dateutil.parser.parse(date_str)
+            except AttributeError:
+                pass
+        raise DBVersionError("no conversion date found")
 
     def ensure_entry(self, entry):
         """This method allows to use an entry or an entry_nr.

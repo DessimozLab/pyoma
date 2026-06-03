@@ -15,6 +15,7 @@ from .test_db import find_path_to_test_db
 
 class HogIdMapTester(unittest.TestCase):
     db = None
+    lsh_class = hogidmap.HogLSHIndex
 
     @classmethod
     def setUpClass(cls):
@@ -38,43 +39,55 @@ class HogIdMapTester(unittest.TestCase):
     def yield_hog_hashes_for_family_range(self, start=1, stop=40):
         hasher = hogidmap.HogHasher(self.db)
         for fam in range(start, stop):
-            yield from hasher.analyze_fam(fam).items()
+            minhashes, _ = hasher.analyze_fam(fam)
+            yield from minhashes.items()
 
     def test_query_exact_identical_groups_will_return_same_hogids(self):
         hash_fam_40 = list(self.yield_hog_hashes_for_family_range(stop=40))
-        lsh = hogidmap.LSHBuilder(self.hogmapfn, "w")
-        lsh.add_minhashes(hash_fam_40)
-        lsh.compute_lsh()
-        lsh.close()
+        writer = hogidmap.HogHashWriter(self.hogmapfn, "w")
+        writer.add_minhashes(hash_fam_40)
+        writer.close()
 
-        lshq = hogidmap.LSHBuilder(self.hogmapfn, "r")
+        lshq = self.lsh_class(self.hogmapfn)
+        lshq.compute_lsh()
         for hogid, hashes in hash_fam_40:
             best = sorted(lshq.query(hogid, hashes), key=lambda x: -x[2])[0]
             self.assertEqual(best[0], best[1], "wrong mapping for {}: {}".format(hogid, best[1]))
+        lshq.close()
 
     def test_stop_and_continue_building_db_works(self):
         hash_fam_40 = list(self.yield_hog_hashes_for_family_range(stop=40))
-        lsh = hogidmap.LSHBuilder(self.hogmapfn, "w")
         split = len(hash_fam_40) // 2
-        lsh.add_minhashes(hash_fam_40[:split])
-        lsh.close()  # close and reopen for append
-        lsh = hogidmap.LSHBuilder(self.hogmapfn, "a")
-        lsh.add_minhashes(hash_fam_40[split:])
-        lsh.compute_lsh()
+        writer = hogidmap.HogHashWriter(self.hogmapfn, "w")
+        writer.add_minhashes(hash_fam_40[:split])
+        writer.close()
+        writer = hogidmap.HogHashWriter(self.hogmapfn, "a")
+        writer.add_minhashes(hash_fam_40[split:])
+        writer.close()
 
+        lsh = hogidmap.HogLSHIndex(self.hogmapfn)
+        lsh.compute_lsh()
         for hogid, hashes in hash_fam_40:
             best = sorted(lsh.query(hogid, hashes), key=lambda x: -x[2])[0]
             self.assertEqual(best[0], best[1], "wrong mapping for {}: {}".format(hogid, best[1]))
+        lsh.close()
 
     def test_inexisting_hog_has_no_match(self):
-        lsh = hogidmap.LSHBuilder(self.hogmapfn, "w")
-        lsh.add_minhashes(self.yield_hog_hashes_for_family_range(stop=40))
+        writer = hogidmap.HogHashWriter(self.hogmapfn, "w")
+        writer.add_minhashes(self.yield_hog_hashes_for_family_range(stop=40))
+        writer.close()
+
+        lsh = hogidmap.HogLSHIndex(self.hogmapfn)
+        lsh.compute_lsh()
         for hogid, hashes in self.yield_hog_hashes_for_family_range(start=41, stop=44):
             self.assertEqual(0, len(list(lsh.query(hogid, hashes))))
+        lsh.close()
 
     def test_largely_overlap_matches(self):
-        lsh = hogidmap.LSHBuilder(self.hogmapfn, "w")
-        lsh.add_minhashes(self.yield_hog_hashes_for_family_range(start=450, stop=480))
+        writer = hogidmap.HogHashWriter(self.hogmapfn, "w")
+        writer.add_minhashes(self.yield_hog_hashes_for_family_range(start=450, stop=480))
+        writer.close()
+        lsh = hogidmap.HogLSHIndex(self.hogmapfn)
         lsh.compute_lsh()
 
         query_sub_fam = "HOG:0000474.1d.2f"
@@ -95,3 +108,7 @@ class HogIdMapTester(unittest.TestCase):
                 continue
             self.assertEqual(query_sub_fam, res[0][1].decode())
         self.assertLessEqual(no_match, 1)
+
+
+class HogIdMapForestTester(HogIdMapTester):
+    lsh_class = hogidmap.HogLSHForestIndex

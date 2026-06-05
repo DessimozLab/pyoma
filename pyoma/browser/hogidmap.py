@@ -360,8 +360,10 @@ def compute_minhashes_for_db(db_path, output_path, nr_procs=None, per_fam_timeou
 
 
 def jaccard(query_proteins: numpy.ndarray, cand_proteins: numpy.ndarray) -> float:
-    n_common = len(numpy.intersect1d(query_proteins, cand_proteins, assume_unique=True))
-    n_union = len(query_proteins) + len(cand_proteins) - n_common
+    qp = numpy.unique(query_proteins)
+    cp = numpy.unique(cand_proteins)
+    n_common = len(numpy.intersect1d(qp, cp, assume_unique=True))
+    n_union = len(qp) + len(cp) - n_common
     return n_common / n_union if n_union > 0 else 0.0
 
 
@@ -396,6 +398,7 @@ def compare_versions(output_file, target_path, *old_path, index_cls=HogLSHIndex)
             else:
                 use_exact = False
             buffer = []
+            c = collections.Counter()
 
             logger.info(
                 f"{old_fn} --> |hogids|={len(old.hogids)}, |hashes|={len(old.hashes)}, use_exact={bool(use_exact)}"
@@ -413,21 +416,31 @@ def compare_versions(output_file, target_path, *old_path, index_cls=HogLSHIndex)
                     )
                 else:
                     candidates = raw_candidates
+                c["query"] += 1
                 if len(candidates) > 0 and candidates[0][1] != raw_candidates[0][1]:
                     logger.debug(
                         f"exact jaccard changed top hit: old_id={old_id.decode()}, min-hash-jaccard: {raw_candidates[0]}, exact-jaccard: {candidates[0]}"
                     )
+                    c["invert"] += 1
 
                 if len(candidates) > 10 and candidates[6][2] > 0.9:
                     # this is a dubious node, store it for now, maybe try to recover later.
                     # it seems that this happens if the CanonicalId is truncated and hence maps to several ids.
                     dubious.append([old_id])
+                    c["dubious"] += 1
                     continue
                 if len(candidates) > 0 and candidates[0][2] > 0.3:
                     buffer.append((old_id, candidates[0][1], candidates[0][2]))
+                    c["mapped"] += 1
                     if candidates[0][2] < 1:
                         top_jaccard = candidates[0][2]
-                        buffer.extend([(old_id, c[1], c[2]) for c in candidates[1:] if c[2] > 0.5 * top_jaccard])
+                        minor_matches = [(old_id, c[1], c[2]) for c in candidates[1:] if c[2] > 0.5 * top_jaccard]
+                        if minor_matches:
+                            buffer.extend(minor_matches)
+                            c["has_minor"] += 1
+                            c["minor_matches"] += len(minor_matches)
+                else:
+                    c["not_mapped"] += 1
                 if len(buffer) > 10_000:
                     tab.append(buffer)
                     buffer.clear()
@@ -437,6 +450,9 @@ def compare_versions(output_file, target_path, *old_path, index_cls=HogLSHIndex)
             tab.flush()
             dubious.flush()
             old.close()
+
+            msg = [f"{key:20s}: {val:7d}" for key, val in c.items()]
+            logger.info(f"Mapping statistics:\n" + ("*" * 20) + "\n" + "\n".join(msg))
         # build index of Old ids
         tab.colinstances["Old"].create_csindex()
 

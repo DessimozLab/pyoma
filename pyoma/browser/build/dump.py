@@ -1,3 +1,4 @@
+import collections
 import logging
 import sys
 import warnings
@@ -9,6 +10,8 @@ from typing import Tuple
 import tables
 from tables import PerformanceWarning
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+
+from tqdm import tqdm
 
 from .main import setup_logging
 from ..db import Database
@@ -177,6 +180,109 @@ def dump_sequences_and_protein_annotations(conf):
                     )
 
 
+def _load_oma_group_data(db):
+    groups = collections.defaultdict(list)
+    for row in tqdm(db.get_hdf5_handle().get_node("/Protein/Entries").where("OmaGroup > 0"), desc="Loading OMA groups"):
+        groups[int(row["OmaGroup"])].append(int(row["EntryNr"]))
+    meta_tab = db.get_hdf5_handle().get_node("/OmaGroups/MetaData")
+    fingerprints = {
+        int(row["GroupNr"]): row["Fingerprint"].decode() for row in tqdm(meta_tab, desc="Loading fingerprints")
+    }
+    xref_tab = db.get_hdf5_handle().get_node("/XRef")
+    source_code = xref_tab.get_enum("XRefSource")["SourceID"]
+    gene_ids = {
+        int(row["EntryNr"]): row["XRefId"].decode()
+        for row in tqdm(
+            xref_tab.where("XRefSource == source_code", condvars={"source_code": source_code}), desc="Loading gene IDs"
+        )
+    }
+    nr_species = len(db.get_hdf5_handle().get_node("/Genome"))
+    return groups, fingerprints, gene_ids, nr_species
+
+
+def _dump_oma_groups_txt(out, db, groups, fingerprints, gene_ids, nr_species):
+    with auto_open(out, "wt") as fh:
+        fh.write(
+            f"# Orthologous groups from OMA release of {db.get_release_name()}\n"
+            f"# This release has {len(groups)} groups covering {sum(len(z) for z in groups.values())} proteins from {nr_species} species\n"
+            "# Format: group number<tab>Fingerprint<tab>tab-separated list of OMA Entry IDs\n"
+        )
+        id_mapper = db.id_mapper["OMA"]
+        for group_nr in range(1, len(groups) + 1):
+            oma_ids = groups[group_nr]
+            members = "\t".join(map(id_mapper.map_entry_nr, oma_ids))
+            fh.write(f"{group_nr}\t{fingerprints.get(group_nr, 'n/a')}\t{members}\n")
+
+
+def _dump_oma_groups_orthoxml(out, db, groups, fingerprints, gene_ids, nr_species):
+    from html import escape as xml_escape
+
+    nr_proteins_total = db.get_hdf5_handle().get_node("/Protein/Entries").nrows
+    with auto_open(out, "wt") as fh:
+        fh.write(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            f'<orthoXML xmlns="http://orthoXML.org/2011/" version="0.3"'
+            f' origin="OMA" originVersion="{xml_escape(db.get_release_name())}">\n'
+            f" <notes>\n"
+            f'  <stats nrGroups="{len(groups)}" nrSpecies="{nr_species}"'
+            f' nrProt="{nr_proteins_total}" nrProtInGroups="{sum(len(z) for z in groups.values())}" />\n'
+            f" </notes>\n"
+        )
+
+        logger.info("Writing species sections for %d genomes...", nr_species)
+        for genome in tqdm(db.get_hdf5_handle().get_node("/Genome"), desc="Writing genome sections"):
+            entry_off = int(genome["EntryOff"])
+            nr_entries = int(genome["TotEntries"])
+            sci_name = genome["SciName"].decode()
+            ncbi_taxid = int(genome["NCBITaxonId"])
+            db_version = genome["Release"].decode()
+            sp_code = genome["UniProtSpeciesCode"].decode()
+            enr_min = entry_off + 1
+            enr_max = entry_off + nr_entries
+
+            buf = [
+                f' <species name="{xml_escape(sci_name)}" NCBITaxId="{ncbi_taxid}">\n',
+                f'  <database name="{xml_escape(sci_name)}" version="{xml_escape(db_version)}">\n',
+                "   <genes>\n",
+            ]
+            for enr in range(enr_min, enr_max + 1):
+                oma_id = f"{sp_code}{enr - entry_off:05d}"
+                gene_id = xml_escape(gene_ids.get(enr, ""))
+                buf.append(f'    <gene id="{enr}" ')
+                if gene_id != "":
+                    gene_id = gene_id.split("{")[0].strip()
+                    buf.append(f'geneId="{gene_id}" ')
+                buf.append(f'protId="{oma_id}"/>\n')
+            buf.extend(["   </genes>\n", "  </database>\n", " </species>\n"])
+            fh.writelines(buf)
+
+        logger.info("Writing %d OMA groups...", len(groups))
+        fh.write(" <groups>\n")
+        buf = []
+        for grp_nr in tqdm(range(1, len(groups) + 1), desc="Writing groups"):
+            buf.append(f'  <orthologGroup id="{grp_nr}">\n')
+            for j in groups[grp_nr]:
+                buf.append(f'   <geneRef id="{j}" />\n')
+            buf.append(f'   <notes><fingerprint id="{xml_escape(fingerprints[grp_nr])}" /></notes>\n')
+            buf.append("  </orthologGroup>\n")
+            if len(buf) >= 50_000:
+                fh.writelines(buf)
+                buf.clear()
+        if buf:
+            fh.writelines(buf)
+        fh.write(" </groups>\n")
+        fh.write("</orthoXML>\n")
+
+
+def dump_oma_groups(conf):
+    with Database(conf.db) as db:
+        groups, fingerprints, gene_ids, nr_species = _load_oma_group_data(db)
+        if conf.out_orthoxml is not None:
+            _dump_oma_groups_orthoxml(conf.out_orthoxml, db, groups, fingerprints, gene_ids, nr_species)
+        if conf.out_txt is not None:
+            _dump_oma_groups_txt(conf.out_txt, db, groups, fingerprints, gene_ids, nr_species)
+
+
 def parse_command_line_args():
     parser = ArgumentParser(description="Dump various files from the OMA database")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
@@ -225,6 +331,14 @@ def parse_command_line_args():
     seq_parser.add_argument("--out-proteins", help="Output path for protein sequences in FASTA format")
     seq_parser.add_argument("--out-cdna", help="Output path for cDNA sequences in FASTA format")
     seq_parser.add_argument("--out-annotations", help="Output path for protein annotations in TSV format")
+
+    groups_parser = subparsers.add_parser(
+        "oma-groups", help="Dump OMA groups in TXT or OrthoXML format", formatter_class=ArgumentDefaultsHelpFormatter
+    )
+    groups_parser.set_defaults(func=dump_oma_groups)
+    groups_parser.add_argument("--db", required=True, help="Path to database")
+    groups_parser.add_argument("--out-orthoxml", help="Output path for OMA groups in OrthoXML format")
+    groups_parser.add_argument("--out-txt", help="Output path for OMA groups in txt format")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

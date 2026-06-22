@@ -1573,6 +1573,11 @@ class Database(object):
             evidence = evidence_enum[evidence]
         except KeyError:
             raise ValueError(f"Invalid evidence value {evidence}")
+        try:
+            orient_enum = ancestral_node.Synteny.get_enum("Orientation")
+        except KeyError:
+            logger.warning("ancestral synteny: no orientation enum found")
+            orient_enum = None
         edge_data = read_table_where(ancestral_node.Synteny, "Evidence <= {}".format(evidence))
         edges = (
             (
@@ -1582,6 +1587,14 @@ class Database(object):
                     "weight": int(e[2]),
                     "evidence": evidence_enum(e["Evidence"]),
                     "age": float(self.tax.taxid_to_age.get(e["LCA_taxid"], -1)),
+                    **(
+                        {
+                            "orientation": orient_enum(e["Orientation"]),
+                            "orientation_score": float(e["OrientationScore"]),
+                        }
+                        if orient_enum is not None
+                        else {}
+                    ),
                 },
             )
             for e in edge_data

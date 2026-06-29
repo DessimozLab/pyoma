@@ -199,9 +199,17 @@ def _load_oma_group_data(db):
     for row in tqdm(db.get_hdf5_handle().get_node("/Protein/Entries").where("OmaGroup > 0"), desc="Loading OMA groups"):
         groups[int(row["OmaGroup"])].append(int(row["EntryNr"]))
     meta_tab = db.get_hdf5_handle().get_node("/OmaGroups/MetaData")
-    fingerprints = {
-        int(row["GroupNr"]): row["Fingerprint"].decode() for row in tqdm(meta_tab, desc="Loading fingerprints")
-    }
+    kw_buf = db.get_hdf5_handle().get_node("/OmaGroups/KeywordBuffer")
+    fingerprints = {}
+    keywords = {}
+    for row in tqdm(meta_tab, desc="Loading group metadata"):
+        grp_nr = int(row["GroupNr"])
+        fingerprints[grp_nr] = row["Fingerprint"].decode()
+        kw = (
+            kw_buf[int(row["KeywordOffset"]) : int(row["KeywordOffset"]) + int(row["KeywordLength"])].tobytes().decode()
+        )
+        if kw:
+            keywords[grp_nr] = kw
     xref_tab = db.get_hdf5_handle().get_node("/XRef")
     source_code = xref_tab.get_enum("XRefSource")["SourceID"]
     gene_ids = {
@@ -211,7 +219,7 @@ def _load_oma_group_data(db):
         )
     }
     nr_species = len(db.get_hdf5_handle().get_node("/Genome"))
-    return groups, fingerprints, gene_ids, nr_species
+    return groups, fingerprints, keywords, gene_ids, nr_species
 
 
 def _dump_oma_groups_txt(out, db, groups, fingerprints, gene_ids, nr_species):
@@ -288,13 +296,21 @@ def _dump_oma_groups_orthoxml(out, db, groups, fingerprints, gene_ids, nr_specie
         fh.write("</orthoXML>\n")
 
 
+def _dump_oma_groups_keywords(out_keywords, nr_groups, keywords):
+    with auto_open(out_keywords, "wt") as fh:
+        for grp_nr in range(1, nr_groups + 1):
+            fh.write(f"{grp_nr}\t{keywords.get(grp_nr, '-')}\n")
+
+
 def dump_oma_groups(conf):
     with Database(conf.db) as db:
-        groups, fingerprints, gene_ids, nr_species = _load_oma_group_data(db)
+        groups, fingerprints, keywords, gene_ids, nr_species = _load_oma_group_data(db)
         if conf.out_orthoxml is not None:
             _dump_oma_groups_orthoxml(conf.out_orthoxml, db, groups, fingerprints, gene_ids, nr_species)
         if conf.out_txt is not None:
             _dump_oma_groups_txt(conf.out_txt, db, groups, fingerprints, gene_ids, nr_species)
+        if conf.out_keywords is not None:
+            _dump_oma_groups_keywords(conf.out_keywords, keywords)
 
 
 def parse_command_line_args():
@@ -374,6 +390,7 @@ def parse_command_line_args():
     groups_parser.add_argument("--db", required=True, help="Path to database")
     groups_parser.add_argument("--out-orthoxml", help="Output path for OMA groups in OrthoXML format")
     groups_parser.add_argument("--out-txt", help="Output path for OMA groups in txt format")
+    groups_parser.add_argument("--out-keywords", help="Output path for OMA group keywords (TSV: group_nr<tab>keywords)")
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

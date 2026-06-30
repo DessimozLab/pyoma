@@ -311,7 +311,7 @@ def dump_oma_groups(conf):
         if conf.out_txt is not None:
             _dump_oma_groups_txt(conf.out_txt, db, groups, fingerprints, gene_ids, nr_species)
         if conf.out_keywords is not None:
-            _dump_oma_groups_keywords(conf.out_keywords, keywords)
+            _dump_oma_groups_keywords(conf.out_keywords, len(groups), keywords)
 
 
 def dump_id_history(conf):

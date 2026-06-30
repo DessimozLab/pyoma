@@ -1,5 +1,6 @@
 import collections
 import logging
+import os
 import sys
 import warnings
 from contextlib import ExitStack
@@ -313,6 +314,68 @@ def dump_oma_groups(conf):
             _dump_oma_groups_keywords(conf.out_keywords, keywords)
 
 
+def dump_id_history(conf):
+    """Write IDHistory-{old}-to-{new}.txt.gz files for each previous-release database."""
+    os.makedirs(conf.out, exist_ok=True)
+
+    with tables.open_file(conf.db, "r") as new_h5:
+        new_release = str(new_h5.get_node_attr("/", "oma_version"))
+        new_genome_tab = new_h5.get_node("/Genome").read()
+        new_prot_tab = new_h5.get_node("/Protein/Entries")
+
+        new_genomes = {row["UniProtSpeciesCode"]: row for row in new_genome_tab}
+
+        for old_db_path in conf.prev_dbs:
+            with tables.open_file(old_db_path, "r") as old_h5:
+                old_release = str(old_h5.get_node_attr("/", "oma_version"))
+                old_genome_tab = old_h5.get_node("/Genome").read()
+                old_prot_tab = old_h5.get_node("/Protein/Entries")
+
+                out_fn = os.path.join(conf.out, f"IDHistory-{old_release}-to-{new_release}.txt.gz")
+                logger.info("writing %s", out_fn)
+
+                with auto_open(out_fn, "wt") as fh:
+                    fh.write(
+                        f"# OMA IDs mapping from release {old_release} to {new_release} of updated genomes.\n"
+                        "#\n"
+                        "#  The OMA IDs of an updated genome are not stable. We provide here a\n"
+                        "#  mapping of those proteins, which still have an identical protein sequence. We\n"
+                        "#  do not provide a mapping for proteins which changed in their sequence.\n"
+                        "#  Species which were not updated are not included in this mapping.\n"
+                        "# Format: old OMA ID<tab>new OMA ID\n"
+                    )
+
+                    n_mapped = 0
+                    for old_gs in old_genome_tab:
+                        code = old_gs["UniProtSpeciesCode"]
+                        if code not in new_genomes:
+                            continue
+                        new_gs = new_genomes[code]
+                        if old_gs["Date"] == new_gs["Date"]:
+                            continue
+
+                        new_off = int(new_gs["EntryOff"])
+                        new_tot = int(new_gs["TotEntries"])
+                        new_prots = new_prot_tab[new_off : new_off + new_tot]
+                        new_md5_to_pnr = {}
+                        for i, row in enumerate(new_prots):
+                            md5 = bytes(row["MD5ProteinHash"])
+                            if md5 not in new_md5_to_pnr:
+                                new_md5_to_pnr[md5] = i + 1
+
+                        old_off = int(old_gs["EntryOff"])
+                        old_tot = int(old_gs["TotEntries"])
+                        old_prots = old_prot_tab[old_off : old_off + old_tot]
+                        code_str = code.decode()
+                        for i, row in enumerate(old_prots):
+                            pnr_new = new_md5_to_pnr.get(bytes(row["MD5ProteinHash"]))
+                            if pnr_new is not None:
+                                fh.write(f"{code_str}{i + 1:05d}\t{code_str}{pnr_new:05d}\n")
+                                n_mapped += 1
+
+                logger.info("wrote %d ID mappings to %s", n_mapped, out_fn)
+
+
 def parse_command_line_args():
     parser = ArgumentParser(description="Dump various files from the OMA database")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
@@ -391,6 +454,24 @@ def parse_command_line_args():
     groups_parser.add_argument("--out-orthoxml", help="Output path for OMA groups in OrthoXML format")
     groups_parser.add_argument("--out-txt", help="Output path for OMA groups in txt format")
     groups_parser.add_argument("--out-keywords", help="Output path for OMA group keywords (TSV: group_nr<tab>keywords)")
+
+    id_history_parser = subparsers.add_parser(
+        "id-history",
+        help="Produce IDHistory files mapping OMA IDs across updated genomes between releases",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    id_history_parser.set_defaults(func=dump_id_history)
+    id_history_parser.add_argument("--db", required=True, help="Path to the current (new) HDF5 database")
+    id_history_parser.add_argument(
+        "--prev-dbs",
+        nargs="+",
+        required=True,
+        metavar="PREV_DB",
+        help="Paths to previous-release HDF5 databases",
+    )
+    id_history_parser.add_argument(
+        "--out", default=".", help="Output directory for IDHistory-{old}-to-{new}.txt.gz files"
+    )
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

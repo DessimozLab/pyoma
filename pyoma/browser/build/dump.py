@@ -153,7 +153,7 @@ def _format_locus(exons):
         return "n/a"
     exons = exons[exons["Start"].argsort()]
     if exons["Strand"][0] < 0:
-        parts = [f"complement({e['Start']}..{e['End']})" for e in exons]
+        parts = [f"complement({e['Start']}..{e['End']})" for e in exons[::-1]]
     else:
         parts = [f"{e['Start']}..{e['End']}" for e in exons]
     return f"join({', '.join(parts)})" if len(parts) > 1 else parts[0]

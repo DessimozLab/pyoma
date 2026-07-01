@@ -8,6 +8,7 @@ from collections import defaultdict
 from textwrap import dedent
 from typing import Tuple
 
+import numpy as np
 import tables
 from tables import PerformanceWarning
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
@@ -146,6 +147,94 @@ def _format_main_isoform(prot):
     return "self" if prot.is_main_isoform else prot.get_main_isoform().omaid
 
 
+def _format_locus(exons):
+    """Format a numpy array of locus rows as the canonical location string."""
+    if len(exons) == 0:
+        return "n/a"
+    exons = exons[exons["Start"].argsort()]
+    if exons["Strand"][0] < 0:
+        parts = [f"complement({e['Start']}..{e['End']})" for e in exons]
+    else:
+        parts = [f"{e['Start']}..{e['End']}" for e in exons]
+    return f"join({', '.join(parts)})" if len(parts) > 1 else parts[0]
+
+
+def _dump_annotations(fh, db):
+    """Write protein annotations genome-by-genome to avoid per-protein HDF5 queries."""
+    fh.write(
+        "# Dump of protein annotations (taken from original genome source, except for\n"
+        '# "MainIsoform", which is the splicing form that has the most homologous matches).\n'
+        "#   Note: MainIsoform=='self' indicates that this protein is OMA's main isoform,\n"
+        "#         otherwise it is an OMA ID of the main isoform.\n"
+        "# Format: OMA ID\tOriginal ID\tChromosome/Scaffold\tLocation\tMainIsoform\tDescription\n"
+    )
+
+    h5 = db.db
+    prot_tab = h5.get_node("/Protein/Entries")
+    desc_buf = h5.get_node("/Protein/DescriptionBuffer")
+    xref_tab = h5.get_node("/XRef")
+    src_enum = xref_tab.get_enum("XRefSource")
+    source_code = src_enum["SourceID"]
+
+    for gs in tqdm(h5.get_node("/Genome").read(), desc="genomes"):
+        code = gs["UniProtSpeciesCode"].decode()
+        off = int(gs["EntryOff"])
+        tot = int(gs["TotEntries"])
+        if tot == 0:
+            continue
+
+        # Read all entries for this genome in one slice
+        entries = prot_tab[off : off + tot]
+
+        # Source-ID xrefs for this genome (one range query, not per-protein)
+        enr_min, enr_max = int(entries["EntryNr"].min()), int(entries["EntryNr"].max())
+        src_xrefs = {
+            int(row["EntryNr"]): row["XRefId"].decode()
+            for row in xref_tab.where(
+                "(EntryNr >= enr_min) & (EntryNr <= enr_max) & (XRefSource == source_code)",
+                condvars={"enr_min": enr_min, "enr_max": enr_max, "source_code": source_code},
+            )
+        }
+
+        # Locus table: one read for the entire genome, grouped by entry_nr
+        try:
+            locus_tab = h5.get_node(f"/Protein/Locus/{code}")
+            locus_rows = locus_tab[:]
+        except tables.NoSuchNodeError:
+            locus_rows = None
+
+        locus_by_enr = defaultdict(list)
+        if locus_rows is not None:
+            for row in locus_rows:
+                locus_by_enr[int(row["EntryNr"])].append(row)
+
+        for i, e in enumerate(entries):
+            enr = int(e["EntryNr"])
+            omaid = f"{code}{i + 1:05d}"
+            src_xref = src_xrefs.get(enr, "")
+            chrom = e["Chromosome"].decode()
+            desc = (
+                desc_buf[int(e["DescriptionOffset"]) : int(e["DescriptionOffset"]) + int(e["DescriptionLength"])]
+                .tobytes()
+                .decode()
+            )
+
+            exon_rows = locus_by_enr.get(enr)
+            if exon_rows:
+                locus_str = _format_locus(np.array(exon_rows, dtype=locus_rows.dtype))
+            else:
+                locus_str = "n/a"
+
+            alt = int(e["AltSpliceVariant"])
+            if alt == 0 or alt == enr:
+                main_iso = "self"
+            else:
+                # alt is the entry_nr of the main isoform — compute its OMA ID using genome offset
+                main_iso = f"{code}{alt - off:05d}"
+
+            fh.write(f"{omaid}\t{src_xref}\t{chrom}\t{locus_str}\t{main_iso}\t{desc}\n")
+
+
 def dump_sequences_and_protein_annotations(conf):
     with Database(conf.db) as db:
         with ExitStack() as stack:
@@ -153,34 +242,28 @@ def dump_sequences_and_protein_annotations(conf):
             cdna_fh = stack.enter_context(auto_open(conf.out_cdna, "wt")) if conf.out_cdna else None
             annot_fh = stack.enter_context(auto_open(conf.out_annotations, "wt")) if conf.out_annotations else None
 
+            if annot_fh:
+                logger.info("writing protein annotations to %s", conf.out_annotations)
+                _dump_annotations(annot_fh, db)
             if prot_fh:
                 logger.info("writing protein sequences to %s", conf.out_proteins)
             if cdna_fh:
                 logger.info("writing cDNA sequences to %s", conf.out_cdna)
-            if annot_fh:
-                logger.info("writing protein annotations to %s", conf.out_annotations)
-                annot_fh.write(
-                    "# Dump of protein annotations (taken from original genome source, except for\n"
-                    '# "MainIsoform", which is the splicing form that has the most homologous matches).\n'
-                    "#   Note: MainIsoform=='self' indicates that this protein is OMA's main isoform,\n"
-                    "#         otherwise it is an OMA ID of the main isoform.\n"
-                    "# Format: OMA ID\tOriginal ID\tChromosome/Scaffold\tLocation\tMainIsoform\tDescription\n"
-                )
 
-            for prot, src_xref in _iter_protein_entries(db):
-                if prot_fh is not None:
-                    seq = prot.sequence
-                    if seq:
-                        _write_fasta_record(prot_fh, prot.omaid, seq)
-                if cdna_fh is not None:
-                    cdna = prot.cdna
-                    if cdna:
-                        _write_fasta_record(cdna_fh, prot.omaid, cdna)
-                if annot_fh is not None:
-                    annot_fh.write(
-                        f"{prot.omaid}\t{src_xref}\t{prot.chromosome}\t"
-                        f"{prot.exons}\t{_format_main_isoform(prot)}\t{prot.description}\n"
-                    )
+            if prot_fh is not None or cdna_fh is not None:
+                for prot, src_xref in tqdm(
+                    _iter_protein_entries(db),
+                    desc="Processing proteins",
+                    total=db.db.get_node("/Protein/Entries").nrows,
+                ):
+                    if prot_fh is not None:
+                        seq = prot.sequence
+                        if seq:
+                            _write_fasta_record(prot_fh, src_xref, seq)
+                    if cdna_fh is not None:
+                        cdna = prot.cdna
+                        if cdna:
+                            _write_fasta_record(cdna_fh, src_xref, cdna)
 
 
 def dump_ncbi_linkout(conf):

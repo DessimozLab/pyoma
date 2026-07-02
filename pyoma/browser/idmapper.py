@@ -1,4 +1,4 @@
-from __future__ import division, print_function, unicode_literals
+import abc
 import collections
 import itertools
 import logging
@@ -16,32 +16,70 @@ from ..common import count_elements
 logger = logging.getLogger(__name__)
 
 
-class GeneNamesLookup:
+class AbstractLookup(metaclass=abc.ABCMeta):
+    """Case-insensitive index for fast lookup of XRef identifiers by name.
+
+    Backed by two HDF5 nodes that subclasses declare via class attributes:
+
+    - ``tab_name``: a table with one row per unique (lowercased) identifier,
+      holding at minimum the columns ``XRefId`` (bytes), ``Offset`` (uint),
+      and ``Length`` (uint).  Rows are sorted in memory by ``XRefId`` on load
+      to support O(log n) binary search via :func:`numpy.searchsorted`.
+
+    - ``tab_lookup_name``: a flat array of ``(EntryNr, XRefRow)`` pairs.  For
+      each name row, ``Offset`` and ``Length`` delimit the contiguous slice of
+      this array that lists every protein carrying that name.  ``XRefRow`` is
+      the index of the corresponding row in the main ``/XRef`` table, where the
+      original-case spelling is stored.
+
+    Subclasses only need to set ``tab_name`` and ``tab_lookup_name``; all
+    lookup logic is inherited.  Example::
+
+        class ProteinNamesLookup(AbstractLookup):
+            tab_name = "/XRefIndex/ProteinNames"
+            tab_lookup_name = "/XRefIndex/ProteinNames_lookup"
+    """
+
+    tab_name: str = None
+    tab_lookup_name: str = None
+
     def __init__(self, h5: tables.File):
-        tab = h5.get_node("/XRefIndex/GeneNames").read()
-        self.gene_names = {x["XRefId"]: x for x in tab}
-        self.lookup_tab = h5.get_node("/XRefIndex/GeneNames_lookup")
+        self.names_tab = h5.get_node(self.tab_name).read()
+        self.names_tab.sort(order="XRefId")
+        self.lookup_tab = h5.get_node(self.tab_lookup_name)
 
     def _low(self, item):
         if isinstance(item, str):
             item = item.encode("utf-8")
         return item.lower()
 
+    def _find_idx(self, term):
+        """Binary search for exact term (lowercased bytes); returns index or -1."""
+        idx = int(numpy.searchsorted(self.names_tab["XRefId"], term))
+        if idx < len(self.names_tab) and self.names_tab["XRefId"][idx].rstrip(b"\x00") == term:
+            return idx
+        return -1
+
     def __contains__(self, item):
-        return self._low(item) in self.gene_names
+        return self._find_idx(self._low(item)) >= 0
 
     def count(self, term):
-        term = self._low(term)
-        try:
-            v = self.gene_names[term]
-            return int(v["Length"])
-        except KeyError:
-            return 0
+        """Return the number of proteins carrying *term* (0 if absent)."""
+        idx = self._find_idx(self._low(term))
+        return int(self.names_tab["Length"][idx]) if idx >= 0 else 0
 
     def get_matching_xref_row_nrs(self, term, entrynr_range=None):
-        term = self._low(term)
-        v = self.gene_names[term]
-        lookup = self.lookup_tab[v["Offset"] : v["Offset"] + v["Length"]]
+        """Return XRef row numbers for all proteins with exactly *term*.
+
+        Raises :class:`KeyError` if *term* is not in the index.
+        Optionally restrict to proteins whose EntryNr falls in *entrynr_range*
+        (a ``(min_inclusive, max_exclusive)`` pair).
+        """
+        idx = self._find_idx(self._low(term))
+        if idx < 0:
+            raise KeyError(term)
+        v = self.names_tab[idx]
+        lookup = self.lookup_tab[int(v["Offset"]) : int(v["Offset"]) + int(v["Length"])]
         if entrynr_range is not None:
             lookup = lookup[
                 numpy.where(
@@ -53,15 +91,70 @@ class GeneNamesLookup:
             ]
         return lookup["XRefRow"]
 
+    def starts_with(self, prefix: str | bytes) -> list[tuple[str, int, int]]:
+        """Return ``(name, count, xref_row)`` pairs for every name starting with *prefix*.
+
+        The search is case-insensitive. *name* is the lowercased form as stored
+        in the index. *count* is the number of genes with having this name as a cross-reference
+        and *xref_row* is the index of one representative row in the
+        ``/XRef`` table for that name, which holds the original-case spelling.
+        """
+        prefix = self._low(prefix)
+        lo = int(numpy.searchsorted(self.names_tab["XRefId"], prefix))
+        results = []
+        for i in range(lo, len(self.names_tab)):
+            v = self.names_tab[i]
+            name = v["XRefId"]
+            if name.startswith(prefix):
+                results.append(
+                    (name.rstrip(b"\x00").decode(), int(v["Length"]), int(self.lookup_tab[int(v["Offset"])]["XRefRow"]))
+                )
+            else:
+                break
+        return results
+
+    def contains(self, pattern: str | bytes) -> list[tuple[str, int, int]]:
+        """Return ``(name, count, xref_row)`` pairs for every name containing *pattern*.
+
+        The search is case-insensitive. Unlike :meth:`starts_with` this cannot
+        exploit the sorted order and scans all names in O(n), using
+        :func:`numpy.char.find` for the inner loop.
+        """
+        pattern = self._low(pattern)
+        mask = numpy.char.find(self.names_tab["XRefId"], pattern) >= 0
+        return [
+            (v["XRefId"].rstrip(b"\x00").decode(), int(v["Length"]), int(self.lookup_tab[int(v["Offset"])]["XRefRow"]))
+            for v in self.names_tab[mask]
+        ]
+
+
+class GeneNamesLookup(AbstractLookup):
+    """Lookup for gene names stored in ``/XRefIndex/GeneNames``."""
+
+    tab_name = "/XRefIndex/GeneNames"
+    tab_lookup_name = "/XRefIndex/GeneNames_lookup"
+
+
+class ProteinNamesLookup(AbstractLookup):
+    """Lookup for protein names stored in ``/XRefIndex/ProteinNames``."""
+
+    tab_name = "/XRefIndex/ProteinNames"
+    tab_lookup_name = "/XRefIndex/ProteinNames_lookup"
+
 
 class XRefSearchHelper:
     def __init__(self, h5):
         self.gene_name_lookup = None
         self.reduced_xref_tab = None
+        self.protein_name_lookup = None
         self._re_version = re.compile(r"(?P<base>[\w-]+)\.\d{1,2}$")
         try:
             self.gene_name_lookup = GeneNamesLookup(h5)
             self.reduced_xref_tab = h5.get_node("/XRefIndex/XRef_reduced")
+            try:
+                self.protein_name_lookup = ProteinNamesLookup(h5)
+            except tables.NoSuchNodeError:
+                pass
         except tables.NoSuchNodeError:
             logger.warning("No reduced XRef Index and GeneName lookup found")
             pass

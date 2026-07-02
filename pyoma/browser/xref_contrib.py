@@ -83,6 +83,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         )
         self.genenames = collections.defaultdict(list)
         self.spids = collections.defaultdict(list)
+        self.protein_names = collections.defaultdict(list)
         self._buffer = []
 
     def _sort_and_store_xrefs(self):
@@ -147,12 +148,18 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         self.genenames[id.lower()].append((enr, xref_row))
         self.add_xref(id, enr, xref_row)
 
+    def add_protein_name(self, id, enr, xref_row):
+        self.protein_names[id.lower()].append((enr, xref_row))
+        self.add_xref(id, enr, xref_row)
+
     def handle_input(self, recs: numpy.ndarray):
         for row in recs:
             if row["XRefSource"] == 0:
                 self.add_swissprot(row["XRefId"], row["EntryNr"], row["xref_row"])
             elif row["XRefSource"] in (110, 115):
                 self.add_gene_name(row["XRefId"], row["EntryNr"], row["xref_row"])
+            elif row["XRefSource"] in (120, 121):
+                self.add_protein_name(row["XRefId"], row["EntryNr"], row["xref_row"])
             else:
                 self.add_xref(row["XRefId"], row["EntryNr"], row["xref_row"])
 
@@ -161,6 +168,7 @@ class XRefIndexHandler(BaseProfileBuilderProcess):
         self._sort_and_store_xrefs()
         self._store_names(self.spids, "SwissProt")
         self._store_names(self.genenames, "GeneNames", 3)
+        self._store_names(self.protein_names, "ProteinNames", 4)
         self.xref_h5.close()
         os.remove(self.tmp_h5)
 

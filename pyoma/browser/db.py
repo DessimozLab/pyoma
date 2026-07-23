@@ -1892,13 +1892,22 @@ class Database(object):
         return seq.tobytes()
 
     def load_structure_db(self, path: Optional[os.PathLike] = None):
-        """Load structure database from an external HDF5 file.
+        """Load the structure database from an external HDF5 file.
 
         :param path: path to the structure HDF5 file.
-               Defaults to "structure_db.h5" in the same directory as the main database file."
+               Defaults to "OmaServer.structure.h5" in the same directory as the main database file."
         """
         if path is None:
-            path = Path(self.db.filename).parent / "structure_db.h5"
+            main_db_path = Path(self.db.filename)
+            name = main_db_path.stem + ".structure" + main_db_path.suffix
+            path = main_db_path.parent / name
+            if not path.exists() and (main_db_path.parent / "structure_db.h5").exists():
+                path = main_db_path.parent / "structure_db.h5"
+                warnings.warn(
+                    f"Structure database name is outdated. should be changed to {name} in the same directory as the main database file.",
+                    category=DeprecationWarning,
+                    stacklevel=2,
+                )
         else:
             path = Path(path)
         if not path.is_file():

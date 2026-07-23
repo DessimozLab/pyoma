@@ -1,4 +1,4 @@
-from __future__ import division, annotations
+from __future__ import annotations
 
 import collections
 import re

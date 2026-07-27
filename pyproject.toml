@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyoma"
-version = "0.14.0"
+version = "0.14.1"
 description = "Library to interact and build OMA hdf5 files"
 readme = "README.md"
 license = "MPL-2.0"

@@ -3,6 +3,8 @@ import random
 import unittest
 
 import numpy
+import tables
+from datasketch import MinHash
 
 from pyoma.browser.db import Database
 from pyoma.browser import hogidmap
@@ -95,3 +97,80 @@ class HogIdMapTester(unittest.TestCase):
                 continue
             self.assertEqual(query_sub_fam, res[0][1].decode())
         self.assertLessEqual(no_match, 1)
+
+
+@unittest.skipUnless(
+    hogidmap._MINHASH_HAS_SCHEME,
+    "requires a datasketch version with MinHash `scheme` support (>= 2.0)",
+)
+class MinHashSchemeCompatTester(unittest.TestCase):
+    """Verifies LSHBuilder stays compatible with hash files written by
+    datasketch < 2.0 (no `scheme` concept, implicitly "legacy") once read
+    back with datasketch >= 2.0 (which requires `scheme` to be specified
+    explicitly when rebuilding a MinHash from raw hash values)."""
+
+    def setUp(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".h5", delete=False) as fh:
+            self.hogmapfn = fh.name
+
+    def tearDown(self) -> None:
+        try:
+            os.remove(self.hogmapfn)
+        except OSError:
+            pass
+
+    def _minhash(self, scheme="legacy"):
+        return MinHash(seed=1, num_perm=256, scheme=scheme)
+
+    def test_scheme_is_persisted_and_restored(self):
+        lsh = hogidmap.LSHBuilder(self.hogmapfn, "w")
+        mh1 = self._minhash()
+        mh1.update(b"a")
+        lsh.add_minhashes([(b"hog1", mh1)])
+        lsh.close()
+
+        with tables.open_file(self.hogmapfn, "r") as h5:
+            self.assertEqual(h5.get_node("/hashes")._v_attrs.minhash_scheme, "legacy")
+
+        lshr = hogidmap.LSHBuilder(self.hogmapfn, "r")
+        self.assertEqual(lshr._min_hash_scheme, "legacy")
+
+    def test_missing_scheme_attribute_defaults_to_legacy_and_still_queries(self):
+        lsh = hogidmap.LSHBuilder(self.hogmapfn, "w")
+        mh1 = self._minhash()
+        mh1.update(b"a")
+        mh1.update(b"b")
+        mh2 = self._minhash()
+        mh2.update(b"a")
+        mh2.update(b"c")
+        lsh.add_minhashes([(b"hog1", mh1), (b"hog2", mh2)])
+        lsh.compute_lsh()
+        lsh.close()
+
+        # simulate a hash file written before the `minhash_scheme` attribute
+        # was introduced (i.e. by a pyoma version predating this feature,
+        # always implicitly using the "legacy" datasketch scheme).
+        with tables.open_file(self.hogmapfn, "a") as h5:
+            del h5.get_node("/hashes")._v_attrs.minhash_scheme
+
+        lshr = hogidmap.LSHBuilder(self.hogmapfn, "r")
+        self.assertEqual(lshr._min_hash_scheme, "legacy")
+        res = sorted(lshr.query(b"hog1", mh1), key=lambda x: -x[2])
+        self.assertEqual((res[0][0], res[0][1]), (b"hog1", b"hog1"))
+        self.assertEqual(res[0][2], 1.0)
+
+    def test_mixing_schemes_in_same_file_raises(self):
+        lsh = hogidmap.LSHBuilder(self.hogmapfn, "w")
+        mh_legacy = self._minhash(scheme="legacy")
+        mh_legacy.update(b"a")
+        lsh.add_minhashes([(b"hog1", mh_legacy)])
+
+        mh_affine = self._minhash(scheme="affine32")
+        mh_affine.update(b"a")
+        with self.assertRaises(ValueError):
+            lsh.add_minhashes([(b"hog2", mh_affine)])
+
+    def test_scheme_kwargs_helper(self):
+        self.assertEqual(hogidmap._scheme_kwargs("legacy"), {"scheme": "legacy"})
+        self.assertEqual(hogidmap._scheme_kwargs(None), {"scheme": "legacy"})
+        self.assertEqual(hogidmap._scheme_kwargs("affine32"), {"scheme": "affine32"})

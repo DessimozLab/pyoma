@@ -1,4 +1,5 @@
 import collections
+import inspect
 import itertools
 import logging
 import os
@@ -18,6 +19,23 @@ from .db import Database
 logger = logging.getLogger(__name__)
 MinHash256 = partial(MinHash, seed=1, num_perm=256)
 LeanMinHash256 = partial(LeanMinHash, seed=1)
+
+# datasketch >= 2.0 introduced a `scheme` parameter/attribute on MinHash and
+# LeanMinHash (e.g. "affine32", or "legacy" for hash values produced by
+# datasketch < 2.0, which predates the concept entirely). Reconstructing a
+# MinHash/LeanMinHash from raw stored hashvalues now requires that scheme to
+# be passed explicitly; datasketch < 2.0 has no such parameter and raises
+# TypeError if given one.
+_MINHASH_HAS_SCHEME = "scheme" in inspect.signature(MinHash.__init__).parameters
+
+
+def _scheme_kwargs(scheme):
+    """kwargs needed to rebuild a MinHash/LeanMinHash from stored hashvalues
+    with the permutation `scheme` they were created with, compatible with
+    both datasketch < 2.0 and >= 2.0."""
+    if not _MINHASH_HAS_SCHEME:
+        return {}
+    return {"scheme": scheme or "legacy"}
 
 
 class HogHasher(object):
@@ -52,6 +70,7 @@ class LSHBuilder(object):
     def __init__(self, hash_file, mode="r", threshold=0.7):
         if mode not in ("r", "a", "w"):
             raise ValueError("invalid mode string ``%s``. Allowed modes are: " "'r', 'a' and 'w'" % mode)
+        self._min_hash_scheme = None
         if mode == "r":
             if not os.path.exists(hash_file):
                 raise IOError('file "{}" does not exist'.format(hash_file))
@@ -94,10 +113,15 @@ class LSHBuilder(object):
         hogid2row_bytes = bytes(lsh_obj_arr[1])
         lsh = pickle.loads(lsh_bytes)
         hogid2row = pickle.loads(hogid2row_bytes)
+        # Files written before this attribute existed predate datasketch's
+        # scheme concept entirely, i.e. they were produced with the "legacy"
+        # permutation scheme.
+        self._min_hash_scheme = getattr(h5.get_node("/hashes")._v_attrs, "minhash_scheme", "legacy")
         return h5, lsh, hogid2row
 
     def close(self):
         if self.h5.mode != "r":
+            self.hashes._v_attrs.minhash_scheme = self._min_hash_scheme or "legacy"
             lsh_obj_arr: tables.VLArray = self.h5.get_node("/lsh_obj")
             # Remove old content, if any (for repeated closes)
             lsh_obj_arr.truncate(0)
@@ -115,6 +139,15 @@ class LSHBuilder(object):
         hash_buffer = []
         hogid_buffer = []
         for hogid, minhash in it:
+            scheme = getattr(minhash, "scheme", "legacy")
+            if self._min_hash_scheme is None:
+                self._min_hash_scheme = scheme
+            elif self._min_hash_scheme != scheme:
+                raise ValueError(
+                    "MinHash scheme %r does not match scheme %r of previously added hashes in this "
+                    "file; cannot mix minhashes computed with different datasketch schemes"
+                    % (scheme, self._min_hash_scheme)
+                )
             hash_buffer.append(minhash.digest())
             hogid_buffer.append(hogid)
         self.hashes.append(hash_buffer)
@@ -127,7 +160,7 @@ class LSHBuilder(object):
         hog2row = {}
         for row, (hogid, hashvals) in enumerate(itertools.zip_longest(self.hogids, self.hashes)):
             hog2row[hogid] = row
-            lsh.insert(hogid, LeanMinHash256(hashvalues=hashvals))
+            lsh.insert(hogid, LeanMinHash256(hashvalues=hashvals, **_scheme_kwargs(self._min_hash_scheme)))
         self.lsh = lsh
         self.hogid2row = hog2row
 
@@ -137,7 +170,7 @@ class LSHBuilder(object):
         candidates = self.lsh.query(minhash)
         for c in candidates:
             hashvals = self.hashes[self.hogid2row[c]]
-            h = MinHash256(hashvalues=hashvals)
+            h = MinHash256(hashvalues=hashvals, **_scheme_kwargs(self._min_hash_scheme))
             yield key, c, minhash.jaccard(h)
 
 
@@ -256,7 +289,7 @@ def compare_versions(output_file, target_path, *old_path):
         for old in old_path:
             old = LSHBuilder(old, mode="r")
             for old_id, old_hashvals in tqdm(itertools.zip_longest(old.hogids, old.hashes), total=len(old.hogids)):
-                minhash = LeanMinHash256(hashvalues=old_hashvals)
+                minhash = LeanMinHash256(hashvalues=old_hashvals, **_scheme_kwargs(old._min_hash_scheme))
                 candidates = sorted(lsh.query(old_id, minhash), key=lambda x: -x[2])
                 logger.debug("old_id: %s: candidates: %s", old_id, candidates)
                 if len(candidates) > 10 and candidates[6][2] > 0.9:

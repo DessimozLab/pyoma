@@ -1,5 +1,3 @@
-from __future__ import division, print_function, unicode_literals
-
 import collections
 import functools
 import io
@@ -54,6 +52,7 @@ from .geneontology import GeneOntology, OntologyParser, GOAspect, FreqAwareGeneO
 from .hoghelper import compare_levels, are_orthologous
 from .hogprofile import Profiler
 from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
+from .structure import StructureDB, StructureInfo
 from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .idmapper import (
     XRefNoApproximateIdMapper,
@@ -284,6 +283,7 @@ class Database(object):
             self.desc_searcher = DescriptionSearcher(self)
         except SuffixIndexError:
             self.desc_searcher = None
+        self.load_structure_db()
         self.hog_profiler = None
         self._re_fam = None
         self.format_hogid = None
@@ -371,9 +371,21 @@ class Database(object):
         """return the handle to the database hdf5 file"""
         return self.db
 
-    def get_conversion_date(self):
-        """return the conversion end date from the DB attributes"""
-        return dateutil.parser.parse(self.db.root._v_attrs["conversion_end"])
+    def get_conversion_date(self, kind: Optional[str] = None):
+        """return the conversion end date from the DB attributes
+
+        :param kind: kind of the conversion, must be 'start' or 'end'
+        """
+        all_attributes = ("conversion_end", "conversion_start", "convertion_start")
+        if kind is not None:
+            all_attributes = [a for a in all_attributes if a.find(kind.lower()) >= 0]
+        for attribute in all_attributes:
+            try:
+                date_str = self.db.get_node_attr("/", attribute)
+                return dateutil.parser.parse(date_str)
+            except AttributeError:
+                pass
+        raise DBVersionError("no conversion date found")
 
     def ensure_entry(self, entry):
         """This method allows to use an entry or an entry_nr.
@@ -1559,6 +1571,11 @@ class Database(object):
             evidence = evidence_enum[evidence]
         except KeyError:
             raise ValueError(f"Invalid evidence value {evidence}")
+        try:
+            orient_enum = ancestral_node.Synteny.get_enum("Orientation")
+        except KeyError:
+            logger.warning("ancestral synteny: no orientation enum found")
+            orient_enum = None
         edge_data = read_table_where(ancestral_node.Synteny, "Evidence <= {}".format(evidence))
         edges = (
             (
@@ -1568,6 +1585,14 @@ class Database(object):
                     "weight": int(e[2]),
                     "evidence": evidence_enum(e["Evidence"]),
                     "age": float(self.tax.taxid_to_age.get(e["LCA_taxid"], -1)),
+                    **(
+                        {
+                            "orientation": orient_enum(e["Orientation"]),
+                            "orientation_score": float(e["OrientationScore"]),
+                        }
+                        if orient_enum is not None
+                        else {}
+                    ),
                 },
             )
             for e in edge_data
@@ -1865,6 +1890,41 @@ class Database(object):
         seqArr = self.db.get_node("/Protein/SequenceBuffer")
         seq = seqArr[entry["SeqBufferOffset"] : entry["SeqBufferOffset"] + entry["SeqBufferLength"] - 1]
         return seq.tobytes()
+
+    def load_structure_db(self, path: Optional[os.PathLike] = None):
+        """Load the structure database from an external HDF5 file.
+
+        :param path: path to the structure HDF5 file.
+               Defaults to "OmaServer.structure.h5" in the same directory as the main database file."
+        """
+        if path is None:
+            main_db_path = Path(self.db.filename)
+            name = main_db_path.stem + ".structure" + main_db_path.suffix
+            path = main_db_path.parent / name
+            if not path.exists() and (main_db_path.parent / "structure_db.h5").exists():
+                path = main_db_path.parent / "structure_db.h5"
+                warnings.warn(
+                    f"Structure database name is outdated. should be changed to {name} in the same directory as the main database file.",
+                    category=DeprecationWarning,
+                    stacklevel=2,
+                )
+        else:
+            path = Path(path)
+        if not path.is_file():
+            logger.warning(f"No structure database found: {path}")
+            return
+        self.structure_db = StructureDB(self, path)
+
+    def get_structure(self, entry) -> Optional[StructureInfo]:
+        """Return 3Di sequence, AA sequence, and source for an entry, or None if unavailable.
+
+        Requires a structure database to be loaded first via :meth:`load_structure_db`.
+
+        :param entry: the entry or entry_nr for which the structure is requested"""
+        if not hasattr(self, "structure_db") or self.structure_db is None:
+            return None
+        entry = self.ensure_entry(entry)
+        return self.structure_db.get(entry)
 
     def get_cdna(self, entry):
         """get the protein sequence of a given entry as a string"""

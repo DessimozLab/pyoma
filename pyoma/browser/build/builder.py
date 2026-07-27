@@ -413,6 +413,8 @@ class DBBuilder(DarwinExporter):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._mode in ("w", "write", "a", "append"):
+            self.h5.set_node_attr("/", "convertion_end", time.strftime("%c"))
         self.h5.close()
 
     def call_darwin_export(self, func):

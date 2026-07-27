@@ -1,5 +1,3 @@
-from __future__ import division, print_function
-
 import collections
 import csv
 import errno
@@ -421,7 +419,7 @@ class DarwinExporter(object):
         self.h5 = tables.open_file(fn, mode=mode[0], filters=self._compr)
         self.logger.info("opened {} in {} mode, options {} ; pyoma {}".format(fn, mode, str(self._compr), version()))
         if mode == "write":
-            self.h5.set_node_attr("/", "convertion_start", time.strftime("%c"))
+            self.h5.set_node_attr("/", "conversion_start", time.strftime("%c"))
             self.h5.set_node_attr("/", "pyoma_version", version())
 
     def call_darwin_export(self, func):

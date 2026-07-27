@@ -1,5 +1,3 @@
-from __future__ import unicode_literals, division
-from builtins import str
 import lxml.etree as etree
 import os
 import errno

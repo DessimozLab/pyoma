@@ -292,6 +292,27 @@ class DatabaseTests(TestWithDbInstance):
                 "exact search for entry {} failed.".format(i),
             )
 
+    def test_get_sequence_length_matches_entry_length(self):
+        # Regression test: SeqBufferOffset (uint64) + SeqBufferLength (uint32) - 1
+        # must stay integer arithmetic. Without casting to Python int first, numpy's
+        # legacy value-based casting silently upcasts the result to float64, which
+        # forces PyTables onto its slow fancy-indexing read path instead of a plain
+        # slice.
+        for i in range(1, len(self.db.db.root.Protein.Entries) + 1):
+            entry = self.db.entry_by_entry_nr(i)
+            seq = self.db.get_sequence(entry)
+            self.assertIsInstance(seq, bytes)
+            self.assertEqual(len(seq), int(entry["SeqBufferLength"]) - 1)
+
+    def test_get_cdna_length_matches_entry_length(self):
+        # Same regression as test_get_sequence_length_matches_entry_length, but for
+        # CDNABufferOffset/CDNABufferLength.
+        for i in range(1, len(self.db.db.root.Protein.Entries) + 1):
+            entry = self.db.entry_by_entry_nr(i)
+            cdna = self.db.get_cdna(entry)
+            self.assertIsInstance(cdna, bytes)
+            self.assertEqual(len(cdna), int(entry["CDNABufferLength"]) - 1)
+
     def get_random_subsequence(self, minlen=10):
         i = random.randint(0, len(self.db.db.root.Protein.Entries))
         elen = self.db.db.root.Protein.Entries[i]["SeqBufferLength"] - 1

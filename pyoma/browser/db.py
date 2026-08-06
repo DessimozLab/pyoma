@@ -1888,7 +1888,8 @@ class Database(object):
         :param entry: the entry or entry_nr for which the sequence is requested"""
         entry = self.ensure_entry(entry)
         seqArr = self.db.get_node("/Protein/SequenceBuffer")
-        seq = seqArr[entry["SeqBufferOffset"] : entry["SeqBufferOffset"] + entry["SeqBufferLength"] - 1]
+        offset, length = int(entry["SeqBufferOffset"]), int(entry["SeqBufferLength"])
+        seq = seqArr[offset : offset + length - 1]
         return seq.tobytes()
 
     def load_structure_db(self, path: Optional[os.PathLike] = None):
@@ -1930,7 +1931,8 @@ class Database(object):
         """get the protein sequence of a given entry as a string"""
         entry = self.ensure_entry(entry)
         seqArr = self.db.get_node("/Protein/CDNABuffer")
-        seq = seqArr[entry["CDNABufferOffset"] : entry["CDNABufferOffset"] + entry["CDNABufferLength"] - 1]
+        offset, length = int(entry["CDNABufferOffset"]), int(entry["CDNABufferLength"])
+        seq = seqArr[offset : offset + length - 1]
         return seq.tobytes()
 
     def get_description(self, entry):

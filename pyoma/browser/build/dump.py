@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 from .main import setup_logging
 from ..db import Database
+from ..hoghelper import are_orthologous
 from ..models import ProteinEntry
 from ..build.taxonomy_alignment import produce_mapping_and_download_files
 from ..linkout import ncbi as ncbi_linkout
@@ -459,6 +460,129 @@ def dump_id_history(conf):
                 logger.info("wrote %d ID mappings to %s", n_mapped, out_fn)
 
 
+def _load_pairwise_ortholog_lookup(db):
+    """Build EntryNr-indexed lookup arrays (OMA ID, OmaHOG, OmaGroup) for all main isoforms.
+
+    VPairs only ever reference main isoforms, so restricting the scan to them keeps the
+    lookup as small as possible while still covering every EntryNr that can appear in a
+    pairwise relation.
+    """
+    entries_tab = db.get_hdf5_handle().get_node("/Protein/Entries")
+    id_mapper = db.id_mapper["OMA"]
+    n = entries_tab.nrows
+
+    oma_id = [""] * (n + 1)
+    oma_hog = np.empty(n + 1, dtype=object)
+    oma_hog[:] = b""
+    oma_group = np.zeros(n + 1, dtype=np.uint32)
+
+    for row in tqdm(
+        entries_tab.where("(AltSpliceVariant == EntryNr) | (AltSpliceVariant == 0)"),
+        desc="Loading main isoforms",
+    ):
+        enr = int(row["EntryNr"])
+        oma_id[enr] = id_mapper.map_entry_nr(enr)
+        oma_hog[enr] = bytes(row["OmaHOG"])
+        oma_group[enr] = row["OmaGroup"]
+    # OMA IDs are near-fixed-width (species code + zero-padded index), but the index
+    # is not truncated for genomes with >=100'000 entries, so let numpy infer the
+    # true max width here rather than assuming one - a hardcoded fixed dtype would
+    # silently truncate any longer id. OMA IDs are ASCII, so bytes (S) is more
+    # compact than unicode (U); consumers must decode() the resulting elements.
+    oma_id = np.array(oma_id, dtype=bytes)
+    return oma_id, oma_hog, oma_group
+
+
+def _iter_genomes_with_vpairs(db):
+    h5 = db.get_hdf5_handle()
+    for gs in h5.get_node("/Genome").read():
+        code = gs["UniProtSpeciesCode"].decode()
+        try:
+            vp_tab = h5.get_node(f"/PairwiseRelation/{code}/VPairs")
+        except tables.NoSuchNodeError:
+            continue
+        yield code, vp_tab
+
+
+def dump_pairwise_orthologs(conf):
+    """Write all pairwise orthologs (VPairs) as a TSV file.
+
+    Format: OMA_ID1\tOMA_ID2\tRelType\tOMA_Group\tOMA_HOG
+
+    OMA_Group is only reported if both entries are members of the same (non-zero) OMA Group.
+    OMA_HOG is the deepest common sub-HOG prefix, if the two entries qualify as orthologous
+    according to :func:`pyoma.browser.hoghelper.are_orthologous`. Cells that do not qualify
+    are reported as "n/a".
+    """
+    chunk_size = 2_000_000
+    with Database(conf.db) as db:
+        logger.info("Loading OMA-ID / OmaHOG / OmaGroup lookup for main isoforms...")
+        oma_id, oma_hog, oma_group = _load_pairwise_ortholog_lookup(db)
+
+        genomes_with_vpairs = list(_iter_genomes_with_vpairs(db))
+        n_proteins = db.get_hdf5_handle().get_node("/Protein/Entries").nrows
+        n_pairs = sum(vp_tab.nrows for _, vp_tab in genomes_with_vpairs) // 2
+        n_species = len(genomes_with_vpairs)
+
+        reltype_map = None
+        n_written = 0
+        with auto_open(conf.out, "wt") as fh:
+            fh.write(
+                f"# All orthologous pairs from OMA release {db.get_release_name()}\n"
+                f"# This release has {n_pairs} pairs covering {n_proteins} proteins from {n_species} species\n"
+                "# Format: Protein 1<tab>Protein 2<tab>Orthology type<tab>OMA group (if any)<tab>OMA HOG (if any)\n"
+                "#\n"
+                "#   OMA_Group is only reported if both proteins are members of the same OMA Group (SOG).\n"
+                "#   OMA_HOG is the deepest common sub-HOG prefix, if the two proteins belong to the same HOG.\n"
+                "#   OMA_Group and OMA_HOG are reported as 'n/a' if the two proteins do not belong to "
+                "#   the same group or HOG, respectively.\n"
+                "# Every pair is listed only once, and in no particular order.\n"
+            )
+            for code, vp_tab in tqdm(genomes_with_vpairs, desc="genomes"):
+                if reltype_map is None:
+                    type_enum = vp_tab.get_enum("RelType")
+                    reltype_map = {val: name for name, val in type_enum}
+
+                nrows = vp_tab.nrows
+                for start in range(0, nrows, chunk_size):
+                    chunk = vp_tab[start : start + chunk_size]
+                    mask = chunk["EntryNr1"] > chunk["EntryNr2"]
+                    sub = chunk[mask]
+                    if len(sub) == 0:
+                        continue
+
+                    e1 = sub["EntryNr1"]
+                    e2 = sub["EntryNr2"]
+                    ids1 = oma_id[e1]
+                    ids2 = oma_id[e2]
+                    hogs1 = oma_hog[e1]
+                    hogs2 = oma_hog[e2]
+                    g1 = oma_group[e1]
+                    g2 = oma_group[e2]
+                    group_match = (g1 == g2) & (g1 > 0)
+                    rel_types = sub["RelType"]
+
+                    buf = []
+                    for i in range(len(sub)):
+                        ortho_type = reltype_map[int(rel_types[i])]
+                        group_str = str(int(g1[i])) if group_match[i] else "n/a"
+
+                        h1, h2 = hogs1[i], hogs2[i]
+                        hog_str = "n/a"
+                        if h1 and h2:
+                            if h1 == h2:
+                                hog_str = h1.decode()
+                            else:
+                                common = are_orthologous(h1, h2, return_group=True)
+                                if common is not False:
+                                    hog_str = common
+
+                        buf.append(f"{ids1[i].decode()}\t{ids2[i].decode()}\t{ortho_type}\t{group_str}\t{hog_str}\n")
+                    fh.writelines(buf)
+                    n_written += len(sub)
+        logger.info("wrote %d pairwise ortholog relations to %s", n_written, conf.out)
+
+
 def parse_command_line_args():
     parser = ArgumentParser(description="Dump various files from the OMA database")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
@@ -537,6 +661,17 @@ def parse_command_line_args():
     groups_parser.add_argument("--out-orthoxml", help="Output path for OMA groups in OrthoXML format")
     groups_parser.add_argument("--out-txt", help="Output path for OMA groups in txt format")
     groups_parser.add_argument("--out-keywords", help="Output path for OMA group keywords (TSV: group_nr<tab>keywords)")
+
+    pairwise_orthologs_parser = subparsers.add_parser(
+        "pairwise-orthologs",
+        help="Dump pairwise orthologs (VPairs) as a TSV file, together with OMA Group and OmaHOG information",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    pairwise_orthologs_parser.set_defaults(func=dump_pairwise_orthologs)
+    pairwise_orthologs_parser.add_argument("--db", required=True, help="Path to database")
+    pairwise_orthologs_parser.add_argument(
+        "--out", required=True, help="Output path for the pairwise orthologs TSV file"
+    )
 
     id_history_parser = subparsers.add_parser(
         "id-history",

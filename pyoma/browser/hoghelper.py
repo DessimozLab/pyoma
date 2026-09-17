@@ -1,4 +1,5 @@
 import collections
+import functools
 import logging
 import os.path
 import re
@@ -143,19 +144,32 @@ def compare_levels(
 hog_re = re.compile(r"(?P<id>HOG:(?P<rel>[A-Z]+)?(?P<fam>\d+)(?P<sub>[a-z0-9.]*))(?:_(?P<taxid>\d+))?")
 sub_re = re.compile(r"^(?P<nr>\d+)(?P<char>[a-z]+)$")
 
+# Bounded so long-running processes (e.g. the browser backend, which calls
+# are_orthologous with an unpredictable, ever-growing set of HOGids over its
+# lifetime) don't accumulate an unbounded cache. Batch jobs (e.g. dump.py)
+# benefit from whatever locality falls within this window; sized generously
+# for that case without risking unbounded growth in the server case.
+_HOGID_PARSE_CACHE_SIZE = 2**17
+
+
+@functools.lru_cache(maxsize=_HOGID_PARSE_CACHE_SIZE)
+def _parse_hogid(hogid: Union[bytes, str]):
+    h = hogid if isinstance(hogid, str) else hogid.decode()
+    m = hog_re.match(h)
+    if m is None:
+        raise ValueError("Invalid HOGid provided: {}".format(hogid))
+    return m.group("fam"), m.group("rel"), m.group("sub")
+
 
 def are_orthologous(
     hogid1: Union[bytes, str], hogid2: Union[bytes, str], return_group: bool = False
 ) -> Union[bool, str]:
-    h1 = hogid1 if isinstance(hogid1, str) else hogid1.decode()
-    h2 = hogid2 if isinstance(hogid2, str) else hogid2.decode()
-
-    m1 = hog_re.match(h1)
-    m2 = hog_re.match(h2)
-    if m1.group("fam") != m2.group("fam") or m1.group("rel") != m2.group("rel"):
+    fam1, rel1, sub1 = _parse_hogid(hogid1)
+    fam2, rel2, sub2 = _parse_hogid(hogid2)
+    if fam1 != fam2 or rel1 != rel2:
         return False
-    common_group = ["HOG:{}{}".format(m1.group("rel"), m1.group("fam"))]
-    for sub_i, sub_j in zip(m1.group("sub").split("."), m2.group("sub").split(".")):
+    common_group = ["HOG:{}{}".format(rel1 or "", fam1)]
+    for sub_i, sub_j in zip(sub1.split("."), sub2.split(".")):
         if sub_i == sub_j:
             if len(sub_i) > 0:
                 common_group.append(sub_i)

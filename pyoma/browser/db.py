@@ -3247,69 +3247,29 @@ class Taxonomy(object):
         return self.tax_table.take(idx)
 
     def _get_taxids_from_any(self, it, skip_missing=True):
-        """
-        Convert input iterable of tax IDs or names to NumPy array of tax IDs.
-
-        Parameters
-        ----------
-        it : int, str, list, or np.ndarray
-            Tax IDs (integers) or taxonomy names (strings).
-        skip_missing : bool
-            If False, raises KeyError when a name is not found.
-
-        Returns
-        -------
-        np.ndarray
-        Array of NCBI tax IDs corresponding to input.
-        """
-
-        # ----------------------------
-        # 1️⃣ Convert input to a flat NumPy array
-        # ----------------------------
         if not isinstance(it, numpy.ndarray):
+            # elements may themselves be single-value numpy arrays (e.g. from
+            # indexing a structured array); numpy>=2 no longer coerces those
+            # to scalars implicitly, so unwrap them before building the array.
+            it = [x.item() if isinstance(x, numpy.ndarray) else x for x in it]
             try:
-                # Flatten if it is a nested list or list of arrays
-                it = numpy.asarray(
-                    [x for sub in it for x in (sub if isinstance(sub, (list, numpy.ndarray)) else [sub])]
-                )
-            except TypeError:
-                # Handle single scalar
-                it = numpy.asarray([it])
-
-        # Determine dtype
-        if numpy.issubdtype(it.dtype, numpy.integer):
-            dtype = "i4"
-        elif numpy.issubdtype(it.dtype, numpy.str_):
-            dtype = "S255"
-            it = it.astype(dtype)
-        else:
-            # fallback: treat as string
-            it = it.astype("S255")
-
-        # ----------------------------
-        # 2️⃣ If input is strings, map to tax IDs
-        # ----------------------------
+                it = numpy.fromiter(it, dtype="i4")
+            except ValueError:
+                it = numpy.fromiter(it, dtype="S255")
         if it.dtype.type is numpy.bytes_:
             try:
                 ns = self.name_key
             except AttributeError:
                 ns = self.name_key = self.tax_table.argsort(order="Name")
-
-            # Locate indices in tax_table
             idxs = self.tax_table["Name"].searchsorted(it, sorter=ns)
             idxs = numpy.clip(idxs, 0, len(ns) - 1)
-
-            # Get tax table entries
             taxs = self.tax_table[ns[idxs]]
             keep = taxs["Name"] == it
-
             if not skip_missing and not keep.all():
                 raise KeyError("not all taxonomy names could be found")
-
             res = taxs["NCBITaxonId"][keep]
         else:
-            # Already numeric tax IDs
-            res = it.astype("i4")
+            res = it
         return res
 
     def get_subtaxonomy_rooted_at(self, root, collapse=True):

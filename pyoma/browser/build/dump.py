@@ -1,6 +1,7 @@
 import collections
 import logging
 import os
+import resource
 import sys
 import warnings
 from contextlib import ExitStack
@@ -504,6 +505,10 @@ def _iter_genomes_with_vpairs(db):
         yield code, vp_tab
 
 
+def rss_mb():
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+
 def dump_pairwise_orthologs(conf):
     """Write all pairwise orthologs (VPairs) as a TSV file.
 
@@ -515,11 +520,15 @@ def dump_pairwise_orthologs(conf):
     are reported as "n/a".
     """
     chunk_size = 2_000_000
+    logger.debug("RSS before Database(): %.1f MB", rss_mb())
     with Database(conf.db) as db:
+        logger.debug("RSS after Database(): %.1f MB", rss_mb())
         logger.info("Loading OMA-ID / OmaHOG / OmaGroup lookup for main isoforms...")
         oma_id, oma_hog, oma_group = _load_pairwise_ortholog_lookup(db)
+        logger.debug("RSS after lookup build: %.1f MB", rss_mb())
 
         genomes_with_vpairs = list(_iter_genomes_with_vpairs(db))
+        logger.debug("RSS after genomes_vtab_list: %.1f MB", rss_mb())
         n_proteins = db.get_hdf5_handle().get_node("/Protein/Entries").nrows
         n_pairs = sum(vp_tab.nrows for _, vp_tab in genomes_with_vpairs) // 2
         n_species = len(genomes_with_vpairs)
@@ -543,6 +552,7 @@ def dump_pairwise_orthologs(conf):
                     type_enum = vp_tab.get_enum("RelType")
                     reltype_map = {val: name for name, val in type_enum}
 
+                logger.debug("RSS before processing %s vtab: %.1f MB", code, rss_mb())
                 nrows = vp_tab.nrows
                 for start in range(0, nrows, chunk_size):
                     chunk = vp_tab[start : start + chunk_size]
@@ -581,6 +591,7 @@ def dump_pairwise_orthologs(conf):
                     fh.writelines(buf)
                     n_written += len(sub)
         logger.info("wrote %d pairwise ortholog relations to %s", n_written, conf.out)
+        logger.info("RSS after writing pairwise orthologs: %.1f MB", rss_mb())
 
 
 def parse_command_line_args():

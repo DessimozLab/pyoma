@@ -75,16 +75,18 @@ class DataImportError(Exception):
 
 
 class OmaGroupsProvider:
-    def __init__(self, source):
+    def __init__(self, source: Optional[str], name2code: Optional[dict] = None):
         if source is not None:
             with open(source, "r") as f:
                 self.data = json.load(f)
         else:
             self.data = None
+        self.code2name = {v: k for k, v in (name2code or {}).items()}
 
-    def get_oma_group(self, genome, nr):
+    def get_oma_group(self, genome, nr) -> int:
+        genome_name = self.code2name.get(genome, genome)
         try:
-            per_genome = self.data[str(genome)]
+            per_genome = self.data[genome_name]
         except KeyError:
             return 0
         try:

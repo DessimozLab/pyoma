@@ -52,7 +52,7 @@ def phase_genomes(conf):
         name2code = db.add_species_data(conf.gs_tsv, taxid_updates=taxid_updates)
         code_to_file = {name2code[basename(f).split(".")[0]]: f for f in conf.genomes}
         with XrefStorer(conf.xref_db, index_cols=["EntryNr"]) as xref_storer:
-            db.add_proteins(code_to_file, OmaGroupsProvider(conf.oma_groups), xref_collector=xref_storer)
+            db.add_proteins(code_to_file, OmaGroupsProvider(conf.oma_groups, name2code), xref_collector=xref_storer)
 
 
 def phase_build_seq_indexes(conf):

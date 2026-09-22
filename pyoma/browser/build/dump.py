@@ -494,7 +494,13 @@ def _load_pairwise_ortholog_lookup(db):
     return oma_id, oma_hog, oma_group
 
 
-def _iter_genomes_with_vpairs(db):
+def _iter_genome_codes_with_vpairs(db):
+    """Yield (code, nrows) for every genome that has a VPairs table.
+
+    Deliberately does *not* hand back the open Table node: reading a table's shape
+    is metadata-only, but any actual row read populates a per-dataset HDF5 chunk
+    cache that is only released once the node is closed.
+    """
     h5 = db.get_hdf5_handle()
     for gs in h5.get_node("/Genome").read():
         code = gs["UniProtSpeciesCode"].decode()
@@ -502,7 +508,9 @@ def _iter_genomes_with_vpairs(db):
             vp_tab = h5.get_node(f"/PairwiseRelation/{code}/VPairs")
         except tables.NoSuchNodeError:
             continue
-        yield code, vp_tab
+        nrows = vp_tab.nrows
+        vp_tab.close()
+        yield code, nrows
 
 
 def rss_mb():
@@ -527,11 +535,11 @@ def dump_pairwise_orthologs(conf):
         oma_id, oma_hog, oma_group = _load_pairwise_ortholog_lookup(db)
         logger.debug("RSS after lookup build: %.1f MB", rss_mb())
 
-        genomes_with_vpairs = list(_iter_genomes_with_vpairs(db))
+        genome_vpair_info = list(_iter_genome_codes_with_vpairs(db))
         logger.debug("RSS after genomes_vtab_list: %.1f MB", rss_mb())
         n_proteins = db.get_hdf5_handle().get_node("/Protein/Entries").nrows
-        n_pairs = sum(vp_tab.nrows for _, vp_tab in genomes_with_vpairs) // 2
-        n_species = len(genomes_with_vpairs)
+        n_pairs = sum(nrows for _, nrows in genome_vpair_info) // 2
+        n_species = len(genome_vpair_info)
 
         reltype_map = None
         n_written = 0
@@ -547,49 +555,58 @@ def dump_pairwise_orthologs(conf):
                 "#   the same group or HOG, respectively.\n"
                 "# Every pair is listed only once, and in no particular order.\n"
             )
-            for code, vp_tab in tqdm(genomes_with_vpairs, desc="genomes"):
-                if reltype_map is None:
-                    type_enum = vp_tab.get_enum("RelType")
-                    reltype_map = {val: name for name, val in type_enum}
+            h5 = db.get_hdf5_handle()
+            with tqdm(total=n_pairs, desc="nr of pairs") as pbar:
+                for i, (code, nrows) in enumerate(genome_vpair_info):
+                    if i % 100 == 0:
+                        logger.debug("RSS before processing %s [%d] vtab: %.1f MB", code, i, rss_mb())
+                    vp_tab = h5.get_node(f"/PairwiseRelation/{code}/VPairs")
+                    try:
+                        if reltype_map is None:
+                            type_enum = vp_tab.get_enum("RelType")
+                        reltype_map = {val: name for name, val in type_enum}
 
-                logger.debug("RSS before processing %s vtab: %.1f MB", code, rss_mb())
-                nrows = vp_tab.nrows
-                for start in range(0, nrows, chunk_size):
-                    chunk = vp_tab[start : start + chunk_size]
-                    mask = chunk["EntryNr1"] > chunk["EntryNr2"]
-                    sub = chunk[mask]
-                    if len(sub) == 0:
-                        continue
+                        for start in range(0, nrows, chunk_size):
+                            chunk = vp_tab[start : start + chunk_size]
+                            mask = chunk["EntryNr1"] > chunk["EntryNr2"]
+                            sub = chunk[mask]
+                            if len(sub) == 0:
+                                continue
 
-                    e1 = sub["EntryNr1"]
-                    e2 = sub["EntryNr2"]
-                    ids1 = oma_id[e1]
-                    ids2 = oma_id[e2]
-                    hogs1 = oma_hog[e1]
-                    hogs2 = oma_hog[e2]
-                    g1 = oma_group[e1]
-                    g2 = oma_group[e2]
-                    group_match = (g1 == g2) & (g1 > 0)
-                    rel_types = sub["RelType"]
+                            e1 = sub["EntryNr1"]
+                            e2 = sub["EntryNr2"]
+                            ids1 = oma_id[e1]
+                            ids2 = oma_id[e2]
+                            hogs1 = oma_hog[e1]
+                            hogs2 = oma_hog[e2]
+                            g1 = oma_group[e1]
+                            g2 = oma_group[e2]
+                            group_match = (g1 == g2) & (g1 > 0)
+                            rel_types = sub["RelType"]
 
-                    buf = []
-                    for i in range(len(sub)):
-                        ortho_type = reltype_map[int(rel_types[i])]
-                        group_str = str(int(g1[i])) if group_match[i] else "n/a"
+                            buf = []
+                            for i in range(len(sub)):
+                                ortho_type = reltype_map[int(rel_types[i])]
+                                group_str = str(int(g1[i])) if group_match[i] else "n/a"
 
-                        h1, h2 = hogs1[i], hogs2[i]
-                        hog_str = "n/a"
-                        if h1 and h2:
-                            if h1 == h2:
-                                hog_str = h1.decode()
-                            else:
-                                common = are_orthologous(h1, h2, return_group=True)
-                                if common is not False:
-                                    hog_str = common
+                                h1, h2 = hogs1[i], hogs2[i]
+                                hog_str = "n/a"
+                                if h1 and h2:
+                                    if h1 == h2:
+                                        hog_str = h1.decode()
+                                    else:
+                                        common = are_orthologous(h1, h2, return_group=True)
+                                        if common is not False:
+                                            hog_str = common
 
-                        buf.append(f"{ids1[i].decode()}\t{ids2[i].decode()}\t{ortho_type}\t{group_str}\t{hog_str}\n")
-                    fh.writelines(buf)
-                    n_written += len(sub)
+                                buf.append(
+                                    f"{ids1[i].decode()}\t{ids2[i].decode()}\t{ortho_type}\t{group_str}\t{hog_str}\n"
+                                )
+                            fh.writelines(buf)
+                            n_written += len(sub)
+                            pbar.update(len(sub))
+                    finally:
+                        vp_tab.close()
         logger.info("wrote %d pairwise ortholog relations to %s", n_written, conf.out)
         logger.info("RSS after writing pairwise orthologs: %.1f MB", rss_mb())
 

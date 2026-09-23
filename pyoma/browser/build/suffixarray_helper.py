@@ -85,6 +85,23 @@ def build_filtered_sa(
     return sa_f, sa_origpos, idx_saorder
 
 
+def dtype_for_kmer_codes(alphabet_size: int, k: int) -> numpy.dtype:
+    """Smallest unsigned integer dtype that can hold all `alphabet_size**k` distinct
+    kmer codes plus one reserved sentinel value (its max) for invalid kmers.
+
+    This is intentionally independent of the suffix-array position dtype
+    (`dtype_sa`), which is only sized for the sequence-buffer length and can be
+    far too narrow for the kmer code space -- e.g. `dtype_sa` is `uint16` for any
+    buffer <~64KB, but a single AA kmer of length k=4 already needs codes up to
+    `21**4 - 1 = 194480`, which does not fit in `uint16`.
+    """
+    n_codes = alphabet_size**k
+    for cand in (numpy.uint16, numpy.uint32, numpy.uint64):
+        if n_codes <= numpy.iinfo(cand).max:
+            return numpy.dtype(cand)
+    raise ValueError(f"kmer code space too large for k={k}, alphabet_size={alphabet_size}")
+
+
 def kmer_codes_for_positions(P, k, seqs_np, dtype_sa, map256, alphabet_size):
     """
     Vectorized equivalent of [KmerEncoder.decode(seqs[p:p+k]) for p in P].
@@ -95,10 +112,11 @@ def kmer_codes_for_positions(P, k, seqs_np, dtype_sa, map256, alphabet_size):
     dtype_sa: np.dtype for the position data
     map256:   map from character to uint8
     alphabet_size: int, size of the alphabet (21 for AA, 5 for DNA)
-    Returns: codes (dtype_sa), valid_mask (bool)
+    Returns: codes (see dtype_for_kmer_codes), valid_mask (bool)
     """
     P = P.astype(dtype_sa, copy=False)
-    codes = numpy.zeros(len(P), dtype=dtype_sa)
+    dtype_code = dtype_for_kmer_codes(alphabet_size, k)
+    codes = numpy.zeros(len(P), dtype=dtype_code)
     good = numpy.ones(len(P), dtype=bool)
 
     for t in range(k):
@@ -106,7 +124,7 @@ def kmer_codes_for_positions(P, k, seqs_np, dtype_sa, map256, alphabet_size):
         v = map256[b]
         bad = v == 255
         good &= ~bad
-        codes = codes * alphabet_size + v.astype(dtype_sa)
+        codes = codes * alphabet_size + v.astype(dtype_code)
 
-    codes[~good] = numpy.iinfo(dtype_sa).max  # sentinel
+    codes[~good] = numpy.iinfo(dtype_code).max  # sentinel
     return codes, good

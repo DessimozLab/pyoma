@@ -1,4 +1,5 @@
 import collections
+import inspect
 import itertools
 import logging
 import os
@@ -21,6 +22,23 @@ from .db import Database
 logger = logging.getLogger(__name__)
 MinHash256 = partial(MinHash, seed=1, num_perm=256)
 LeanMinHash256 = partial(LeanMinHash, seed=1)
+
+# datasketch >= 2.0 introduced a `scheme` parameter/attribute on MinHash and
+# LeanMinHash (e.g. "affine32", or "legacy" for hash values produced by
+# datasketch < 2.0, which predates the concept entirely). Reconstructing a
+# MinHash/LeanMinHash from raw stored hashvalues now requires that scheme to
+# be passed explicitly; datasketch < 2.0 has no such parameter and raises
+# TypeError if given one.
+_MINHASH_HAS_SCHEME = "scheme" in inspect.signature(MinHash.__init__).parameters
+
+
+def _scheme_kwargs(scheme):
+    """kwargs needed to rebuild a MinHash/LeanMinHash from stored hashvalues
+    with the permutation `scheme` they were created with, compatible with
+    both datasketch < 2.0 and >= 2.0."""
+    if not _MINHASH_HAS_SCHEME:
+        return {}
+    return {"scheme": scheme or "legacy"}
 
 
 class HogHasher(object):
@@ -70,6 +88,7 @@ class HogHashWriter:
             self.members_table: tables.Table = self.h5.get_node("/members")
         except tables.NoSuchNodeError:
             self.members_table = None
+        self._min_hash_scheme = getattr(self.hashes._v_attrs, "minhash_scheme", None)
         self.hash_buffer = []
         self.hogid_buffer = []
         self.member_buffer = []
@@ -96,6 +115,15 @@ class HogHashWriter:
 
     def add_minhashes(self, it, members=None):
         for hogid, minhash in it:
+            scheme = getattr(minhash, "scheme", "legacy")
+            if self._min_hash_scheme is None:
+                self._min_hash_scheme = scheme
+            elif self._min_hash_scheme != scheme:
+                raise ValueError(
+                    "MinHash scheme %r does not match scheme %r of previously added hashes in this "
+                    "file; cannot mix minhashes computed with different datasketch schemes"
+                    % (scheme, self._min_hash_scheme)
+                )
             self.hash_buffer.append(minhash.digest())
             self.hogid_buffer.append(hogid)
         if members:
@@ -116,6 +144,7 @@ class HogHashWriter:
 
     def close(self):
         self.flush()
+        self.hashes._v_attrs.minhash_scheme = self._min_hash_scheme or "legacy"
         self.h5.close()
 
 
@@ -132,6 +161,7 @@ class HogLSHIndex:
             self.members_table: tables.Table = self.h5.get_node("/members")
         except tables.NoSuchNodeError:
             self.members_table = None
+        self._min_hash_scheme = getattr(self.hashes._v_attrs, "minhash_scheme", "legacy")
         self.threshold = threshold
         self.lsh = None
         self.hogid2row = None
@@ -141,7 +171,7 @@ class HogLSHIndex:
         hog2row = {}
         for row, (hogid, hashvals) in enumerate(itertools.zip_longest(self.hogids, self.hashes)):
             hog2row[hogid] = row
-            lsh.insert(hogid, LeanMinHash256(hashvalues=hashvals))
+            lsh.insert(hogid, LeanMinHash256(hashvalues=hashvals, **_scheme_kwargs(self._min_hash_scheme)))
         self.lsh = lsh
         self.hogid2row = hog2row
 
@@ -189,7 +219,7 @@ class HogLSHIndex:
         """
         for c in self.lsh.query(minhash):
             hashvals = self.hashes[self.hogid2row[c]]
-            h = LeanMinHash256(hashvalues=hashvals)
+            h = LeanMinHash256(hashvalues=hashvals, **_scheme_kwargs(self._min_hash_scheme))
             yield key, c, minhash.jaccard(h)
 
     def close(self):
@@ -204,15 +234,17 @@ class HogLSHForestIndex(HogLSHIndex):
         hog2row = {}
         for row, (hogid, hashvals) in enumerate(itertools.zip_longest(self.hogids, self.hashes)):
             hog2row[hogid] = row
-            forest.add(hogid, LeanMinHash256(hashvalues=hashvals))
+            forest.add(hogid, LeanMinHash256(hashvalues=hashvals, **_scheme_kwargs(self._min_hash_scheme)))
         forest.index()
         self.lsh = forest
         self.hogid2row = hog2row
 
     def query(self, key, minhash):
+        """query with a minhash, returns a list of tuples of
+        (query-key, target-key, jaccard)"""
         for c in self.lsh.query(minhash, k=10):
             hashvals = self.hashes[self.hogid2row[c]]
-            h = LeanMinHash256(hashvalues=hashvals)
+            h = LeanMinHash256(hashvalues=hashvals, **_scheme_kwargs(self._min_hash_scheme))
             yield key, c, minhash.jaccard(h)
 
 
@@ -404,7 +436,7 @@ def compare_versions(output_file, target_path, *old_path, index_cls=HogLSHIndex)
                 f"{old_fn} --> |hogids|={len(old.hogids)}, |hashes|={len(old.hashes)}, use_exact={bool(use_exact)}"
             )
             for old_id, old_hashvals in tqdm(itertools.zip_longest(old.hogids, old.hashes), total=len(old.hogids)):
-                minhash = LeanMinHash256(hashvalues=old_hashvals)
+                minhash = LeanMinHash256(hashvalues=old_hashvals, **_scheme_kwargs(old._min_hash_scheme))
                 raw_candidates = sorted(lsh.query(old_id, minhash), key=lambda x: -x[2])
                 if raw_candidates:
                     raw_candidates = [c for c in raw_candidates if c[2] > 0.25 * raw_candidates[0][2]]

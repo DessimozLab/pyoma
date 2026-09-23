@@ -144,7 +144,7 @@ class HogIDSearch(BaseSearch):
             logger.debug("analyse token %s: %s", self.term, match.groupdict())
             if match.group("taxid") is not None:
                 try:
-                    n = self.db.tax.get_taxnode_from_name_or_taxid(match.group("taxid"))
+                    n = self.db.tax.get_taxnode_from_name_or_taxid(int(match.group("taxid")))
                     level = n[0]["Name"].decode()
                 except (InvalidTaxonId, KeyError):
                     pass

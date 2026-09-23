@@ -61,6 +61,16 @@ class ExtantSyntenyRels(AbstractSyntenyRels):
     EntryNr2 = tables.UInt32Col(pos=1)
 
 
+class AncestralSyntenyRels(AbstractSyntenyRels):
+    HogRow1 = tables.UInt32Col(pos=0)
+    HogRow2 = tables.UInt32Col(pos=1)
+
+
+class ExtantSyntenyRels(AbstractSyntenyRels):
+    EntryNr1 = tables.UInt32Col(pos=0)
+    EntryNr2 = tables.UInt32Col(pos=1)
+
+
 class ProteinTable(tables.IsDescription):
     EntryNr = tables.UInt32Col(pos=1)
     SeqBufferOffset = tables.UInt64Col(pos=2)

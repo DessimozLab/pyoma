@@ -1,5 +1,3 @@
-from __future__ import division, print_function, absolute_import, unicode_literals
-
 import functools
 import time
 from builtins import bytes, str, range, str

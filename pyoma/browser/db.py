@@ -959,9 +959,9 @@ class Database(object):
             condvars=condvars,
         )
         data.sort(order=["LocusStart"])
-        idx = int((data["EntryNr"] == entry_nr).nonzero()[0])
+        idx = numpy.argmax(data["EntryNr"] == entry_nr)
         res = data[max(0, idx - window) : idx + window + 1]
-        idx = int((res["EntryNr"] == entry_nr).nonzero()[0])
+        idx = numpy.argmax(res["EntryNr"] == entry_nr)
         return res, idx
 
     def parse_hog_id(self, hog_id):
@@ -3248,6 +3248,10 @@ class Taxonomy(object):
 
     def _get_taxids_from_any(self, it, skip_missing=True):
         if not isinstance(it, numpy.ndarray):
+            # elements may themselves be single-value numpy arrays (e.g. from
+            # indexing a structured array); numpy>=2 no longer coerces those
+            # to scalars implicitly, so unwrap them before building the array.
+            it = [x.item() if isinstance(x, numpy.ndarray) else x for x in it]
             try:
                 it = numpy.fromiter(it, dtype="i4")
             except ValueError:
@@ -3284,6 +3288,11 @@ class Taxonomy(object):
         return self.get_induced_taxonomy(subtree, collapse=collapse)
 
     def get_taxnode_from_name_or_taxid(self, query):
+        # Convert digit-only str or bytes to int
+        if isinstance(query, str) and query.isdigit():
+            query = int(query)
+        elif isinstance(query, bytes) and query.isdigit():
+            query = int(query)
         if isinstance(query, (bytes, str, int)):
             query = [query]
         tids = self._get_taxids_from_any(query, skip_missing=False)
@@ -3354,7 +3363,7 @@ class Taxonomy(object):
                 continue
             # get all the parents and check which ones we keep in the new taxonomy.
             parents = self.get_parent_taxa(cur_tax)["NCBITaxonId"]
-            mask = numpy.in1d(parents, taxids_to_keep)
+            mask = numpy.isin(parents, taxids_to_keep)
             # find the position of them in subtaxdata (note: subtaxdata and
             # taxids_to_keep have the same ordering).
             new_idx = taxids_to_keep.searchsorted(parents[mask])

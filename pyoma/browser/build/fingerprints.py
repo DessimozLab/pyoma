@@ -100,7 +100,7 @@ def find_fingerprints_streaming(
 
                 for a, b in zip(run_starts, run_ends):
                     code_int = int(codes[a])
-                    if code_int == numpy.iinfo(dtype_sa).max:
+                    if code_int == numpy.iinfo(codes.dtype).max:
                         continue  # invalid k-mer (e.g., with X)
                     entry_ids = entries[a:b]
                     groups = numpy.unique(entry_to_group[entry_ids])

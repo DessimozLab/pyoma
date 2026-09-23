@@ -801,7 +801,7 @@ class DBBuilder(DarwinExporter):
             )
 
             # Now find the split points and construct lookup ragged array.
-            L = int(len(sa_f)) - k
+            L = int(len(sa_f))
             t = tqdm(total=max(L, 0), desc="Building Kmer lookup")
             ii, tot_kmers = 0, len(kmers)
             chunk_keys: list[int] = []  # chunk keys for sa-lookup-table
@@ -813,7 +813,7 @@ class DBBuilder(DarwinExporter):
             pending_cut: bool = False
 
             if L > 0:
-                first_code = int(kmer_codes_for_positions(sa_f[0:1], k, seqs_np, dtype_sa, map256, alphabet_size)[0])
+                first_code = int(kmer_codes_for_positions(sa_f[0:1], k, seqs_np, dtype_sa, map256, alphabet_size)[0][0])
                 chunk_pos.append(int(sa_origpos[0]))
                 chunk_keys.append(first_code)
             next_target = chunk_pos[-1] + int(chunksize) if chunk_pos else int(chunksize)

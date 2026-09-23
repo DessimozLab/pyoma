@@ -654,16 +654,13 @@ class AddSequenceIndexTest(unittest.TestCase):
             self.assertEqual(n_codes, keys[-1])
             self.assertEqual(len(seqs), pos[-1])
 
-    # Documents why add_sequence_index (builder.py:816) needs `...[0][0]`
+    # Documents why add_sequence_index (builder.py:823) needs `...[0][0]`
     # rather than `...[0]` to unpack `first_code`: kmer_codes_for_positions
     # returns a 2-tuple `(codes, good)`, and `codes` is itself a numpy array
     # (shape (1,) here, since `sa_f[0:1]` has length 1), not a scalar.
-    # `int(<len-1 array>)` was only a (deprecated) implicit conversion under
-    # numpy<2; under numpy>=2 it raises
-    # `TypeError: only 0-dimensional arrays can be converted to Python
-    # scalars`. Previously this made add_sequence_index fail unconditionally
-    # whenever `L = len(sa_f) - k > 0` -- true for essentially any real,
-    # non-trivial set of sequences. Fixed at builder.py:816 (`...[0][0]`).
+    # `int(<ndim>0 array>)` is deprecated since numpy 1.25 and raises
+    # `TypeError` in newer numpy releases (whether it warns or raises depends
+    # on the numpy version, so we don't assert on that behaviour here).
     def test_kmer_codes_for_positions_returns_array_not_scalar(self):
         from pyoma.browser.build.builder import kmer_codes_for_positions
 
@@ -675,10 +672,13 @@ class AddSequenceIndexTest(unittest.TestCase):
         k = 2
         dtype_sa = numpy.dtype("int64")
         sa_f = numpy.array([0, 1, 2], dtype=dtype_sa)
-        codes_tuple_first = kmer_codes_for_positions(sa_f[0:1], k, seqs_np, dtype_sa, map256, len(DIGITS_AA))[0]
-        self.assertEqual((1,), codes_tuple_first.shape)
-        with self.assertRaises(TypeError):
-            int(codes_tuple_first)
+        codes, good = kmer_codes_for_positions(sa_f[0:1], k, seqs_np, dtype_sa, map256, len(DIGITS_AA))
+        self.assertEqual(1, codes.ndim)
+        self.assertEqual((1,), codes.shape)
+        self.assertTrue(good[0])
+        # first k-mer is "AC"
+        expected = int(map256[ord("A")]) * len(DIGITS_AA) + int(map256[ord("C")])
+        self.assertEqual(expected, int(codes[0]))
 
     def test_kmer_lookup_matches_brute_force_k2(self):
         sequences = self._random_sequences(15, seed=7)

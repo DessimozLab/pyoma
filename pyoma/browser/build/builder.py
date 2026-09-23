@@ -83,6 +83,8 @@ class OmaGroupsProvider:
             self.data = None
 
     def get_oma_group(self, genome, nr):
+        if self.data is None:
+            return 0
         try:
             per_genome = self.data[str(genome)]
         except KeyError:
@@ -374,7 +376,12 @@ def identify_close_paralogs(df: pandas.DataFrame, join_threshold_mb=500) -> pand
         df_with_index = df.set_index("EntryNr2")
         cp = df_with_index.join(df_with_index, rsuffix="_2")[["EntryNr1", "EntryNr1_2"]]
         cp = cp[cp["EntryNr1"] < cp["EntryNr1_2"]].drop_duplicates(ignore_index=True)
-        cp = cp.rename(columns={"EntryNr1_2": "EntryNr2"})
+        # `drop_duplicates(ignore_index=True)` gives a fresh RangeIndex but does
+        # not always clear the *name* inherited from the "EntryNr2" index we set
+        # above (notably when `cp` is empty, e.g. no shared close paralogs at
+        # all), which then collides with the "EntryNr2" column created by the
+        # rename below.
+        cp = cp.rename_axis(index=None).rename(columns={"EntryNr1_2": "EntryNr2"})
     else:
         # Groupby-based method
         common.package_logger.info(
@@ -1025,6 +1032,7 @@ class DBBuilder(DarwinExporter):
                 raise DBConsistencyError("Several splice variants contain pairwise orthologs", ent, nr_vps)
             if len(vp) == 1:
                 splice_arr[idx + offset] = ent["EntryNr"][vp[0]]
+                continue
 
             # no orthologs for any variant. choose the longest variant as main one.
             splice_arr[idx + offset] = ent["EntryNr"][numpy.argmax(ent["SeqBufferLength"])]

@@ -21,6 +21,7 @@ from pyoma.browser.build.hogconvert import (
     HogObserver,
     OrthoXMLGeneIdParserGeneralProtID,
     OrthoXMLGeneIdParserWithOmaProtId,
+    PerFamilyHOGObserver,
     Species,
     TaxonomyLookupHelper,
     parse_orthoxml,
@@ -334,53 +335,97 @@ class HogAnnotationEndToEndTest(HogFixtureMixin, unittest.TestCase):
 
 
 class HOGtoHDF5Test(HogFixtureMixin, unittest.TestCase):
+    # Regression tests for two compounding bugs, previously unnoticed since
+    # this class had 0% test coverage (see git history for the fix commit):
+    #
+    # (1) HOGtoHDF5.process_augmented_hog computed the "IsRoot" flag for each
+    #     HOG level as `bool(ognode.getparent().tag in ("paralogGroup",
+    #     "groups"))`. For the family's TOP-LEVEL orthologGroup, `ognode` IS
+    #     that root node -- but `AbstractOrthoXMLParser.process_group` always
+    #     runs the node through `strip_namespace()` first, which builds a
+    #     brand new DETACHED `etree.Element(...)` tree with no parent at all.
+    #     So `ognode.getparent()` was always None for the root orthologGroup's
+    #     own TaxRange entry, and `.tag` on None raised AttributeError --
+    #     unconditionally, for any real orthoxml input, as soon as processing
+    #     reached the root level's own TaxRange. Fixed by treating a None
+    #     parent as the true root.
+    #
+    # (2) That AttributeError used to propagate out of parse_orthoxml() while
+    #     still inside the `with HOGtoHDF5(...)` block, so
+    #     HOGtoHDF5.__exit__(exc_type=AttributeError, ...) ran its data-write
+    #     lines (`numpy.stack(list(self.index.values()))` etc.)
+    #     UNCONDITIONALLY regardless of exc_type -- and since no rootHOG's
+    #     orthoxml had been stored yet (self.index still empty),
+    #     `numpy.stack([])` raised `ValueError: need at least one array to
+    #     stack`, masking the original AttributeError, and self.h5 was never
+    #     closed (leaking the open file handle). Fixed by only running the
+    #     write-out logic when exc_type is None, and always closing self.h5
+    #     via `finally`.
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
         self.path = os.path.join(self.tmpdir, "fixture.h5")
         self.build_h5_fixture(self.path)
 
-    def test_hogtohdf5_writes_leveltab_and_omahog_BUG(self):
-        # BUG-PIN, two compounding issues in
-        # pyoma/browser/build/hogconvert.py::HOGtoHDF5, both previously
-        # unnoticed since this class has 0% test coverage:
-        #
-        # (1) HOGtoHDF5.process_augmented_hog (~line 834): for each
-        #     `<property name="TaxRange">` found under the hog, it computes
-        #         bool(ognode.getparent().tag in ("paralogGroup", "groups"))
-        #     where `ognode` is that property's parent orthologGroup. For the
-        #     TOP-LEVEL (root) orthologGroup of a family, `ognode` IS that
-        #     root node -- but `AbstractOrthoXMLParser.process_group` always
-        #     calls `node = strip_namespace(node)` first, which builds a
-        #     brand new DETACHED `etree.Element(...)` tree with no parent at
-        #     all. So `ognode.getparent()` is always None for the root
-        #     orthologGroup's own TaxRange entry, and `.tag` on None raises
-        #     AttributeError -- unconditionally, for any real orthoxml input,
-        #     as soon as processing reaches the root level's own TaxRange.
-        #
-        # (2) That AttributeError propagates out of parse_orthoxml() while
-        #     still inside the `with HOGtoHDF5(...)` block, so
-        #     HOGtoHDF5.__exit__(exc_type=AttributeError, ...) runs. Its
-        #     first line, `self.orthoxml_index.append(numpy.stack(list(self.
-        #     index.values())))`, runs UNCONDITIONALLY regardless of
-        #     exc_type (line 784) -- and since no rootHOG's orthoxml was ever
-        #     stored (self.index is still empty), `numpy.stack([])` raises
-        #     `ValueError: need at least one array to stack`. Per Python's
-        #     "exception raised while handling another exception" semantics,
-        #     THIS ValueError is what actually propagates out of the `with`
-        #     block (chained via __context__ to the original AttributeError,
-        #     which is silently masked). __exit__ also never closes self.h5
-        #     in this path, leaking the open file handle.
-        #
-        # Pinning current (ValueError-propagating) behavior; not fixed here
-        # (tests-only change).
+    def test_hogtohdf5_writes_leveltab_and_omahog(self):
         parser = OrthoXMLGeneIdParserWithOmaProtId(self.path)
         Annotator(parser)
         out_path = os.path.join(self.tmpdir, "hogs.h5")
-        with self.assertRaises(ValueError) as ctx:
+        with HOGtoHDF5(parser, out_path) as writer:
+            # mirrors real usage in build/main.py: a PerFamilyHOGObserver
+            # feeds each (augmented) HOG's serialized orthoxml back into the
+            # HOGtoHDF5 writer via these callbacks.
+            PerFamilyHOGObserver(parser, writer.store_orthoxml, writer.store_orthoxml_augmented)
+            parse_orthoxml(io.BytesIO(self.XML), parser)
+        self.assertEqual(0, writer.h5.isopen, "file must be closed after a successful run")
+
+        with tables.open_file(out_path, mode="r") as h5out:
+            leveltab = h5out.get_node("/HogLevel").read()
+            by_level = {row["Level"].decode(): row for row in leveltab}
+            self.assertEqual({"Eukaryota", "Metazoa", "Mammalia", "Homo sapiens", "Mus musculus"}, set(by_level))
+            # root of the family: directly under <groups> (detached parent) -> IsRoot
+            self.assertTrue(bool(by_level["Eukaryota"]["IsRoot"]))
+            self.assertEqual(b"HOG:0000001", by_level["Eukaryota"]["ID"])
+            # inserted intermediate level, nested under another orthologGroup -> not root
+            self.assertFalse(bool(by_level["Metazoa"]["IsRoot"]))
+            # directly under the paralogGroup (start of a new sub-hog lineage) -> IsRoot
+            self.assertTrue(bool(by_level["Mammalia"]["IsRoot"]))
+            # species-level leaf, nested under the Mammalia orthologGroup -> not root
+            self.assertFalse(bool(by_level["Homo sapiens"]["IsRoot"]))
+            self.assertFalse(bool(by_level["Mus musculus"]["IsRoot"]))
+            self.assertTrue(all(row["Fam"] == 1 for row in leveltab))
+            # two rows carry the per-paralog sub-hog id (one per geneRef lineage)
+            sub_ids = {row["ID"] for row in leveltab if row["Level"] in (b"Mammalia",)}
+            self.assertEqual({b"HOG:0000001.1a", b"HOG:0000001.1b"}, sub_ids)
+
+            oma_hog = h5out.get_node("/OmaHOG").read()
+            # entries 1 (HUMAN) and 3 (MOUSE) got their sub-hog id; entries
+            # 2, 4 (not part of this HOG) stay empty
+            self.assertEqual(b"HOG:0000001.1a", oma_hog[0])
+            self.assertEqual(b"", oma_hog[1])
+            self.assertEqual(b"HOG:0000001.1b", oma_hog[2])
+            self.assertEqual(b"", oma_hog[3])
+
+            index = h5out.get_node("/OrthoXML/Index").read()
+            self.assertEqual(1, len(index))
+            self.assertEqual(1, index[0]["Fam"])
+            self.assertGreater(index[0]["HogAugmentedBufferLength"], 0)
+
+    def test_hogtohdf5_reraises_original_error_and_closes_file(self):
+        # a geneRef referencing a gene id that was never registered makes
+        # Annotator.update_hogids fail with AttributeError while resolving
+        # the gene (`gene_accessor_func(...)` returns None)
+        broken_xml = self.XML.replace(b'<geneRef id="1"/>', b'<geneRef id="999"/>', 1)
+        parser = OrthoXMLGeneIdParserWithOmaProtId(self.path)
+        Annotator(parser)
+        out_path = os.path.join(self.tmpdir, "hogs_broken.h5")
+        writer_holder = {}
+        with self.assertRaises(AttributeError):
             with HOGtoHDF5(parser, out_path) as writer:
-                parse_orthoxml(io.BytesIO(self.XML), parser)
-        self.assertIsInstance(ctx.exception.__context__, AttributeError)
+                writer_holder["writer"] = writer
+                PerFamilyHOGObserver(parser, writer.store_orthoxml, writer.store_orthoxml_augmented)
+                parse_orthoxml(io.BytesIO(broken_xml), parser)
+        self.assertEqual(0, writer_holder["writer"].h5.isopen, "file must be closed even when processing fails")
 
 
 class GeneLookupHelperTest(unittest.TestCase):

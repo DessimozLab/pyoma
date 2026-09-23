@@ -80,18 +80,16 @@ class OmaGroupsProviderTest(unittest.TestCase):
         prov = OmaGroupsProvider(self.source)
         self.assertEqual(42, prov.get_oma_group("HUMAN", 1))
 
-    def test_none_source_raises_typeerror_on_lookup(self):
-        # BUG-PIN: OmaGroupsProvider(None) sets self.data = None. get_oma_group
-        # then does `self.data[str(genome)]` which raises TypeError (not
-        # subscriptable), which is *not* caught by the `except KeyError`
-        # clause in builder.py OmaGroupsProvider.get_oma_group. This is
-        # called as OmaGroupsProvider(conf.oma_groups) in build/main.py,
-        # where conf.oma_groups may be None/unset -- pinning current
-        # (likely buggy) behavior rather than fixing it here.
+    def test_none_source_returns_zero(self):
+        # OmaGroupsProvider(None) sets self.data = None. get_oma_group used to
+        # do `self.data[str(genome)]` unconditionally, raising TypeError (not
+        # subscriptable) -- not caught by the `except KeyError` clause. This
+        # is called as OmaGroupsProvider(conf.oma_groups) in build/main.py,
+        # where conf.oma_groups may be None/unset, so a genome/protein simply
+        # not having an OMA group must resolve to 0, not raise.
         prov = OmaGroupsProvider(None)
         self.assertIsNone(prov.data)
-        with self.assertRaises(TypeError):
-            prov.get_oma_group("HUMAN", 1)
+        self.assertEqual(0, prov.get_oma_group("HUMAN", 1))
 
 
 class IdentifyClseParalogsTest(unittest.TestCase):
@@ -150,26 +148,26 @@ class IdentifyClseParalogsTest(unittest.TestCase):
         res_groupby = identify_close_paralogs(df, join_threshold_mb=-1)
         self.assertEqual(0, len(res_groupby))
 
-    def test_no_shared_entrynr2_join_method_raises_BUG(self):
-        # BUG-PIN: pyoma/browser/build/builder.py::identify_close_paralogs
-        # (join-based branch, ~lines 374-377). When there are no shared
-        # EntryNr2 values at all, the intermediate `cp` DataFrame after the
+    def test_no_shared_entrynr2_join_method_gives_empty_result(self):
+        # Regression test: pyoma/browser/build/builder.py::identify_close_paralogs
+        # (join-based branch). When there are no shared EntryNr2 values at
+        # all, the intermediate `cp` DataFrame after the
         # `cp[cp["EntryNr1"] < cp["EntryNr1_2"]]` filter is empty, and
-        # `.drop_duplicates(ignore_index=True)` on an *empty* DataFrame does
-        # not actually clear the (inherited) index name "EntryNr2" in this
-        # pandas version -- even though `ignore_index=True` is supposed to
-        # give a fresh default index. The subsequent
-        # `.rename(columns={"EntryNr1_2": "EntryNr2"})` then produces a frame
-        # with BOTH a column and an index level named "EntryNr2", which makes
-        # the final `cp.sort_values(by=["EntryNr1", "EntryNr2"], ...)` raise
+        # `.drop_duplicates(ignore_index=True)` on an *empty* DataFrame used
+        # to leave the (inherited) index name "EntryNr2" in place even though
+        # `ignore_index=True` gives a fresh default index. The subsequent
+        # `.rename(columns={"EntryNr1_2": "EntryNr2"})` then produced a frame
+        # with BOTH a column and an index level named "EntryNr2", making the
+        # final `cp.sort_values(by=["EntryNr1", "EntryNr2"], ...)` raise
         # `ValueError: 'EntryNr2' is both an index level and a column label,
-        # which is ambiguous.` This only manifests for the empty-result edge
+        # which is ambiguous.` This only manifested for the empty-result edge
         # case (e.g. a genome pair with zero close paralogs) via the
-        # join-based method (`join_threshold_mb` large enough, the default
-        # in production use). Pinning current behavior; not fixed here.
+        # join-based method (`join_threshold_mb` large enough, the default in
+        # production use) -- fixed with an explicit `.rename_axis(index=None)`.
         df = pandas.DataFrame({"EntryNr1": [1, 2, 3], "EntryNr2": [10, 20, 30]})
-        with self.assertRaises(ValueError):
-            identify_close_paralogs(df, join_threshold_mb=500)
+        res = identify_close_paralogs(df, join_threshold_mb=500)
+        self.assertEqual(0, len(res))
+        self.assertEqual(["EntryNr1", "EntryNr2"], list(res.columns))
 
 
 class BufferedTableWriterTest(unittest.TestCase):
@@ -531,25 +529,23 @@ class IdentifyMainVariantsTest(unittest.TestCase):
         with self.assertRaises(DBConsistencyError):
             self._call(entries)
 
-    def test_vp_choice_is_overwritten_by_longest_seq_BUG(self):
-        # BUG-PIN: pyoma/browser/build/builder.py::DBBuilder._identify_main_variants
+    def test_single_vp_wins_over_longest_seq(self):
+        # Regression test: pyoma/browser/build/builder.py::DBBuilder._identify_main_variants
         # The "if len(vp) == 1: splice_arr[...] = ..." branch (numpy nonzero of
-        # nr_vps) has no `continue`, unlike the OmaGroup/OmaHOG branches above
-        # it. Execution therefore always falls through to the final
-        # unconditional `splice_arr[idx + offset] = ent["EntryNr"][argmax(...)]`
-        # line, silently discarding the pairwise-ortholog-based choice in favor
-        # of "longest sequence wins" -- even when a unique variant with a
-        # pairwise ortholog was found. This test pins the CURRENT (arguably
-        # buggy) behavior; it does not validate it is correct.
+        # nr_vps) used to have no `continue`, unlike the OmaGroup/OmaHOG
+        # branches above it. Execution therefore always fell through to the
+        # final unconditional
+        # `splice_arr[idx + offset] = ent["EntryNr"][argmax(...)]` line,
+        # silently discarding the pairwise-ortholog-based choice in favor of
+        # "longest sequence wins" -- even when a unique variant with a
+        # pairwise ortholog was found. The variant with the (unique) pairwise
+        # ortholog must win, regardless of sequence length.
         entries = self._entries(3, SeqBufferLength=[10, 999, 20])
-        # give entry #1 (index 0) a pairwise ortholog
+        # give entry #1 (index 0, the *shortest* variant) a pairwise ortholog
         self.vp_tab.append([(entries["EntryNr"][0], 42, 0, 0.0, 0.0, 0.0, 0.0, 0.0)])
         self.vp_tab.flush()
         splice_arr = self._call(entries)
-        # If the vp-based choice were respected, every position would equal
-        # entries["EntryNr"][0]. Instead, the longest SeqBufferLength
-        # (index 1) wins everywhere.
-        expected = entries["EntryNr"][1]
+        expected = entries["EntryNr"][0]
         numpy.testing.assert_array_equal([expected, expected, expected], splice_arr)
 
     def test_longest_seq_wins_with_no_group_hog_or_vp(self):

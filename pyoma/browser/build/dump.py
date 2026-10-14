@@ -399,6 +399,35 @@ def dump_oma_groups(conf):
             _dump_oma_groups_keywords(conf.out_keywords, len(groups), keywords)
 
 
+def _write_roothog_descriptions(fh, h5, release_char=""):
+    """Write the keywords of all root HOGs as ``RootHOG<tab>Description`` lines.
+
+    Reads /RootHOG/MetaData and /RootHOG/KeywordBuffer in one go each rather than
+    calling :meth:`Database.get_roothog_keywords` per family.
+    """
+    meta = h5.get_node("/RootHOG/MetaData").read()
+    kw_buf = h5.get_node("/RootHOG/KeywordBuffer").read().tobytes()
+    meta = meta[np.argsort(meta["FamNr"], kind="stable")]
+    n = 0
+    for row in meta:
+        off = int(row["KeywordOffset"])
+        kw = kw_buf[off : off + int(row["KeywordLength"])].decode()
+        fh.write(f"HOG:{release_char}{int(row['FamNr']):07d}\t{kw}\n")
+        n += 1
+    return n
+
+
+def dump_roothog_descriptions(conf):
+    with Database(conf.db) as db:
+        with auto_open(conf.out, "wt") as fh:
+            fh.write(
+                f"# Descriptions of root HOGs from OMA release {db.get_release_name()}\n"
+                "# Format: RootHOG<tab>Description\n"
+            )
+            n = _write_roothog_descriptions(fh, db.get_hdf5_handle(), db.release_char)
+        logger.info("wrote %d root HOG descriptions to %s", n, conf.out)
+
+
 def dump_id_history(conf):
     """Write IDHistory-{old}-to-{new}.txt.gz files for each previous-release database."""
     os.makedirs(conf.out, exist_ok=True)
@@ -689,6 +718,17 @@ def parse_command_line_args():
     groups_parser.add_argument("--out-orthoxml", help="Output path for OMA groups in OrthoXML format")
     groups_parser.add_argument("--out-txt", help="Output path for OMA groups in txt format")
     groups_parser.add_argument("--out-keywords", help="Output path for OMA group keywords (TSV: group_nr<tab>keywords)")
+
+    roothog_desc_parser = subparsers.add_parser(
+        "roothog-descriptions",
+        help="Dump the descriptions (keywords) of root HOGs as TSV (RootHOG<tab>Description)",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    roothog_desc_parser.set_defaults(func=dump_roothog_descriptions)
+    roothog_desc_parser.add_argument("--db", required=True, help="Path to database")
+    roothog_desc_parser.add_argument(
+        "--out", default="roothog-descriptions.txt.gz", help="Output path for the root HOG descriptions"
+    )
 
     pairwise_orthologs_parser = subparsers.add_parser(
         "pairwise-orthologs",

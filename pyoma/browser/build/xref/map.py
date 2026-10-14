@@ -7,7 +7,7 @@ import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Queue
 
-from typing import Mapping, Set, Union, List, Tuple, Callable, Generator
+from typing import Mapping, Set, Union, List, Tuple, Callable, Generator, Optional
 import logging
 from logging.handlers import QueueListener, QueueHandler
 
@@ -205,7 +205,9 @@ class Mapper(metaclass=abc.ABCMeta):
         logger.debug(f"{rec.id} does not map at all")
         return None
 
-    def select_best_kmer_match(self, rec: SeqRecord, kmer_matches: List[Tuple[int, float]]) -> Tuple[int, float] | None:
+    def select_best_kmer_match(
+        self, rec: SeqRecord, kmer_matches: List[Tuple[int, float]]
+    ) -> Optional[Tuple[int, float]]:
         # Step 1: highest kmer overlap
         max_coverage = kmer_matches[0][1]
         coverage_threshold = 0.8 * max_coverage
@@ -460,7 +462,7 @@ class UniProtKBCrossRefsExtractor(CrossRefsExtractor):
         self.key_map = {k: self.storer.source_enum[v] for k, v in key_map.items()}
         return self
 
-    def iter_gene_names(self, annotations: Mapping) -> Generator[Tuple[int, str]]:
+    def iter_gene_names(self, annotations: Mapping) -> Generator[Tuple[int, str], None, None]:
         """extract the gene names (Name, Synonyms, OrderedLocusNames, ORFNames)"""
         try:
             gene_names = annotations["gene_name"]

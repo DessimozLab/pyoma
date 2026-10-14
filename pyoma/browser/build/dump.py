@@ -1,5 +1,7 @@
 import collections
 import logging
+import os
+import resource
 import sys
 import warnings
 from contextlib import ExitStack
@@ -7,6 +9,7 @@ from collections import defaultdict
 from textwrap import dedent
 from typing import Tuple
 
+import numpy as np
 import tables
 from tables import PerformanceWarning
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
@@ -15,8 +18,11 @@ from tqdm import tqdm
 
 from .main import setup_logging
 from ..db import Database
+from ..hoghelper import are_orthologous
 from ..models import ProteinEntry
 from ..build.taxonomy_alignment import produce_mapping_and_download_files
+from ..linkout import ncbi as ncbi_linkout
+from ..linkout import uniprot as uniprot_linkout
 from ...common import auto_open
 
 logger = logging.getLogger(__name__)
@@ -143,6 +149,94 @@ def _format_main_isoform(prot):
     return "self" if prot.is_main_isoform else prot.get_main_isoform().omaid
 
 
+def _format_locus(exons):
+    """Format a numpy array of locus rows as the canonical location string."""
+    if len(exons) == 0:
+        return "n/a"
+    exons = exons[exons["Start"].argsort()]
+    if exons["Strand"][0] < 0:
+        parts = [f"complement({e['Start']}..{e['End']})" for e in exons[::-1]]
+    else:
+        parts = [f"{e['Start']}..{e['End']}" for e in exons]
+    return f"join({', '.join(parts)})" if len(parts) > 1 else parts[0]
+
+
+def _dump_annotations(fh, db):
+    """Write protein annotations genome-by-genome to avoid per-protein HDF5 queries."""
+    fh.write(
+        "# Dump of protein annotations (taken from original genome source, except for\n"
+        '# "MainIsoform", which is the splicing form that has the most homologous matches).\n'
+        "#   Note: MainIsoform=='self' indicates that this protein is OMA's main isoform,\n"
+        "#         otherwise it is an OMA ID of the main isoform.\n"
+        "# Format: OMA ID\tOriginal ID\tChromosome/Scaffold\tLocation\tMainIsoform\tDescription\n"
+    )
+
+    h5 = db.db
+    prot_tab = h5.get_node("/Protein/Entries")
+    desc_buf = h5.get_node("/Protein/DescriptionBuffer")
+    xref_tab = h5.get_node("/XRef")
+    src_enum = xref_tab.get_enum("XRefSource")
+    source_code = src_enum["SourceID"]
+
+    for gs in tqdm(h5.get_node("/Genome").read(), desc="genomes"):
+        code = gs["UniProtSpeciesCode"].decode()
+        off = int(gs["EntryOff"])
+        tot = int(gs["TotEntries"])
+        if tot == 0:
+            continue
+
+        # Read all entries for this genome in one slice
+        entries = prot_tab[off : off + tot]
+
+        # Source-ID xrefs for this genome (one range query, not per-protein)
+        enr_min, enr_max = int(entries["EntryNr"].min()), int(entries["EntryNr"].max())
+        src_xrefs = {
+            int(row["EntryNr"]): row["XRefId"].decode()
+            for row in xref_tab.where(
+                "(EntryNr >= enr_min) & (EntryNr <= enr_max) & (XRefSource == source_code)",
+                condvars={"enr_min": enr_min, "enr_max": enr_max, "source_code": source_code},
+            )
+        }
+
+        # Locus table: one read for the entire genome, grouped by entry_nr
+        try:
+            locus_tab = h5.get_node(f"/Protein/Locus/{code}")
+            locus_rows = locus_tab[:]
+        except tables.NoSuchNodeError:
+            locus_rows = None
+
+        locus_by_enr = defaultdict(list)
+        if locus_rows is not None:
+            for row in locus_rows:
+                locus_by_enr[int(row["EntryNr"])].append(row)
+
+        for i, e in enumerate(entries):
+            enr = int(e["EntryNr"])
+            omaid = f"{code}{i + 1:05d}"
+            src_xref = src_xrefs.get(enr, "")
+            chrom = e["Chromosome"].decode()
+            desc = (
+                desc_buf[int(e["DescriptionOffset"]) : int(e["DescriptionOffset"]) + int(e["DescriptionLength"])]
+                .tobytes()
+                .decode()
+            )
+
+            exon_rows = locus_by_enr.get(enr)
+            if exon_rows:
+                locus_str = _format_locus(np.array(exon_rows, dtype=locus_rows.dtype))
+            else:
+                locus_str = "n/a"
+
+            alt = int(e["AltSpliceVariant"])
+            if alt == 0 or alt == enr:
+                main_iso = "self"
+            else:
+                # alt is the entry_nr of the main isoform — compute its OMA ID using genome offset
+                main_iso = f"{code}{alt - off:05d}"
+
+            fh.write(f"{omaid}\t{src_xref}\t{chrom}\t{locus_str}\t{main_iso}\t{desc}\n")
+
+
 def dump_sequences_and_protein_annotations(conf):
     with Database(conf.db) as db:
         with ExitStack() as stack:
@@ -150,34 +244,40 @@ def dump_sequences_and_protein_annotations(conf):
             cdna_fh = stack.enter_context(auto_open(conf.out_cdna, "wt")) if conf.out_cdna else None
             annot_fh = stack.enter_context(auto_open(conf.out_annotations, "wt")) if conf.out_annotations else None
 
+            if annot_fh:
+                logger.info("writing protein annotations to %s", conf.out_annotations)
+                _dump_annotations(annot_fh, db)
             if prot_fh:
                 logger.info("writing protein sequences to %s", conf.out_proteins)
             if cdna_fh:
                 logger.info("writing cDNA sequences to %s", conf.out_cdna)
-            if annot_fh:
-                logger.info("writing protein annotations to %s", conf.out_annotations)
-                annot_fh.write(
-                    "# Dump of protein annotations (taken from original genome source, except for\n"
-                    '# "MainIsoform", which is the splicing form that has the most homologous matches).\n'
-                    "#   Note: MainIsoform=='self' indicates that this protein is OMA's main isoform,\n"
-                    "#         otherwise it is an OMA ID of the main isoform.\n"
-                    "# Format: OMA ID\tOriginal ID\tChromosome/Scaffold\tLocation\tMainIsoform\tDescription\n"
-                )
 
-            for prot, src_xref in _iter_protein_entries(db):
-                if prot_fh is not None:
-                    seq = prot.sequence
-                    if seq:
-                        _write_fasta_record(prot_fh, prot.omaid, seq)
-                if cdna_fh is not None:
-                    cdna = prot.cdna
-                    if cdna:
-                        _write_fasta_record(cdna_fh, prot.omaid, cdna)
-                if annot_fh is not None:
-                    annot_fh.write(
-                        f"{prot.omaid}\t{src_xref}\t{prot.chromosome}\t"
-                        f"{prot.exons}\t{_format_main_isoform(prot)}\t{prot.description}\n"
-                    )
+            if prot_fh is not None or cdna_fh is not None:
+                for prot, src_xref in tqdm(
+                    _iter_protein_entries(db),
+                    desc="Processing proteins",
+                    total=db.db.get_node("/Protein/Entries").nrows,
+                ):
+                    if prot_fh is not None:
+                        seq = prot.sequence
+                        if seq:
+                            _write_fasta_record(prot_fh, src_xref, seq)
+                    if cdna_fh is not None:
+                        cdna = prot.cdna
+                        if cdna:
+                            _write_fasta_record(cdna_fh, src_xref, cdna)
+
+
+def dump_ncbi_linkout(conf):
+    if not conf.skip_find:
+        ncbi_linkout.prepare_linkout_files(conf.out, conf.db)
+    if conf.push:
+        ncbi_linkout.copy_to_ncbi(conf.out, conf.password)
+
+
+def dump_uniprot_crosslinks(conf):
+    with auto_open(conf.out, "wt", encoding="utf-8", newline="") as fout:
+        uniprot_linkout.write_omagrp_xref_map(fout, conf.db)
 
 
 def _load_oma_group_data(db):
@@ -185,9 +285,17 @@ def _load_oma_group_data(db):
     for row in tqdm(db.get_hdf5_handle().get_node("/Protein/Entries").where("OmaGroup > 0"), desc="Loading OMA groups"):
         groups[int(row["OmaGroup"])].append(int(row["EntryNr"]))
     meta_tab = db.get_hdf5_handle().get_node("/OmaGroups/MetaData")
-    fingerprints = {
-        int(row["GroupNr"]): row["Fingerprint"].decode() for row in tqdm(meta_tab, desc="Loading fingerprints")
-    }
+    kw_buf = db.get_hdf5_handle().get_node("/OmaGroups/KeywordBuffer")
+    fingerprints = {}
+    keywords = {}
+    for row in tqdm(meta_tab, desc="Loading group metadata"):
+        grp_nr = int(row["GroupNr"])
+        fingerprints[grp_nr] = row["Fingerprint"].decode()
+        kw = (
+            kw_buf[int(row["KeywordOffset"]) : int(row["KeywordOffset"]) + int(row["KeywordLength"])].tobytes().decode()
+        )
+        if kw:
+            keywords[grp_nr] = kw
     xref_tab = db.get_hdf5_handle().get_node("/XRef")
     source_code = xref_tab.get_enum("XRefSource")["SourceID"]
     gene_ids = {
@@ -197,7 +305,7 @@ def _load_oma_group_data(db):
         )
     }
     nr_species = len(db.get_hdf5_handle().get_node("/Genome"))
-    return groups, fingerprints, gene_ids, nr_species
+    return groups, fingerprints, keywords, gene_ids, nr_species
 
 
 def _dump_oma_groups_txt(out, db, groups, fingerprints, gene_ids, nr_species):
@@ -274,13 +382,262 @@ def _dump_oma_groups_orthoxml(out, db, groups, fingerprints, gene_ids, nr_specie
         fh.write("</orthoXML>\n")
 
 
+def _dump_oma_groups_keywords(out_keywords, nr_groups, keywords):
+    with auto_open(out_keywords, "wt") as fh:
+        for grp_nr in range(1, nr_groups + 1):
+            fh.write(f"{grp_nr}\t{keywords.get(grp_nr, '-')}\n")
+
+
 def dump_oma_groups(conf):
     with Database(conf.db) as db:
-        groups, fingerprints, gene_ids, nr_species = _load_oma_group_data(db)
+        groups, fingerprints, keywords, gene_ids, nr_species = _load_oma_group_data(db)
         if conf.out_orthoxml is not None:
             _dump_oma_groups_orthoxml(conf.out_orthoxml, db, groups, fingerprints, gene_ids, nr_species)
         if conf.out_txt is not None:
             _dump_oma_groups_txt(conf.out_txt, db, groups, fingerprints, gene_ids, nr_species)
+        if conf.out_keywords is not None:
+            _dump_oma_groups_keywords(conf.out_keywords, len(groups), keywords)
+
+
+def _write_roothog_descriptions(fh, h5, release_char=""):
+    """Write the keywords of all root HOGs as ``RootHOG<tab>Description`` lines.
+
+    Reads /RootHOG/MetaData and /RootHOG/KeywordBuffer in one go each rather than
+    calling :meth:`Database.get_roothog_keywords` per family.
+    """
+    meta = h5.get_node("/RootHOG/MetaData").read()
+    kw_buf = h5.get_node("/RootHOG/KeywordBuffer").read().tobytes()
+    meta = meta[np.argsort(meta["FamNr"], kind="stable")]
+    n = 0
+    for row in meta:
+        off = int(row["KeywordOffset"])
+        kw = kw_buf[off : off + int(row["KeywordLength"])].decode()
+        fh.write(f"HOG:{release_char}{int(row['FamNr']):07d}\t{kw}\n")
+        n += 1
+    return n
+
+
+def dump_roothog_descriptions(conf):
+    with Database(conf.db) as db:
+        with auto_open(conf.out, "wt") as fh:
+            fh.write(
+                f"# Descriptions of root HOGs from OMA release {db.get_release_name()}\n"
+                "# Format: RootHOG<tab>Description\n"
+            )
+            n = _write_roothog_descriptions(fh, db.get_hdf5_handle(), db.release_char)
+        logger.info("wrote %d root HOG descriptions to %s", n, conf.out)
+
+
+def dump_id_history(conf):
+    """Write IDHistory-{old}-to-{new}.txt.gz files for each previous-release database."""
+    os.makedirs(conf.out, exist_ok=True)
+
+    with tables.open_file(conf.db, "r") as new_h5:
+        new_release = str(new_h5.get_node_attr("/", "oma_version"))
+        new_genome_tab = new_h5.get_node("/Genome").read()
+        new_prot_tab = new_h5.get_node("/Protein/Entries")
+
+        new_genomes = {row["UniProtSpeciesCode"]: row for row in new_genome_tab}
+
+        for old_db_path in conf.prev_dbs:
+            with tables.open_file(old_db_path, "r") as old_h5:
+                old_release = str(old_h5.get_node_attr("/", "oma_version"))
+                old_genome_tab = old_h5.get_node("/Genome").read()
+                old_prot_tab = old_h5.get_node("/Protein/Entries")
+
+                out_fn = os.path.join(conf.out, f"IDHistory-{old_release}-to-{new_release}.txt.gz")
+                logger.info("writing %s", out_fn)
+
+                with auto_open(out_fn, "wt") as fh:
+                    fh.write(
+                        f"# OMA IDs mapping from release {old_release} to {new_release} of updated genomes.\n"
+                        "#\n"
+                        "#  The OMA IDs of an updated genome are not stable. We provide here a\n"
+                        "#  mapping of those proteins, which still have an identical protein sequence. We\n"
+                        "#  do not provide a mapping for proteins which changed in their sequence.\n"
+                        "#  Species which were not updated are not included in this mapping.\n"
+                        "# Format: old OMA ID<tab>new OMA ID\n"
+                    )
+
+                    n_mapped = 0
+                    for old_gs in old_genome_tab:
+                        code = old_gs["UniProtSpeciesCode"]
+                        if code not in new_genomes:
+                            continue
+                        new_gs = new_genomes[code]
+                        if old_gs["Date"] == new_gs["Date"]:
+                            continue
+
+                        new_off = int(new_gs["EntryOff"])
+                        new_tot = int(new_gs["TotEntries"])
+                        new_prots = new_prot_tab[new_off : new_off + new_tot]
+                        new_md5_to_pnr = {}
+                        for i, row in enumerate(new_prots):
+                            md5 = bytes(row["MD5ProteinHash"])
+                            if md5 not in new_md5_to_pnr:
+                                new_md5_to_pnr[md5] = i + 1
+
+                        old_off = int(old_gs["EntryOff"])
+                        old_tot = int(old_gs["TotEntries"])
+                        old_prots = old_prot_tab[old_off : old_off + old_tot]
+                        code_str = code.decode()
+                        for i, row in enumerate(old_prots):
+                            pnr_new = new_md5_to_pnr.get(bytes(row["MD5ProteinHash"]))
+                            if pnr_new is not None:
+                                fh.write(f"{code_str}{i + 1:05d}\t{code_str}{pnr_new:05d}\n")
+                                n_mapped += 1
+
+                logger.info("wrote %d ID mappings to %s", n_mapped, out_fn)
+
+
+def _load_pairwise_ortholog_lookup(db):
+    """Build EntryNr-indexed lookup arrays (OMA ID, OmaHOG, OmaGroup) for all main isoforms.
+
+    VPairs only ever reference main isoforms, so restricting the scan to them keeps the
+    lookup as small as possible while still covering every EntryNr that can appear in a
+    pairwise relation.
+    """
+    entries_tab = db.get_hdf5_handle().get_node("/Protein/Entries")
+    id_mapper = db.id_mapper["OMA"]
+    n = entries_tab.nrows
+
+    oma_id = [""] * (n + 1)
+    oma_hog = np.empty(n + 1, dtype=object)
+    oma_hog[:] = b""
+    oma_group = np.zeros(n + 1, dtype=np.uint32)
+
+    for row in tqdm(
+        entries_tab.where("(AltSpliceVariant == EntryNr) | (AltSpliceVariant == 0)"),
+        desc="Loading main isoforms",
+    ):
+        enr = int(row["EntryNr"])
+        oma_id[enr] = id_mapper.map_entry_nr(enr)
+        oma_hog[enr] = bytes(row["OmaHOG"])
+        oma_group[enr] = row["OmaGroup"]
+    # OMA IDs are near-fixed-width (species code + zero-padded index), but the index
+    # is not truncated for genomes with >=100'000 entries, so let numpy infer the
+    # true max width here rather than assuming one - a hardcoded fixed dtype would
+    # silently truncate any longer id. OMA IDs are ASCII, so bytes (S) is more
+    # compact than unicode (U); consumers must decode() the resulting elements.
+    oma_id = np.array(oma_id, dtype=bytes)
+    return oma_id, oma_hog, oma_group
+
+
+def _iter_genome_codes_with_vpairs(db):
+    """Yield (code, nrows) for every genome that has a VPairs table.
+
+    Deliberately does *not* hand back the open Table node: reading a table's shape
+    is metadata-only, but any actual row read populates a per-dataset HDF5 chunk
+    cache that is only released once the node is closed.
+    """
+    h5 = db.get_hdf5_handle()
+    for gs in h5.get_node("/Genome").read():
+        code = gs["UniProtSpeciesCode"].decode()
+        try:
+            vp_tab = h5.get_node(f"/PairwiseRelation/{code}/VPairs")
+        except tables.NoSuchNodeError:
+            continue
+        nrows = vp_tab.nrows
+        vp_tab.close()
+        yield code, nrows
+
+
+def rss_mb():
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+
+def dump_pairwise_orthologs(conf):
+    """Write all pairwise orthologs (VPairs) as a TSV file.
+
+    Format: OMA_ID1\tOMA_ID2\tRelType\tOMA_Group\tOMA_HOG
+
+    OMA_Group is only reported if both entries are members of the same (non-zero) OMA Group.
+    OMA_HOG is the deepest common sub-HOG prefix, if the two entries qualify as orthologous
+    according to :func:`pyoma.browser.hoghelper.are_orthologous`. Cells that do not qualify
+    are reported as "n/a".
+    """
+    chunk_size = 2_000_000
+    logger.debug("RSS before Database(): %.1f MB", rss_mb())
+    with Database(conf.db) as db:
+        logger.debug("RSS after Database(): %.1f MB", rss_mb())
+        logger.info("Loading OMA-ID / OmaHOG / OmaGroup lookup for main isoforms...")
+        oma_id, oma_hog, oma_group = _load_pairwise_ortholog_lookup(db)
+        logger.debug("RSS after lookup build: %.1f MB", rss_mb())
+
+        genome_vpair_info = list(_iter_genome_codes_with_vpairs(db))
+        logger.debug("RSS after genomes_vtab_list: %.1f MB", rss_mb())
+        n_proteins = db.get_hdf5_handle().get_node("/Protein/Entries").nrows
+        n_pairs = sum(nrows for _, nrows in genome_vpair_info) // 2
+        n_species = len(genome_vpair_info)
+
+        reltype_map = None
+        n_written = 0
+        with auto_open(conf.out, "wt") as fh:
+            fh.write(
+                f"# All orthologous pairs from OMA release {db.get_release_name()}\n"
+                f"# This release has {n_pairs} pairs covering {n_proteins} proteins from {n_species} species\n"
+                "# Format: Protein 1<tab>Protein 2<tab>Orthology type<tab>OMA group (if any)<tab>OMA HOG (if any)\n"
+                "#\n"
+                "#   OMA_Group is only reported if both proteins are members of the same OMA Group (SOG).\n"
+                "#   OMA_HOG is the deepest common sub-HOG prefix, if the two proteins belong to the same HOG.\n"
+                "#   OMA_Group and OMA_HOG are reported as 'n/a' if the two proteins do not belong to "
+                "#   the same group or HOG, respectively.\n"
+                "# Every pair is listed only once, and in no particular order.\n"
+            )
+            h5 = db.get_hdf5_handle()
+            with tqdm(total=n_pairs, desc="nr of pairs") as pbar:
+                for i, (code, nrows) in enumerate(genome_vpair_info):
+                    if i % 100 == 0:
+                        logger.debug("RSS before processing %s [%d] vtab: %.1f MB", code, i, rss_mb())
+                    vp_tab = h5.get_node(f"/PairwiseRelation/{code}/VPairs")
+                    try:
+                        if reltype_map is None:
+                            type_enum = vp_tab.get_enum("RelType")
+                        reltype_map = {val: name for name, val in type_enum}
+
+                        for start in range(0, nrows, chunk_size):
+                            chunk = vp_tab[start : start + chunk_size]
+                            mask = chunk["EntryNr1"] > chunk["EntryNr2"]
+                            sub = chunk[mask]
+                            if len(sub) == 0:
+                                continue
+
+                            e1 = sub["EntryNr1"]
+                            e2 = sub["EntryNr2"]
+                            ids1 = oma_id[e1]
+                            ids2 = oma_id[e2]
+                            hogs1 = oma_hog[e1]
+                            hogs2 = oma_hog[e2]
+                            g1 = oma_group[e1]
+                            g2 = oma_group[e2]
+                            group_match = (g1 == g2) & (g1 > 0)
+                            rel_types = sub["RelType"]
+
+                            buf = []
+                            for i in range(len(sub)):
+                                ortho_type = reltype_map[int(rel_types[i])]
+                                group_str = str(int(g1[i])) if group_match[i] else "n/a"
+
+                                h1, h2 = hogs1[i], hogs2[i]
+                                hog_str = "n/a"
+                                if h1 and h2:
+                                    if h1 == h2:
+                                        hog_str = h1.decode()
+                                    else:
+                                        common = are_orthologous(h1, h2, return_group=True)
+                                        if common is not False:
+                                            hog_str = common
+
+                                buf.append(
+                                    f"{ids1[i].decode()}\t{ids2[i].decode()}\t{ortho_type}\t{group_str}\t{hog_str}\n"
+                                )
+                            fh.writelines(buf)
+                            n_written += len(sub)
+                            pbar.update(len(sub))
+                    finally:
+                        vp_tab.close()
+        logger.info("wrote %d pairwise ortholog relations to %s", n_written, conf.out)
+        logger.info("RSS after writing pairwise orthologs: %.1f MB", rss_mb())
 
 
 def parse_command_line_args():
@@ -332,6 +689,27 @@ def parse_command_line_args():
     seq_parser.add_argument("--out-cdna", help="Output path for cDNA sequences in FASTA format")
     seq_parser.add_argument("--out-annotations", help="Output path for protein annotations in TSV format")
 
+    ncbi_parser = subparsers.add_parser(
+        "ncbi-linkout",
+        help="Generate and optionally push NCBI LinkOut XML files",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    ncbi_parser.set_defaults(func=dump_ncbi_linkout)
+    ncbi_parser.add_argument("--db", required=True, help="Path to the HDF5 database")
+    ncbi_parser.add_argument("--out", default="./", help="Folder where output XML files are written")
+    ncbi_parser.add_argument("--skip-find", action="store_true", help="Skip generating the linkout files")
+    ncbi_parser.add_argument("--push", action="store_true", help="Push XML files to NCBI FTP host")
+    ncbi_parser.add_argument("-p", "--password", help="Password for the NCBI FTP account")
+
+    uniprot_parser = subparsers.add_parser(
+        "uniprot-crosslinks",
+        help="Generate UniProtKB → OMA group crosslink mapping",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    uniprot_parser.set_defaults(func=dump_uniprot_crosslinks)
+    uniprot_parser.add_argument("--db", required=True, help="Path to the HDF5 database")
+    uniprot_parser.add_argument("--out", default="./UniProtKB-OMA.txt.gz", help="Output file for the crosslink mapping")
+
     groups_parser = subparsers.add_parser(
         "oma-groups", help="Dump OMA groups in TXT or OrthoXML format", formatter_class=ArgumentDefaultsHelpFormatter
     )
@@ -339,6 +717,47 @@ def parse_command_line_args():
     groups_parser.add_argument("--db", required=True, help="Path to database")
     groups_parser.add_argument("--out-orthoxml", help="Output path for OMA groups in OrthoXML format")
     groups_parser.add_argument("--out-txt", help="Output path for OMA groups in txt format")
+    groups_parser.add_argument("--out-keywords", help="Output path for OMA group keywords (TSV: group_nr<tab>keywords)")
+
+    roothog_desc_parser = subparsers.add_parser(
+        "roothog-descriptions",
+        help="Dump the descriptions (keywords) of root HOGs as TSV (RootHOG<tab>Description)",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    roothog_desc_parser.set_defaults(func=dump_roothog_descriptions)
+    roothog_desc_parser.add_argument("--db", required=True, help="Path to database")
+    roothog_desc_parser.add_argument(
+        "--out", default="roothog-descriptions.txt.gz", help="Output path for the root HOG descriptions"
+    )
+
+    pairwise_orthologs_parser = subparsers.add_parser(
+        "pairwise-orthologs",
+        help="Dump pairwise orthologs (VPairs) as a TSV file, together with OMA Group and OmaHOG information",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    pairwise_orthologs_parser.set_defaults(func=dump_pairwise_orthologs)
+    pairwise_orthologs_parser.add_argument("--db", required=True, help="Path to database")
+    pairwise_orthologs_parser.add_argument(
+        "--out", required=True, help="Output path for the pairwise orthologs TSV file"
+    )
+
+    id_history_parser = subparsers.add_parser(
+        "id-history",
+        help="Produce IDHistory files mapping OMA IDs across updated genomes between releases",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    id_history_parser.set_defaults(func=dump_id_history)
+    id_history_parser.add_argument("--db", required=True, help="Path to the current (new) HDF5 database")
+    id_history_parser.add_argument(
+        "--prev-dbs",
+        nargs="+",
+        required=True,
+        metavar="PREV_DB",
+        help="Paths to previous-release HDF5 databases",
+    )
+    id_history_parser.add_argument(
+        "--out", default=".", help="Output directory for IDHistory-{old}-to-{new}.txt.gz files"
+    )
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

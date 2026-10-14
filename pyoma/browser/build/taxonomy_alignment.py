@@ -148,6 +148,9 @@ def find_top_overlaping_nodes(source, target):
 
 
 def _filter_candidates(tax, cand, name, threshold=0.4):
+    if len(cand) == 0:
+        return []
+
     for k in range(len(cand)):
         if cand[k][1] < threshold * cand[0][1]:
             break
@@ -276,11 +279,19 @@ def map_gtdb_and_ncbi(tax: Taxonomy, gs: pandas.DataFrame, db_path: str, gtdb2nc
             if row.NCBITaxonId < 0:
                 tax2code[gtdb2ncbi.get(row.NCBITaxonId, [0])[0]].add(row.UniProtSpeciesCode)
 
-    tree_gtdb = tax.get_topology(oma_gtdb, intermediate_nodes=True, annotate=True)
-    tree_ncbi = tax.get_topology(oma_ncbi, intermediate_nodes=True, annotate=True)
+    if len(oma_gtdb) > 0:
+        tree_gtdb = tax.get_topology(oma_gtdb, intermediate_nodes=True, annotate=True)
+        gtdb_nodes_to_genome_set = create_treenode_to_genome_map(tree_gtdb, tax2code)
+    else:
+        tree_gtdb = None
+        gtdb_nodes_to_genome_set = {}
 
-    gtdb_nodes_to_genome_set = create_treenode_to_genome_map(tree_gtdb, tax2code)
-    ncbi_nodes_to_genome_set = create_treenode_to_genome_map(tree_ncbi, tax2code)
+    if len(oma_ncbi) > 0:
+        tree_ncbi = tax.get_topology(oma_ncbi, intermediate_nodes=True, annotate=True)
+        ncbi_nodes_to_genome_set = create_treenode_to_genome_map(tree_ncbi, tax2code)
+    else:
+        tree_ncbi = None
+        ncbi_nodes_to_genome_set = {}
     gtdb_to_ncbi_cand = find_top_overlaping_nodes(gtdb_nodes_to_genome_set, ncbi_nodes_to_genome_set)
     ncbi_to_gtdb_cand = find_top_overlaping_nodes(ncbi_nodes_to_genome_set, gtdb_nodes_to_genome_set)
 

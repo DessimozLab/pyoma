@@ -169,7 +169,7 @@ def _iter_protein_entries(db, chunk_size=500_000):
 
 
 def _write_fasta_record(fh, header, seq, line_width=80):
-    fh.write(f">{header}\n")
+    fh.write(f"{header}\n")
     for i in range(0, len(seq), line_width):
         fh.write(seq[i : i + line_width])
         fh.write("\n")
@@ -288,14 +288,15 @@ def dump_sequences_and_protein_annotations(conf):
                     desc="Processing proteins",
                     total=db.db.get_node("/Protein/Entries").nrows,
                 ):
+                    fasta_header = f">{prot.omaid} | {src_xref}"
                     if prot_fh is not None:
                         seq = prot.sequence
                         if seq:
-                            _write_fasta_record(prot_fh, src_xref, seq)
+                            _write_fasta_record(prot_fh, fasta_header, seq)
                     if cdna_fh is not None:
                         cdna = prot.cdna
                         if cdna:
-                            _write_fasta_record(cdna_fh, src_xref, cdna)
+                            _write_fasta_record(cdna_fh, fasta_header, cdna)
 
 
 def dump_ncbi_linkout(conf):

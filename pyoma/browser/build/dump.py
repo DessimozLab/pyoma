@@ -40,6 +40,8 @@ def open_xref_outputs(args):
         "RefSeq": args.out_refseq,
         "NCBI": args.out_ncbi,
         "EntrezGene": args.out_entrez,
+        "SourceID": args.out_source,
+        "SourceAC": args.out_source,
     }
 
     # Open each unique path only once
@@ -60,19 +62,47 @@ def dump_xrefs(conf):
         else:
             xref_tab = db.db.get_node("/XRef")
         oma_id_mapper = db.id_mapper["OMA"]
-        source_enum = xref_tab.get_enum("XRefSource")
 
         outputs, stack = open_xref_outputs(conf)
         with stack:
-            for row in xref_tab.iterrows():
-                source = source_enum(row["XRefSource"])
-                if source not in outputs:
-                    continue
-                omaid = oma_id_mapper.map_entry_nr(row["EntryNr"])
-                outputs[source].write(f"{omaid}\t{row['XRefId'].decode('utf-8')}\n")
+            _write_xrefs(xref_tab, outputs, oma_id_mapper.map_entry_nr)
 
         if conf.xref_db is not None:
             xref_db.close()
+
+
+def _write_xrefs(xref_tab, outputs, map_entry_nr):
+    """writes the xrefs to the output handle of their source (omaid<tab>xref).
+
+    SourceID and SourceAC xrefs of an entry are combined into a single line
+    (omaid<tab>source ids<tab>source acs), with multiple values joined by ';'.
+    This requires the xref table to be sorted by EntryNr."""
+    source_enum = xref_tab.get_enum("XRefSource")
+    combine = "SourceID" in outputs
+    combined_col = {source_enum["SourceID"]: 0, source_enum["SourceAC"]: 1} if combine else {}
+    cur_enr, combined = None, ([], [])
+
+    def flush_combined():
+        if combined[0] or combined[1]:
+            ids, acs = (";".join(dict.fromkeys(vals)) for vals in combined)
+            outputs["SourceID"].write(f"{map_entry_nr(cur_enr)}\t{ids}\t{acs}\n")
+
+    for row in xref_tab.iterrows():
+        enr = int(row["EntryNr"])
+        if combine and enr != cur_enr:
+            if cur_enr is not None and enr < cur_enr:
+                raise ValueError("XRef table must be sorted by EntryNr to combine SourceID and SourceAC")
+            flush_combined()
+            cur_enr, combined = enr, ([], [])
+        src = row["XRefSource"]
+        if src in combined_col:
+            combined[combined_col[src]].append(row["XRefId"].decode("utf-8"))
+            continue
+        source = source_enum(src)
+        if source in outputs:
+            outputs[source].write(f"{map_entry_nr(enr)}\t{row['XRefId'].decode('utf-8')}\n")
+    if combine:
+        flush_combined()
 
 
 def dump_go(conf):
@@ -659,6 +689,11 @@ def parse_command_line_args():
     xrefs_parser.add_argument("--out-refseq", help="Output path for the refseq cross-reference mappings (if enabled)")
     xrefs_parser.add_argument("--out-ncbi", help="Output path for the ncbi cross-reference mappings (if enabled)")
     xrefs_parser.add_argument("--out-entrez", help="Output path for the entrez cross-reference mappings (if enabled)")
+    xrefs_parser.add_argument(
+        "--out-source",
+        help="Output path for the source id and ac cross-reference mappings (if enabled). "
+        "One line per protein: OMA ID, source ids and source acs (multiple values separated by ';')",
+    )
 
     go_parser = subparsers.add_parser("go", help="Dump GO annotations", formatter_class=ArgumentDefaultsHelpFormatter)
     go_parser.set_defaults(func=dump_go)

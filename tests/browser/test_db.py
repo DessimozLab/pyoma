@@ -1,5 +1,6 @@
 from __future__ import division, print_function, unicode_literals
 
+import itertools
 import random
 import types
 import unittest
@@ -484,6 +485,63 @@ class DatabaseTests(TestWithDbInstance):
         query_level = "YEAST"
         graph = self.db.get_extant_synteny_graph(query_level)
         self.assertIn("YEAST00012", graph)
+
+
+class IterOmaGroupsTest(TestWithDbInstance):
+    def setUp(self):
+        self.meta = self.db.db.get_node("/OmaGroups/MetaData").read()
+
+    def assertGroupNrs(self, expected_mask, groups):
+        expected = self.meta["GroupNr"][expected_mask].tolist()
+        self.assertEqual(expected, [g.group_nbr for g in groups])
+
+    def test_default_returns_all_groups(self):
+        self.assertEqual(self.meta["GroupNr"].tolist(), [g.group_nbr for g in self.db.iter_oma_groups()])
+
+    def test_min_size(self):
+        self.assertGroupNrs(self.meta["NrMembers"] >= 3, self.db.iter_oma_groups(min_size=3))
+
+    def test_min_and_max_size(self):
+        groups = list(self.db.iter_oma_groups(min_size=3, max_size=4))
+        self.assertGreater(len(groups), 0)
+        self.assertGroupNrs((self.meta["NrMembers"] >= 3) & (self.meta["NrMembers"] <= 4), groups)
+
+    def test_has_fingerprint(self):
+        has_fp = self.meta["Fingerprint"] != b"n/a"
+        self.assertGroupNrs(has_fp, self.db.iter_oma_groups(has_fingerprint=True))
+        self.assertGroupNrs(~has_fp, self.db.iter_oma_groups(has_fingerprint=False))
+
+    def test_has_keyword(self):
+        kw_buf = self.db.db.get_node("/OmaGroups/KeywordBuffer")[:]
+        keywords = [kw_buf[o : o + n].tobytes() for o, n in zip(self.meta["KeywordOffset"], self.meta["KeywordLength"])]
+        has_kw = numpy.array([kw not in (b"", b"-") for kw in keywords])
+        self.assertTrue(has_kw.any() and not has_kw.all(), "test db should contain groups with and without keyword")
+        self.assertGroupNrs(has_kw, self.db.iter_oma_groups(has_keyword=True))
+        self.assertGroupNrs(~has_kw, self.db.iter_oma_groups(has_keyword=False))
+
+    def test_combined_filters(self):
+        groups = list(self.db.iter_oma_groups(min_size=3, has_fingerprint=True, has_keyword=True))
+        self.assertGreater(len(groups), 0)
+        for grp in groups:
+            self.assertGreaterEqual(grp._group["size"], 3)
+            self.assertNotEqual("n/a", grp.fingerprint)
+            self.assertNotIn(grp.keyword, ("", "-"))
+
+    def test_metadata_matches_oma_group_metadata(self):
+        for grp in itertools.islice(self.db.iter_oma_groups(max_size=3), 20):
+            self.assertEqual(self.db.oma_group_metadata(grp.group_nbr), grp._group)
+
+    def test_keywords_correct_with_small_read_chunks(self):
+        # a tiny chunk size forces frequent reloads of the keyword window
+        with mock.patch.object(self.db, "_oma_group_kw_chunk_size", 16):
+            for grp in self.db.iter_oma_groups():
+                self.assertEqual(self.db.oma_group_metadata(grp.group_nbr)["keywords"], grp.keyword)
+
+    def test_size_filter_on_db_without_group_sizes_raises(self):
+        meta_tab = mock.Mock(colnames=["GroupNr", "Fingerprint", "KeywordOffset", "KeywordLength"])
+        with mock.patch.object(self.db.db, "get_node", return_value=meta_tab):
+            with self.assertRaises(DBOutdatedError):
+                next(self.db.iter_oma_groups(min_size=2))
 
 
 class XRefDatabaseMock(Database):

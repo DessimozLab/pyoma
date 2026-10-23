@@ -1,9 +1,12 @@
-import ete3
 import numpy as np
 import pandas as pd
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import ete3
 
 
-def generate_treeweights(tree: ete3.PhyloNode, taxa_index):
+def generate_treeweights(tree: "ete3.PhyloNode", taxa_index):
     # weighing function for tax level, masking levels etc. sets all weights to 1
     """
     Generate the weights of each taxonomic level to be applied during the
@@ -20,7 +23,7 @@ def generate_treeweights(tree: ete3.PhyloNode, taxa_index):
     return weights
 
 
-def hash_tree_profile(tp: ete3.PhyloNode, taxa_index, species_index, treeweights, wmg):
+def hash_tree_profile(tp: "ete3.PhyloNode", taxa_index, species_index, treeweights, wmg):
     """
     Generate a weighted minhash and binary matrix row for a tree profile
 

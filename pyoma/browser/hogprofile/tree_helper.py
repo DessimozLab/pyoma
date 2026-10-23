@@ -1,7 +1,10 @@
-import ete3
 import copy
 import collections
 import itertools
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import ete3
 
 
 def get_newick_tree_from_tax_db(tax):
@@ -35,7 +38,7 @@ def get_newick_tree_from_tax_db(tax):
     return res
 
 
-def filter_tree(tree: ete3.PhyloNode, root_node=None, taxfilter=None):
+def filter_tree(tree: "ete3.PhyloNode", root_node=None, taxfilter=None):
     newtree = copy.deepcopy(tree)
     if root_node:
         for n in newtree.traverse():
@@ -49,12 +52,12 @@ def filter_tree(tree: ete3.PhyloNode, root_node=None, taxfilter=None):
     return newtree
 
 
-def taxa_index(tree: ete3.PhyloNode):
+def taxa_index(tree: "ete3.PhyloNode"):
     """build a dictionary from tree-node name to idx"""
     index = {n.name: i for i, n in enumerate(tree.traverse())}
     return index
 
 
-def leaf_index(tree: ete3.PhyloNode):
+def leaf_index(tree: "ete3.PhyloNode"):
     index = {n.name: i for i, n in enumerate(tree.iter_leaves())}
     return index

@@ -16,6 +16,7 @@ import numpy
 from datasketch import WeightedMinHashGenerator, MinHashLSHForest
 from .pyhamutils import get_ham_treemap_from_row
 from .hashutils import generate_treeweights, row2hash
+from .species_tree import ete_tree_to_rows, store_species_tree
 from .tree_helper import (
     taxa_index,
     leaf_index,
@@ -222,14 +223,13 @@ class Collector(BaseProfileBuilderProcess):
             shape=(0,),
             filters=tables.Filters(complevel=3, complib="blosc"),
         )
-        lsh_tree = self.h5.create_vlarray(
+        # store as table to keep the hdf5 file independent of the tree library
+        store_species_tree(
+            self.h5,
             root,
-            "species_tree",
-            createparents=True,
-            atom=tables.ObjectAtom(),
+            ete_tree_to_rows(self.builder.tree),
             filters=tables.Filters(complevel=3, complib="blosc"),
         )
-        lsh_tree.append(self.builder.tree)
         self.h5.set_node_attr(root, "num_perm", self.builder.numperm)
         return hashes, species, lsh_forest
 

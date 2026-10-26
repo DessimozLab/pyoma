@@ -11,11 +11,9 @@ license = "MPL-2.0"
 authors = [
     { name = "DessimozLab", email = "contact@omabrowser.org" }
 ]
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.10,<3.15"
 dependencies = [
-    # PyTables supports numpy>=2 only from 3.10, which requires python>=3.10
-    "numpy>=2.0; python_version>='3.10'",
-    "numpy>=1.24,<2; python_version<'3.10'",
+    "numpy>=2.0",
     "tables>=3.9.0",
     "fuzzyset2>=0.1.1",
     "tqdm",
@@ -23,7 +21,6 @@ dependencies = [
     "pandas",
     "biopython>=1.80",
     "datasketch",
-    "ete3",
     "networkx",
     "property_manager",
 ]
@@ -34,8 +31,10 @@ create_db = [
     "matplotlib",
     "scikit-learn",
     "scikit-fuzzy",
-    "pyham",
-    "omataxonomy",
+    "pyham>=2.0",
+    "omataxonomy>=0.5",
+    "ete4>=4.3,<5",
+    "rapidfuzz",
     "mpire",
     "lark-parser",
 ]
@@ -77,4 +76,4 @@ skip_covered = true
 
 [tool.black]
 line-length = 120
-target-version = ["py39"]
+target-version = ["py310"]

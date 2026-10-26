@@ -6,7 +6,7 @@ import uuid
 import pickle
 
 import tables
-import ete3
+import ete4
 import multiprocessing as mp
 import time
 import tempfile
@@ -33,9 +33,9 @@ class LSHBuilderBase(object):
     def __init__(self, db, numperm=256, taxfilter=None, taxmask=None, **kwargs):
         self.db = db
         tree_newick = get_newick_tree_from_tax_db(db.tax)
-        full_tree = ete3.PhyloTree(tree_newick, format=1)
+        full_tree = ete4.PhyloTree(tree_newick, parser=1)
         self.tree = filter_tree(full_tree, root_node=taxmask, taxfilter=taxfilter)
-        self.tree_newick = self.tree.write(format=1)
+        self.tree_newick = self.tree.write(parser=1)
         self.taxa_index = taxa_index(self.tree)
         self.leaf_index = leaf_index(self.tree)
         self.tree_weights = generate_treeweights(self.tree, self.taxa_index)

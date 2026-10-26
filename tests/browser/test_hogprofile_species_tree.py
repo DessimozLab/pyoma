@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 
+import ete4
 import numpy
 import tables
 
@@ -19,12 +20,8 @@ from pyoma.browser.hogprofile.species_tree import (
     topmost_nodes_matching,
     tree_to_rows,
 )
+from pyoma.browser.hogprofile.tree_helper import leaf_index
 from .test_db import TestWithDbInstance, find_path_to_test_db
-
-try:
-    import ete3
-except ImportError:
-    ete3 = None
 
 
 def nested_tree_to_rows(tree):
@@ -81,32 +78,29 @@ class TreeToRowsTest(unittest.TestCase):
         self.assertEqual([0], topmost_nodes_matching(self.rows, mask).tolist())
 
 
-@unittest.skipIf(ete3 is None, "ete3 not installed")
-class CompareWithEte3Test(unittest.TestCase):
-    """compares against the ete3 based implementation used before"""
+class CompareWithEteTreeTest(unittest.TestCase):
+    """compares against the tree based implementation of the previous Profiler"""
 
     def setUp(self):
-        self.ete = ete3.PhyloTree(random_newick(400), format=1)
+        self.ete = ete4.PhyloTree(random_newick(400), parser=1)
         self.rows = ete_tree_to_rows(self.ete)
 
     def reference_annotation(self):
-        """verbatim logic of the previous ete3 based Profiler"""
-        from pyoma.browser.hogprofile.tree_helper import leaf_index
-
+        """logic of the previous tree based Profiler"""
         leaf_idx = leaf_index(self.ete)
 
         def idx_map(node):
-            if node.is_leaf():
+            if node.is_leaf:
                 idx = leaf_idx[node.name]
-                node.add_features(range=(idx, idx + 1), size=1)
+                node.add_props(range=(idx, idx + 1), size=1)
             else:
                 min_range, max_range, size = 10000, 0, 0
                 for child in node.children:
                     idx_map(child)
-                    min_range = min(min_range, child.range[0])
-                    max_range = max(max_range, child.range[1])
-                    size += child.size
-                node.add_features(range=(min_range, max_range), size=size)
+                    min_range = min(min_range, child.props["range"][0])
+                    max_range = max(max_range, child.props["range"][1])
+                    size += child.props["size"]
+                node.add_props(range=(min_range, max_range), size=size)
 
         idx_map(self.ete)
         return leaf_idx
@@ -116,20 +110,20 @@ class CompareWithEte3Test(unittest.TestCase):
         leaves = self.rows[self.rows["LeafIdx"] >= 0]
         self.assertEqual({int(k): v for k, v in leaf_idx.items()}, dict(zip(leaves["TaxonId"], leaves["LeafIdx"])))
 
-    def test_clade_ranges_as_ete3(self):
+    def test_clade_ranges_as_tree(self):
         self.reference_annotation()
         start, stop, size = clade_ranges(self.rows)
         nodes = list(self.ete.traverse("preorder"))
-        self.assertEqual([n.range for n in nodes], list(zip(start.tolist(), stop.tolist())))
-        self.assertEqual([n.size for n in nodes], size.tolist())
+        self.assertEqual([n.props["range"] for n in nodes], list(zip(start.tolist(), stop.tolist())))
+        self.assertEqual([n.props["size"] for n in nodes], size.tolist())
 
-    def test_key_level_selection_as_ete3(self):
+    def test_key_level_selection_as_tree(self):
         self.reference_annotation()
         _, _, sizes = clade_ranges(self.rows)
         for size in (10, 50, 200):
             expected = [
                 taxid_from_node_name(n.name)
-                for n in self.ete.iter_leaves(is_leaf_fn=lambda n: size >= n.size > 0.1 * size)
+                for n in self.ete.leaves(is_leaf_fn=lambda n: size >= n.props["size"] > 0.1 * size)
             ]
             self.assertGreater(len(expected), 1)
             selected = topmost_nodes_matching(self.rows, (sizes <= size) & (sizes > 0.1 * size))
@@ -156,13 +150,16 @@ class LegacyPickledTreeTest(unittest.TestCase):
         self.assertEqual("2759", taxids[0])
         self.assertEqual(17, len(taxids))
 
-    @unittest.skipIf(ete3 is None, "ete3 not installed")
-    def test_same_rows_as_from_unpickled_ete3_tree(self):
+    def test_rows_of_legacy_tree(self):
+        # expected rows were verified against the tree unpickled with ete3
         with tables.open_file(self.db_path) as h5:
-            node = h5.get_node("/HOGProfile/ALL")
-            expected = ete_tree_to_rows(node.species_tree[0])
-            rows = load_species_tree(node)
-        numpy.testing.assert_array_equal(expected, rows)
+            rows = load_species_tree(h5.get_node("/HOGProfile/ALL"))
+        expected = [
+            (2759, -1, -1), (33154, 0, -1), (4751, 1, -1), (451864, 2, -1), (4890, 3, -1), (451866, 4, -1),
+            (284812, 5, 0), (716545, 4, -1), (147537, 7, -1), (4891, 8, -1), (4892, 9, -1), (4893, 10, -1),
+            (33170, 11, -1), (284811, 12, 1), (559292, 11, 2), (33630, 0, -1), (36329, 15, 3),
+        ]  # fmt: skip
+        self.assertEqual(expected, rows.tolist())
 
     def test_rejects_unexpected_globals(self):
         with self.assertRaises(pickle.UnpicklingError):

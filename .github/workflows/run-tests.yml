@@ -41,7 +41,17 @@ jobs:
           uv sync --upgrade --extra create_db --extra enrichment --extra test --resolution ${{ matrix.resolution }}
         fi
 
+    - name: Cache test database
+      id: cache-testdb
+      uses: actions/cache@v6
+      with:
+        path: |
+          tests/browser/TestDb.h5
+          tests/browser/TestDb.h5.idx
+        key: testdb-zenodo-20310433
+
     - name: Download test database
+      if: steps.cache-testdb.outputs.cache-hit != 'true'
       run: |
         curl -L --fail https://zenodo.org/records/20310433/files/TestDb.h5?download=1 -o tests/browser/TestDb.h5
         curl -L --fail https://zenodo.org/records/20310433/files/TestDb.h5.idx?download=1 -o tests/browser/TestDb.h5.idx

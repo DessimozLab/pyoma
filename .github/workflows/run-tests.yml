@@ -14,27 +14,40 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        resolution: ["locked", "highest", "lowest-direct"]
 
+    name: py${{ matrix.python-version }} (${{ matrix.resolution }})
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0  # full history so setuptools_scm can derive the version
+
     - name: Set up uv with Python ${{ matrix.python-version }}
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@v10.3.2
       with:
         python-version: ${{ matrix.python-version }}
         enable-cache: true
+
     - name: Install dependencies
-      run: uv sync --locked --extra create_db --extra enrichment --extra test
+      run: |
+        if [ "${{ matrix.resolution }}" = "locked" ]; then
+          uv sync --locked --extra create_db --extra enrichment --extra test
+        else
+          uv sync --upgrade --extra create_db --extra enrichment --extra test --resolution ${{ matrix.resolution }}
+        fi
+
     - name: Download test database
       run: |
         curl -L --fail https://zenodo.org/records/20310433/files/TestDb.h5?download=1 -o tests/browser/TestDb.h5
         curl -L --fail https://zenodo.org/records/20310433/files/TestDb.h5.idx?download=1 -o tests/browser/TestDb.h5.idx
         ls -l tests/browser/TestDb.h5*
+
     - name: Check versions of installed libraries/systems
       run: uv run --no-sync python -c "import sys, tables, pyoma; print(sys.version); tables.print_versions(); print(pyoma.__version__)"
+
     - name: Test with pytest
       run: uv run --no-sync pytest --cov --cov-report=term --cov-report=xml
+
     - name: Add coverage summary to job summary
       if: always()
       run: |
@@ -42,9 +55,10 @@ jobs:
           echo "### Coverage (Python ${{ matrix.python-version }})" >> "$GITHUB_STEP_SUMMARY"
           uv run --no-sync coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
         fi
+
     - name: Upload coverage report
       if: always()
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v7
       with:
         name: coverage-py${{ matrix.python-version }}
         path: coverage.xml

@@ -11,7 +11,7 @@ from typing import Optional, Union, List, Tuple
 import numpy
 import tables
 import lxml.etree as etree
-from ete3 import TreeNode
+from ete4 import Tree
 
 from .. import tablefmt
 from ..convert import create_index_for_columns
@@ -24,10 +24,10 @@ Species = collections.namedtuple("Species", ["species_code", "xml_taxonId", "ent
 
 
 class TaxonomyLookupHelper:
-    def __init__(self, tree: TreeNode):
+    def __init__(self, tree: Tree):
         self.taxtree = tree
-        self._taxonId_to_node = {n.xml_taxonId: n for n in tree.traverse()}
-        self._taxid_to_node = {n.taxid: n for n in tree.traverse()}
+        self._taxonId_to_node = {n.props["xml_taxonId"]: n for n in tree.traverse()}
+        self._taxid_to_node = {n.props["taxid"]: n for n in tree.traverse()}
 
     def get_node_from_taxonId(self, taxon_id):
         return self._taxonId_to_node[int(taxon_id)]
@@ -35,7 +35,7 @@ class TaxonomyLookupHelper:
     def get_node_from_taxid(self, taxid):
         return self._taxid_to_node[int(taxid)]
 
-    def get_mrca(self, taxon_ids: List[Tuple[int, str]]) -> TreeNode:
+    def get_mrca(self, taxon_ids: List[Tuple[int, str]]) -> Tree:
         """finds the most recent common ancestor of the species tree
         based on a list of taxon ids.
         the taxon ids can be either taxids (new numeric taxids in database)
@@ -50,7 +50,7 @@ class TaxonomyLookupHelper:
                 leaves.add(self.get_node_from_taxid(taxon_id))
         if len(leaves) == 1:
             return leaves.pop()
-        mrca = self.taxtree.get_common_ancestor(*leaves)
+        mrca = self.taxtree.common_ancestor(*leaves)
         return mrca
 
     def levels_between(self, child_node, parent_node):
@@ -61,9 +61,9 @@ class TaxonomyLookupHelper:
             yield n
             n = n.up
 
-    def as_xml(self, root_tax_node: Optional[TreeNode] = None) -> etree.Element:
+    def as_xml(self, root_tax_node: Optional[Tree] = None) -> etree.Element:
         def _traverseR(node, xml):
-            n = etree.SubElement(xml, "taxon", {"id": str(node.taxid), "name": str(node.name)})
+            n = etree.SubElement(xml, "taxon", {"id": str(node.props["taxid"]), "name": str(node.name)})
             for child in node.children:
                 _traverseR(child, n)
 
@@ -120,7 +120,7 @@ class GeneLookupHelper:
                     yield sp_node
                 sp = self.search_species_by_entry_nr(gene.e_nr)
                 sp_node = copy.deepcopy(sp.xml_node)
-                sp_node.set("taxonId", str(self.parser.taxonomy.get_node_from_taxonId(sp.xml_taxonId).taxid))
+                sp_node.set("taxonId", str(self.parser.taxonomy.get_node_from_taxonId(sp.xml_taxonId).props["taxid"]))
                 try:
                     gs = gst[numpy.where(gst["NCBITaxonId"] == int(sp_node.get("taxonId")))][0]
                 except IndexError as err:
@@ -193,7 +193,7 @@ class Annotator:
             if node.tag == "orthologGroup":
                 taxonId = node.get("taxonId")
                 taxtree_node = taxon_accessor_func(taxonId)
-                node.set("taxonId", str(taxtree_node.taxid))
+                node.set("taxonId", str(taxtree_node.props["taxid"]))
 
                 taxrange = node.find('./property[@name="TaxRange"]')
                 if taxrange.get("value") != taxtree_node.name:
@@ -202,9 +202,9 @@ class Annotator:
 
                 orig_id = node.get("id")
                 if orig_id is None or orig_id.isdigit() or (match := HOGID_RE.match(orig_id)) is None:
-                    node.set("id", f"{og}_{taxtree_node.taxid}")
+                    node.set("id", f"{og}_{taxtree_node.props['taxid']}")
                 else:
-                    id_ = self.format_hogid(match.group("fam"), match.group("subhog"), taxtree_node.taxid)
+                    id_ = self.format_hogid(match.group("fam"), match.group("subhog"), taxtree_node.props["taxid"])
                     if og != id_.split("_", maxsplit=1)[0]:
                         logger.warning("expected subfamily id does not match existing ID.")
                     node.set("id", id_)
@@ -213,13 +213,16 @@ class Annotator:
                     covered_species.update(_annotateGroupR(child, og, idx))
                 score_node = node.find('./score[@id="CompletenessScore"]')
                 if score_node is not None:
-                    score_node.set("value", f"{len(covered_species) / taxtree_node.size:.3f}")
+                    score_node.set("value", f"{len(covered_species) / taxtree_node.props['size']:.3f}")
                 else:
                     node.insert(
                         0,
                         etree.Element(
                             "score",
-                            {"id": "CompletenessScore", "value": f"{len(covered_species) / taxtree_node.size:.3f}"},
+                            {
+                                "id": "CompletenessScore",
+                                "value": f"{len(covered_species) / taxtree_node.props['size']:.3f}",
+                            },
                         ),
                     )
             elif node.tag == "paralogGroup":
@@ -261,12 +264,14 @@ class Annotator:
             parent.insert(pos, child)
 
         def _insert_one_og(child, taxnode, nr_covered_species, nr_genes):
-            el = etree.Element("orthologGroup", {"taxonId": str(taxnode.taxid)})
+            el = etree.Element("orthologGroup", {"taxonId": str(taxnode.props["taxid"])})
             el.append(
-                etree.Element("score", {"id": "CompletenessScore", "value": f"{nr_covered_species / taxnode.size:.3f}"})
+                etree.Element(
+                    "score", {"id": "CompletenessScore", "value": f"{nr_covered_species / taxnode.props['size']:.3f}"}
+                )
             )
             el.append(etree.Element("property", {"name": "TaxRange", "value": taxnode.name}))
-            el.append(etree.Element("property", {"name": "taxid", "value": str(taxnode.taxid)}))
+            el.append(etree.Element("property", {"name": "taxid", "value": str(taxnode.props["taxid"])}))
             el.append(etree.Element("property", {"name": "NrMemberGenes", "value": str(nr_genes)}))
             el.append(child)
             return el
@@ -390,20 +395,20 @@ class AbstractOrthoXMLParser(metaclass=abc.ABCMeta):
         taxid = self._taxname2taxid[name]
         return {"taxid": taxid, "name": name, "xml_taxonId": xml_taxonId}
 
-    def _build_tree_node(self, xml_node: etree.Element, parent: Optional[TreeNode] = None) -> TreeNode:
-        tn = TreeNode()
-        tn.add_features(**self._get_features_for_taxonomy(xml_node))
+    def _build_tree_node(self, xml_node: etree.Element, parent: Optional[Tree] = None) -> Tree:
+        tn = Tree()
+        tn.add_props(**self._get_features_for_taxonomy(xml_node))
         if parent is not None:
             parent.add_child(tn)
         return tn
 
-    def _post_process_taxonomy_tree(self, tree_node: TreeNode):
+    def _post_process_taxonomy_tree(self, tree_node: Tree):
         return tree_node
 
     def process_taxonomy(self, node):
         assert node.tag == "{http://orthoXML.org/2011/}taxonomy"
 
-        def traverse(xml_node: etree.Element, tree: TreeNode):
+        def traverse(xml_node: etree.Element, tree: Tree):
             for child in xml_node.iterchildren(tag="{http://orthoXML.org/2011/}taxon"):
                 child_node = self._build_tree_node(child, tree)
                 traverse(child, child_node)
@@ -415,7 +420,7 @@ class AbstractOrthoXMLParser(metaclass=abc.ABCMeta):
         traverse(root_tax, root)
         root = self._post_process_taxonomy_tree(root)
         for n in root.traverse(strategy="preorder"):
-            n.add_feature("size", len(n))
+            n.add_prop("size", len(n))
         self.taxonomy = TaxonomyLookupHelper(root)
 
     def process_scores(self, node):
@@ -485,12 +490,12 @@ class OrthoXMLGeneIdParserWithOmaProtId(AbstractOrthoXMLParser):
 
     def _post_process_taxonomy_tree(self, tree_node):
         nxt_fix_taxid = -10
-        for leaf in tree_node.iter_leaves():
-            if (leaf.taxid == leaf.up.taxid) or (leaf.name == leaf.up.name):
-                leaf.name = leaf.code
-                leaf.taxid = nxt_fix_taxid
+        for leaf in tree_node.leaves():
+            if (leaf.props["taxid"] == leaf.up.props["taxid"]) or (leaf.name == leaf.up.name):
+                leaf.name = leaf.props["code"]
+                leaf.add_prop("taxid", nxt_fix_taxid)
                 nxt_fix_taxid -= 1
-        taxid_counter = collections.Counter(l.taxid for l in tree_node.traverse())
+        taxid_counter = collections.Counter(l.props["taxid"] for l in tree_node.traverse())
         if max(taxid_counter.values()) > 1:
             raise ValueError("taxids are not unique: ", taxid_counter.most_common(3))
         return tree_node

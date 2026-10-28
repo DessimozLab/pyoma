@@ -15,6 +15,7 @@ import re
 import resource
 import subprocess
 import time
+import urllib.request
 import uuid
 from typing import List, Iterable, Tuple, Union, Mapping, Dict
 from builtins import str, chr, range, object, super, bytes
@@ -27,7 +28,6 @@ import numpy.lib.recfunctions
 import pandas
 import tables
 from PySAIS import sais
-from future.standard_library import hooks
 from tables import NoSuchNodeError
 from tqdm import tqdm
 
@@ -40,9 +40,6 @@ from .homoeologs import HomeologsConfidenceCalculator
 from .synteny import SyntenyScorer
 from . import hoghelper
 from .. import common, version
-
-with hooks():
-    import urllib.request
 
 hog_re = re.compile(rb"((?P<prefix>HOG):)?(?P<rel>[A-Z]?)(?P<fam>\d+)(\.(?P<subfamid>[0-9a-z.]+))?$")
 
@@ -823,9 +820,10 @@ class DarwinExporter(object):
                 for z in ("uniprot_xrefs.tsv", "swissprot_xrefs.tsv")
             )
         )
-        with DescriptionManager(
-            self.h5, "/Protein/Entries", "/Protein/DescriptionBuffer"
-        ) as de_man, GeneOntologyManager(self.h5, "/Annotations/GeneOntology", "/Ontologies/GO") as go_man:
+        with (
+            DescriptionManager(self.h5, "/Protein/Entries", "/Protein/DescriptionBuffer") as de_man,
+            GeneOntologyManager(self.h5, "/Annotations/GeneOntology", "/Ontologies/GO") as go_man,
+        ):
             xref_importer = XRefImporter(
                 db_parser,
                 gs,

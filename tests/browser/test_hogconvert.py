@@ -10,7 +10,7 @@ import unittest
 import numpy
 import tables
 import lxml.etree as etree
-from ete3 import TreeNode
+from ete4 import Tree
 
 from pyoma.browser import tablefmt
 from pyoma.browser.build.hogconvert import (
@@ -81,18 +81,18 @@ class AnnotatorFormatHogidTest(unittest.TestCase):
 
 def _build_taxonomy_fixture():
     """Eukaryota -> {Mammalia -> {HUMAN, MOUSE}, YEAST}"""
-    root = TreeNode()
-    root.add_features(taxid=1, xml_taxonId=1, name="Eukaryota")
+    root = Tree()
+    root.add_props(taxid=1, xml_taxonId=1, name="Eukaryota")
     mammalia = root.add_child(name="Mammalia")
-    mammalia.add_features(taxid=2, xml_taxonId=2)
+    mammalia.add_props(taxid=2, xml_taxonId=2)
     human = mammalia.add_child(name="HUMAN")
-    human.add_features(taxid=9606, xml_taxonId=101)
+    human.add_props(taxid=9606, xml_taxonId=101)
     mouse = mammalia.add_child(name="MOUSE")
-    mouse.add_features(taxid=10090, xml_taxonId=102)
+    mouse.add_props(taxid=10090, xml_taxonId=102)
     yeast = root.add_child(name="YEAST")
-    yeast.add_features(taxid=4932, xml_taxonId=103)
+    yeast.add_props(taxid=4932, xml_taxonId=103)
     for n in root.traverse(strategy="preorder"):
-        n.add_feature("size", len(n))
+        n.add_prop("size", len(n))
     return root, {"root": root, "mammalia": mammalia, "human": human, "mouse": mouse, "yeast": yeast}
 
 

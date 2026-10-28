@@ -149,7 +149,7 @@ class MinHashSchemeCompatTester(unittest.TestCase):
         with tables.open_file(self.hogmapfn, "r") as h5:
             self.assertEqual(h5.get_node("/hashes")._v_attrs.minhash_scheme, "legacy")
 
-        lshr = hogidmap.HogLSHIndex(self.hogmapfn, "r")
+        lshr = hogidmap.HogLSHIndex(self.hogmapfn)
         self.assertEqual(lshr._min_hash_scheme, "legacy")
 
     def test_missing_scheme_attribute_defaults_to_legacy_and_still_queries(self):
@@ -170,7 +170,7 @@ class MinHashSchemeCompatTester(unittest.TestCase):
         with tables.open_file(self.hogmapfn, "a") as h5:
             del h5.get_node("/hashes")._v_attrs.minhash_scheme
 
-        lshr = hogidmap.HogLSHIndex(self.hogmapfn, "r")
+        lshr = hogidmap.HogLSHIndex(self.hogmapfn)
         lshr.compute_lsh()
 
         self.assertEqual(lshr._min_hash_scheme, "legacy")

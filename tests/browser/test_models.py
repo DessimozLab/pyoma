@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 from builtins import str
 
 import numpy
-from future.utils import with_metaclass
 
 import pyoma.browser.exceptions
 from pyoma.browser import models, db, tablefmt
@@ -365,7 +364,7 @@ class GeneOntologyAnnotationTests(unittest.TestCase):
 
 class SingletonTests(unittest.TestCase):
     def test_singleton(self):
-        class Foo(with_metaclass(models.Singleton, object)):
+        class Foo(metaclass=models.Singleton):
             def __init__(self):
                 pass
 

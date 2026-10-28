@@ -1,9 +1,12 @@
-import ete3
 import numpy as np
 import pandas as pd
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import ete4
 
 
-def generate_treeweights(tree: ete3.PhyloNode, taxa_index):
+def generate_treeweights(tree: "ete4.PhyloTree", taxa_index):
     # weighing function for tax level, masking levels etc. sets all weights to 1
     """
     Generate the weights of each taxonomic level to be applied during the
@@ -15,12 +18,12 @@ def generate_treeweights(tree: ete3.PhyloNode, taxa_index):
 
     weights = np.zeros((3 * len(taxa_index), 1))
     for i in range(3):
-        for n in tree.traverse():
+        for n in tree.traverse("preorder"):
             weights[len(taxa_index) * i + taxa_index[n.name]] = 1
     return weights
 
 
-def hash_tree_profile(tp: ete3.PhyloNode, taxa_index, species_index, treeweights, wmg):
+def hash_tree_profile(tp: "ete4.Tree", taxa_index, species_index, treeweights, wmg):
     """
     Generate a weighted minhash and binary matrix row for a tree profile
 
@@ -33,10 +36,13 @@ def hash_tree_profile(tp: ete3.PhyloNode, taxa_index, species_index, treeweights
 
     """
 
-    losses = [taxa_index[n.name] for n in tp.traverse() if n.lost and n.name in taxa_index]
-    dupl = [taxa_index[n.name] for n in tp.traverse() if n.dupl and n.name in taxa_index]
-    presence = [taxa_index[n.name] for n in tp.traverse() if n.nbr_genes > 0 and n.name in taxa_index]
-    covered_species = [species_index[n.name] for n in tp.iter_leaves() if n.nbr_genes > 0 and n.name in species_index]
+    nodes = [n for n in tp.traverse("preorder") if n.name in taxa_index]
+    losses = [taxa_index[n.name] for n in nodes if n.props.get("lost")]
+    dupl = [taxa_index[n.name] for n in nodes if n.props.get("dupl")]
+    presence = [taxa_index[n.name] for n in nodes if n.props.get("nbr_genes", 0) > 0]
+    covered_species = [
+        species_index[n.name] for n in tp.leaves() if n.props.get("nbr_genes", 0) > 0 and n.name in species_index
+    ]
     indices = dict(zip(["presence", "loss", "dup"], [presence, losses, dupl]))
     hog_matrix_weighted = np.zeros((1, 3 * len(taxa_index)))
     hog_matrix_binary = np.zeros((1, 3 * len(taxa_index)))

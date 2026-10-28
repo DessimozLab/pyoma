@@ -285,3 +285,11 @@ class RootHOGMetaTable(tables.IsDescription):
     KeywordLength = tables.UInt32Col(pos=2)
     FamDataJsonOffset = tables.UInt64Col(pos=3)
     FamDataJsonLength = tables.UInt32Col(pos=4)
+
+
+class ProfileSpeciesTreeTable(tables.IsDescription):
+    """species tree of the HOG profiles; one row per node in preorder"""
+
+    TaxonId = tables.Int32Col(pos=0)
+    ParentIdx = tables.Int32Col(pos=1, dflt=-1)  # row of the parent node, -1 for root
+    LeafIdx = tables.Int32Col(pos=2, dflt=-1)  # column in species_profile, -1 for internal nodes

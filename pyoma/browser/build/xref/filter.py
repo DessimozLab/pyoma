@@ -4,7 +4,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Set, List, Mapping, Union
-import ete3
+import ete4
 import omataxonomy
 
 from ....common import auto_open
@@ -107,7 +107,7 @@ def filter_records_on_taxids(fpath: str, writer, taxids: Set[int], format: str):
 
 
 def load_relevant_taxids(
-    species_taxids, ncbi_taxonomy: Union[ete3.NCBITaxa, omataxonomy.Taxonomy]
+    species_taxids, ncbi_taxonomy: Union[ete4.NCBITaxa, omataxonomy.Taxonomy]
 ) -> Mapping[int, Set[int]]:
     """load relevant taxids for xref mapping for a given set of species.
 
@@ -134,12 +134,13 @@ def load_relevant_taxids(
         return relevant_taxids
 
     tree = ncbi_taxonomy.get_topology(ncbi_taxids, intermediate_nodes=True, annotate=True)
-    for genus_node in tree.iter_search_nodes(rank="genus"):
+    for genus_node in tree.search_nodes(rank="genus"):
         for nn in genus_node.traverse(strategy="postorder"):
-            if nn.is_leaf():
-                nn.add_feature("subtaxids", {nn.taxid})
+            if nn.is_leaf:
+                nn.add_prop("subtaxids", {nn.props["taxid"]})
             else:
-                nn.add_feature("subtaxids", set.union(*list(x.subtaxids for x in nn.get_children())))
-                relevant_taxids[nn.taxid].update(nn.subtaxids)
+                subtaxids = set.union(*list(x.props["subtaxids"] for x in nn.children))
+                nn.add_prop("subtaxids", subtaxids)
+                relevant_taxids[nn.props["taxid"]].update(subtaxids)
     logger.debug(f"final relevant taxid mapping: {relevant_taxids}")
     return relevant_taxids

@@ -3,7 +3,7 @@ import numpy
 import pickle
 import tables
 
-from .tree_helper import leaf_index
+from .species_tree import clade_ranges, load_species_tree, topmost_nodes_matching
 import logging
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class Profiler(object):
         self.forest = load_forest(root_level_data)
         self.hashes = root_level_data.hashes
         self.species_profile = root_level_data.species_profile
-        self.species_tree = root_level_data.species_tree[0]
+        self.species_tree = load_species_tree(root_level_data)
         self.num_perm = db.get_hdf5_handle().get_node_attr("/HOGProfile/ALL", "num_perm")
         self.species_names = self._build_tree_range_lookup()
         self.tax_range_index = self._select_key_levels_and_ranges()
@@ -41,47 +41,28 @@ class Profiler(object):
         return tax_row["Name"].decode()
 
     def _build_tree_range_lookup(self):
-        leaf_idx = leaf_index(self.species_tree)
-        species_names = [""] * len(leaf_idx)
-        for x in self.species_tree.iter_leaves():
-            species_names[leaf_idx[x.name]] = self._map_taxid_to_name(x.name)
-
-        def idx_map(node):
-            try:
-                taxid = int(node.name)
-            except ValueError:
-                taxid = int(node.name[: node.name.index("Rep")])
-            # at some point the taxid's were uint32 with negative values
-            # need to cast them via np.int32
-            taxid = int(numpy.int32(taxid))
-            sciname = self._map_taxid_to_name(taxid)
-            if node.is_leaf():
-                idx = leaf_idx[node.name]
-                node.add_features(range=(idx, idx + 1), size=1, sciname=sciname)
-            else:
-                min_range, max_range, size = 10000, 0, 0
-                for child in node.children:
-                    idx_map(child)
-                    if child.range[0] < min_range:
-                        min_range = child.range[0]
-                    if child.range[1] > max_range:
-                        max_range = child.range[1]
-                    size += child.size
-                node.add_features(range=(min_range, max_range), size=size, sciname=sciname)
-
-        # annotate speciestree with range features
-        idx_map(self.species_tree)
+        rows = self.species_tree
+        leaves = numpy.flatnonzero(rows["LeafIdx"] >= 0)
+        species_names = [""] * len(leaves)
+        for i in leaves:
+            species_names[rows["LeafIdx"][i]] = self._map_taxid_to_name(rows["TaxonId"][i])
+        self._clade_start, self._clade_stop, self._clade_size = clade_ranges(rows)
         return species_names
 
     def _select_key_levels_and_ranges(self):
-        def nodes_of_size(node, size):
-            for n in node.iter_leaves(is_leaf_fn=lambda n: size >= n.size > 0.1 * size):
-                yield n
+        rows = self.species_tree
+
+        def clades(nodes):
+            return {
+                self._map_taxid_to_name(rows["TaxonId"][i]): (int(self._clade_start[i]), int(self._clade_stop[i]))
+                for i in nodes
+            }
 
         indexes = {}
         for size in (50, 200):
-            indexes[size] = {n.sciname: n.range for n in nodes_of_size(self.species_tree, size)}
-        indexes["root"] = {n.sciname: n.range for n in self.species_tree.children}
+            mask = (self._clade_size <= size) & (self._clade_size > 0.1 * size)
+            indexes[size] = clades(topmost_nodes_matching(rows, mask))
+        indexes["root"] = clades(numpy.flatnonzero(rows["ParentIdx"] == 0))
         return indexes
 
     def query(self, fam_nr, k=50):

@@ -272,6 +272,7 @@ def dump_sequences_and_protein_annotations(conf):
         with ExitStack() as stack:
             prot_fh = stack.enter_context(auto_open(conf.out_proteins, "wt")) if conf.out_proteins else None
             cdna_fh = stack.enter_context(auto_open(conf.out_cdna, "wt")) if conf.out_cdna else None
+            _3di_fh = stack.enter_context(auto_open(conf.out_3di, "wt")) if conf.out_3di else None
             annot_fh = stack.enter_context(auto_open(conf.out_annotations, "wt")) if conf.out_annotations else None
 
             if annot_fh:
@@ -281,8 +282,18 @@ def dump_sequences_and_protein_annotations(conf):
                 logger.info("writing protein sequences to %s", conf.out_proteins)
             if cdna_fh:
                 logger.info("writing cDNA sequences to %s", conf.out_cdna)
+            seq_3di_iter = None
+            if _3di_fh:
+                structure_db = getattr(db, "structure_db", None)
+                if structure_db is None:
+                    logger.warning("No structure database available. %s will be empty.", conf.out_3di)
+                else:
+                    logger.info("writing 3Di sequences to %s", conf.out_3di)
+                    seq_3di_iter = structure_db.iter_seq_3di()
 
-            if prot_fh is not None or cdna_fh is not None:
+            if prot_fh is not None or cdna_fh is not None or seq_3di_iter is not None:
+                # 3Di sequences are streamed in EntryNr order, same as the proteins
+                next_3di = next(seq_3di_iter, None) if seq_3di_iter is not None else None
                 for prot, src_xref in tqdm(
                     _iter_protein_entries(db),
                     desc="Processing proteins",
@@ -297,6 +308,10 @@ def dump_sequences_and_protein_annotations(conf):
                         cdna = prot.cdna
                         if cdna:
                             _write_fasta_record(cdna_fh, fasta_header, cdna)
+                    while next_3di is not None and next_3di[0] < prot.entry_nr:
+                        next_3di = next(seq_3di_iter, None)
+                    if next_3di is not None and next_3di[0] == prot.entry_nr:
+                        _write_fasta_record(_3di_fh, fasta_header, next_3di[1].decode("ascii"))
 
 
 def dump_ncbi_linkout(conf):
@@ -723,6 +738,7 @@ def parse_command_line_args():
     seq_parser.add_argument("--db", required=True, help="Path to database")
     seq_parser.add_argument("--out-proteins", help="Output path for protein sequences in FASTA format")
     seq_parser.add_argument("--out-cdna", help="Output path for cDNA sequences in FASTA format")
+    seq_parser.add_argument("--out-3di", help="Output path for 3Di sequences in FASTA format")
     seq_parser.add_argument("--out-annotations", help="Output path for protein annotations in TSV format")
 
     ncbi_parser = subparsers.add_parser(

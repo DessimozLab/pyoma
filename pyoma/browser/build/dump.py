@@ -40,6 +40,8 @@ def open_xref_outputs(args):
         "RefSeq": args.out_refseq,
         "NCBI": args.out_ncbi,
         "EntrezGene": args.out_entrez,
+        "SourceID": args.out_source,
+        "SourceAC": args.out_source,
     }
 
     # Open each unique path only once
@@ -60,19 +62,47 @@ def dump_xrefs(conf):
         else:
             xref_tab = db.db.get_node("/XRef")
         oma_id_mapper = db.id_mapper["OMA"]
-        source_enum = xref_tab.get_enum("XRefSource")
 
         outputs, stack = open_xref_outputs(conf)
         with stack:
-            for row in xref_tab.iterrows():
-                source = source_enum(row["XRefSource"])
-                if source not in outputs:
-                    continue
-                omaid = oma_id_mapper.map_entry_nr(row["EntryNr"])
-                outputs[source].write(f"{omaid}\t{row['XRefId'].decode('utf-8')}\n")
+            _write_xrefs(xref_tab, outputs, oma_id_mapper.map_entry_nr)
 
         if conf.xref_db is not None:
             xref_db.close()
+
+
+def _write_xrefs(xref_tab, outputs, map_entry_nr):
+    """writes the xrefs to the output handle of their source (omaid<tab>xref).
+
+    SourceID and SourceAC xrefs of an entry are combined into a single line
+    (omaid<tab>source ids<tab>source acs), with multiple values joined by ';'.
+    This requires the xref table to be sorted by EntryNr."""
+    source_enum = xref_tab.get_enum("XRefSource")
+    combine = "SourceID" in outputs
+    combined_col = {source_enum["SourceID"]: 0, source_enum["SourceAC"]: 1} if combine else {}
+    cur_enr, combined = None, ([], [])
+
+    def flush_combined():
+        if combined[0] or combined[1]:
+            ids, acs = (";".join(dict.fromkeys(vals)) for vals in combined)
+            outputs["SourceID"].write(f"{map_entry_nr(cur_enr)}\t{ids}\t{acs}\n")
+
+    for row in xref_tab.iterrows():
+        enr = int(row["EntryNr"])
+        if combine and enr != cur_enr:
+            if cur_enr is not None and enr < cur_enr:
+                raise ValueError("XRef table must be sorted by EntryNr to combine SourceID and SourceAC")
+            flush_combined()
+            cur_enr, combined = enr, ([], [])
+        src = row["XRefSource"]
+        if src in combined_col:
+            combined[combined_col[src]].append(row["XRefId"].decode("utf-8"))
+            continue
+        source = source_enum(src)
+        if source in outputs:
+            outputs[source].write(f"{map_entry_nr(enr)}\t{row['XRefId'].decode('utf-8')}\n")
+    if combine:
+        flush_combined()
 
 
 def dump_go(conf):
@@ -139,7 +169,7 @@ def _iter_protein_entries(db, chunk_size=500_000):
 
 
 def _write_fasta_record(fh, header, seq, line_width=80):
-    fh.write(f">{header}\n")
+    fh.write(f"{header}\n")
     for i in range(0, len(seq), line_width):
         fh.write(seq[i : i + line_width])
         fh.write("\n")
@@ -242,6 +272,7 @@ def dump_sequences_and_protein_annotations(conf):
         with ExitStack() as stack:
             prot_fh = stack.enter_context(auto_open(conf.out_proteins, "wt")) if conf.out_proteins else None
             cdna_fh = stack.enter_context(auto_open(conf.out_cdna, "wt")) if conf.out_cdna else None
+            _3di_fh = stack.enter_context(auto_open(conf.out_3di, "wt")) if conf.out_3di else None
             annot_fh = stack.enter_context(auto_open(conf.out_annotations, "wt")) if conf.out_annotations else None
 
             if annot_fh:
@@ -251,21 +282,36 @@ def dump_sequences_and_protein_annotations(conf):
                 logger.info("writing protein sequences to %s", conf.out_proteins)
             if cdna_fh:
                 logger.info("writing cDNA sequences to %s", conf.out_cdna)
+            seq_3di_iter = None
+            if _3di_fh:
+                structure_db = getattr(db, "structure_db", None)
+                if structure_db is None:
+                    logger.warning("No structure database available. %s will be empty.", conf.out_3di)
+                else:
+                    logger.info("writing 3Di sequences to %s", conf.out_3di)
+                    seq_3di_iter = structure_db.iter_seq_3di()
 
-            if prot_fh is not None or cdna_fh is not None:
+            if prot_fh is not None or cdna_fh is not None or seq_3di_iter is not None:
+                # 3Di sequences are streamed in EntryNr order, same as the proteins
+                next_3di = next(seq_3di_iter, None) if seq_3di_iter is not None else None
                 for prot, src_xref in tqdm(
                     _iter_protein_entries(db),
                     desc="Processing proteins",
                     total=db.db.get_node("/Protein/Entries").nrows,
                 ):
+                    fasta_header = f">{prot.omaid} | {src_xref}"
                     if prot_fh is not None:
                         seq = prot.sequence
                         if seq:
-                            _write_fasta_record(prot_fh, src_xref, seq)
+                            _write_fasta_record(prot_fh, fasta_header, seq)
                     if cdna_fh is not None:
                         cdna = prot.cdna
                         if cdna:
-                            _write_fasta_record(cdna_fh, src_xref, cdna)
+                            _write_fasta_record(cdna_fh, fasta_header, cdna)
+                    while next_3di is not None and next_3di[0] < prot.entry_nr:
+                        next_3di = next(seq_3di_iter, None)
+                    if next_3di is not None and next_3di[0] == prot.entry_nr:
+                        _write_fasta_record(_3di_fh, fasta_header, next_3di[1].decode("ascii"))
 
 
 def dump_ncbi_linkout(conf):
@@ -659,6 +705,11 @@ def parse_command_line_args():
     xrefs_parser.add_argument("--out-refseq", help="Output path for the refseq cross-reference mappings (if enabled)")
     xrefs_parser.add_argument("--out-ncbi", help="Output path for the ncbi cross-reference mappings (if enabled)")
     xrefs_parser.add_argument("--out-entrez", help="Output path for the entrez cross-reference mappings (if enabled)")
+    xrefs_parser.add_argument(
+        "--out-source",
+        help="Output path for the source id and ac cross-reference mappings (if enabled). "
+        "One line per protein: OMA ID, source ids and source acs (multiple values separated by ';')",
+    )
 
     go_parser = subparsers.add_parser("go", help="Dump GO annotations", formatter_class=ArgumentDefaultsHelpFormatter)
     go_parser.set_defaults(func=dump_go)
@@ -687,6 +738,7 @@ def parse_command_line_args():
     seq_parser.add_argument("--db", required=True, help="Path to database")
     seq_parser.add_argument("--out-proteins", help="Output path for protein sequences in FASTA format")
     seq_parser.add_argument("--out-cdna", help="Output path for cDNA sequences in FASTA format")
+    seq_parser.add_argument("--out-3di", help="Output path for 3Di sequences in FASTA format")
     seq_parser.add_argument("--out-annotations", help="Output path for protein annotations in TSV format")
 
     ncbi_parser = subparsers.add_parser(

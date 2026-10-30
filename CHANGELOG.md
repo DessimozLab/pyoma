@@ -5,7 +5,7 @@ All notable changes to pyoma are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and pyoma uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.15.0] - Unreleased
+## [0.15.0] - 2026-10-30
 
 ### Added
 
@@ -626,7 +626,7 @@ and pyoma uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - First tagged release.
 
-[0.15.0]: https://github.com/DessimozLab/pyoma/compare/v0.14.2...develop
+[0.15.0]: https://github.com/DessimozLab/pyoma/compare/v0.14.2...v0.15.0
 [0.14.2]: https://github.com/DessimozLab/pyoma/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/DessimozLab/pyoma/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/DessimozLab/pyoma/compare/v0.13.5...v0.14.0

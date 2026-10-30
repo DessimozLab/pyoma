@@ -4,7 +4,13 @@ name: Run tests of pyoma
 on:
   push:
   pull_request:
-    branches: [ $default-branch ]
+    branches: [ main ]
+  # weekly run on main: catches breakage from new dependency releases and
+  # keeps the test database cache of main from being evicted after 7 days,
+  # so that new branches can restore it instead of downloading it again
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 jobs:
   build:

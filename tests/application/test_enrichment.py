@@ -12,7 +12,7 @@ class GOEnrichmentTest(TestWithDbInstance):
 
     def test_random_set(self):
         rng = random.Random(1234)
-        sample = random.sample(range(*self.db.id_mapper["OMA"].genome_range(1)), k=15)
+        sample = rng.sample(range(*self.db.id_mapper["OMA"].genome_range(1)), k=15)
         res = pyoma.application.enrichment.extant_species_go_enrichment(self.db, sample)
         self.assertIsNotNone(res)
         self.assertIn("p_bonferroni", res.columns)

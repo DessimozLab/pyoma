@@ -1,55 +1,56 @@
 [build-system]
-requires = ["setuptools>=65.0", "wheel"]
+requires = ["setuptools>=65.0", "setuptools_scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyoma"
-version = "0.14.2"
+dynamic = ["version"]
 description = "Library to interact and build OMA hdf5 files"
 readme = "README.md"
 license = "MPL-2.0"
 authors = [
     { name = "DessimozLab", email = "contact@omabrowser.org" }
 ]
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.10,<3.15"
 dependencies = [
-    "numpy>=1.26,<2.0",
-    "tables>=3.9.0",
+    "numpy>=2.0",
+    "tables>=3.10.0",
     "fuzzyset2>=0.1.1",
-    "tqdm",
-    "pyopa>=0.8",
-    "pandas",
-    "biopython>=1.80",
-    "datasketch",
-    "ete3",
-    "networkx",
-    "property_manager",
+    "tqdm>=4.62",
+    "pyopa>=0.8.6",
+    "pandas>=2.2.2",
+    "biopython>=1.84",
+    "datasketch>=1.6",
+    "networkx>=3.0",
+    "property_manager>=3.0",
 ]
 
 [project.optional-dependencies]
 create_db = [
-    "PySAIS",
-    "matplotlib",
-    "scikit-learn",
-    "scikit-fuzzy",
-    "pyham",
-    "omataxonomy",
-    "mpire",
-    "lark-parser",
+    "PySAIS>=1.1.0",
+    "matplotlib>=3.8.4",
+    "scikit-learn>=1.4.2",
+    "scikit-fuzzy>=0.5.0",
+    "pyham>=2.0",
+    "omataxonomy>=0.5",
+    "ete4>=4.3,<5",
+    "rapidfuzz>=3.0",
+    "mpire>=2.10",
+    "lark-parser>=0.12.0",
 ]
 enrichment = [
-    "plotly",
-    "scikit-learn",
-    "statsmodels",
-    "scipy"
+    "plotly>=5.0",
+    "scikit-learn>=1.4.2",
+    "statsmodels>=0.14.2",
+    "scipy>=1.13.0"
 ]
 notebooks = [
-    "jupyter",
-    "matplotlib",
-    "seaborn"
+    "jupyter>=1.0",
+    "matplotlib>=3.8.4",
+    "seaborn>=0.13.2"
 ]
-docs = ["sphinx"]
-test = ["pytest"]
+docs = ["sphinx>=7.0"]
+test = ["pytest>=7.0", "pytest-cov>=4.0"]
 
 [project.scripts]
 oma-build = "pyoma.browser.build.main:build_database"
@@ -60,7 +61,19 @@ oma-dump  = "pyoma.browser.build.dump:dump_files"
 include = ["pyoma*"]
 exclude = ["notebooks"]
 
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
+
+
+[tool.coverage.run]
+source = ["pyoma"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
 
 [tool.black]
 line-length = 120
-target-version = ["py39"]
+target-version = ["py310"]

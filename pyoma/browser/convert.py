@@ -15,6 +15,7 @@ import re
 import resource
 import subprocess
 import time
+import urllib.request
 import uuid
 from typing import List, Iterable, Tuple, Union, Mapping, Dict
 from builtins import str, chr, range, object, super, bytes
@@ -27,7 +28,6 @@ import numpy.lib.recfunctions
 import pandas
 import tables
 from PySAIS import sais
-from future.standard_library import hooks
 from tables import NoSuchNodeError
 from tqdm import tqdm
 
@@ -40,9 +40,6 @@ from .homoeologs import HomeologsConfidenceCalculator
 from .synteny import SyntenyScorer
 from . import hoghelper
 from .. import common, version
-
-with hooks():
-    import urllib.request
 
 hog_re = re.compile(rb"((?P<prefix>HOG):)?(?P<rel>[A-Z]?)(?P<fam>\d+)(\.(?P<subfamid>[0-9a-z.]+))?$")
 
@@ -823,9 +820,10 @@ class DarwinExporter(object):
                 for z in ("uniprot_xrefs.tsv", "swissprot_xrefs.tsv")
             )
         )
-        with DescriptionManager(
-            self.h5, "/Protein/Entries", "/Protein/DescriptionBuffer"
-        ) as de_man, GeneOntologyManager(self.h5, "/Annotations/GeneOntology", "/Ontologies/GO") as go_man:
+        with (
+            DescriptionManager(self.h5, "/Protein/Entries", "/Protein/DescriptionBuffer") as de_man,
+            GeneOntologyManager(self.h5, "/Annotations/GeneOntology", "/Ontologies/GO") as go_man,
+        ):
             xref_importer = XRefImporter(
                 db_parser,
                 gs,
@@ -932,6 +930,7 @@ class DarwinExporter(object):
         if unknown:
             raise ValueError(f"Unknown XRefSource(s): {unknown}. Valid: {list(source_enum._names)}")
         canonical_sources = [source_enum[z] for z in xrefsource_order]
+        swissprot_idx = canonical_sources.index(source_enum["UniProtKB/SwissProt"])  # used to select name, not acc
         max_acceptable_verif_value = xrefs.get_enum("Verification")["unchecked"]
         current_xref = (1000, "")
         current_protein = None
@@ -948,7 +947,9 @@ class DarwinExporter(object):
                 current_xref = (1000, b"")
             try:
                 rank = canonical_sources.index(xref["XRefSource"])
-                if rank < current_xref[0]:
+                if rank < current_xref[0] or (
+                    current_xref[0] == rank and rank == swissprot_idx and b"_" in xref["XRefId"]
+                ):
                     current_xref = (rank, xref["XRefId"])
             except ValueError:
                 pass
@@ -1056,9 +1057,12 @@ class DarwinExporter(object):
         dom_cov_hist_tab = self.create_table_if_needed(
             summary, "Domain_coverage_hist", drop_data=True, obj=cov_hist_data
         )
-        dom_cov_hist_tab.set_attr("frac_genes_w_domain", len(cov_fracs[cov_fracs > 0]) / len(cov_fracs))
+        fracs_w_domain = cov_fracs[cov_fracs > 0]
+        dom_cov_hist_tab.set_attr("frac_genes_w_domain", len(fracs_w_domain) / len(cov_fracs))
         dom_cov_hist_tab.set_attr("mean_coverage_overall", numpy.mean(cov_fracs))
-        dom_cov_hist_tab.set_attr("mean_coverage_w_domain", numpy.mean(cov_fracs[cov_fracs > 0]))
+        dom_cov_hist_tab.set_attr(
+            "mean_coverage_w_domain", numpy.mean(fracs_w_domain) if len(fracs_w_domain) > 0 else 0.0
+        )
 
     def collect_goterm_freqs(self):
         self.logger.info("Computing gene ontology annotations term frequencies")
@@ -1082,30 +1086,70 @@ class DarwinExporter(object):
         self.logger.info("Building gene ontology annotations summary info")
         go_tab = self.h5.get_node("/Annotations/GeneOntology")
         prot_tab = self.h5.get_node("/Protein/Entries")
-        exp_codes = frozenset([b"EXP", b"IDA", b"IPI", b"IMP", b"IGI", b"IEP"])
+        exp_codes = [b"EXP", b"IDA", b"IPI", b"IMP", b"IGI", b"IEP"]
         cnts = collections.Counter()
-        cur_enr = None
-        for (enr, term), row_iter in itertools.groupby(go_tab, operator.itemgetter("EntryNr", "TermNr")):
-            evidences = {row["Evidence"] for row in row_iter}
-            is_iea = b"IEA" in evidences
-            evidences.discard(b"IEA")
-            is_exp = not exp_codes.isdisjoint(evidences)
-            is_cur = len(evidences.difference(exp_codes)) > 0
-            cnts["annotations_any"] += 1
-            if is_exp:
-                cnts["annotations_exp"] += 1
-            if is_cur:
-                cnts["annotations_currated"] += 1
-            if is_iea:
-                cnts["annotations_iea"] += 1
-            if cur_enr != enr:
-                e = next(prot_tab.where("EntryNr == {}".format(enr))).fetch_all_fields()
-                cnts["proteins_any"] += 1
-                if e["OmaGroup"] != 0:
-                    cnts["protein_OmaGroup"] += 1
-                if len(e["OmaHOG"]) > 0:
-                    cnts["protein_HOG"] += 1
-                cur_enr = enr
+
+        # ProteinTable is dense, sorted, 1-indexed: row i holds EntryNr == i+1.
+        # Build O(1) lookup arrays directly by row position; no need to read EntryNr.
+        max_enr = prot_tab.nrows  # EntryNr runs 1..nrows
+        oma_group_arr = numpy.empty(max_enr + 1, dtype=numpy.uint32)
+        oma_group_arr[1:] = prot_tab.read(field="OmaGroup")  # ~100 MB
+        has_hog_arr = numpy.zeros(max_enr + 1, dtype=bool)
+        hog_chunk = 200_000
+        for s in range(0, max_enr, hog_chunk):
+            has_hog_arr[s + 1 : s + 1 + hog_chunk] = prot_tab.read(s, s + hog_chunk, field="OmaHOG") != b""
+        seen_enrs = numpy.zeros(max_enr + 1, dtype=bool)
+
+        # Process GO table in column-wise chunks (skips the 255-byte Reference column).
+        # Carry a tail across chunk boundaries so no (EntryNr, TermNr) group is split.
+        go_chunk = 5_000_000
+        n_go = go_tab.nrows
+        tail = {k: numpy.empty(0, dtype=dt) for k, dt in (("enr", numpy.uint32), ("tnr", numpy.uint32), ("evid", "S3"))}
+
+        for start in range(0, n_go, go_chunk):
+            stop = min(start + go_chunk, n_go)
+            enr = numpy.concatenate([tail["enr"], go_tab.read(start, stop, field="EntryNr")])
+            tnr = numpy.concatenate([tail["tnr"], go_tab.read(start, stop, field="TermNr")])
+            evid = numpy.concatenate([tail["evid"], go_tab.read(start, stop, field="Evidence")])
+
+            pair_change = numpy.empty(len(enr), dtype=bool)
+            pair_change[0] = True
+            pair_change[1:] = (enr[1:] != enr[:-1]) | (tnr[1:] != tnr[:-1])
+            group_starts = numpy.where(pair_change)[0]
+
+            if stop < n_go:
+                cut = int(group_starts[-1])
+                tail = {"enr": enr[cut:].copy(), "tnr": tnr[cut:].copy(), "evid": evid[cut:].copy()}
+                enr, evid = enr[:cut], evid[:cut]
+                group_starts = group_starts[:-1]
+            else:
+                tail = {
+                    k: numpy.empty(0, dtype=dt)
+                    for k, dt in (("enr", numpy.uint32), ("tnr", numpy.uint32), ("evid", "S3"))
+                }
+
+            if len(group_starts) == 0:
+                continue
+
+            is_iea = evid == b"IEA"
+            is_exp = numpy.isin(evid, exp_codes)
+            is_cur = ~is_iea & ~is_exp
+
+            cnts["annotations_any"] += len(group_starts)
+            cnts["annotations_iea"] += int(
+                numpy.add.reduceat(is_iea.view(numpy.uint8), group_starts).astype(bool).sum()
+            )
+            cnts["annotations_exp"] += int(
+                numpy.add.reduceat(is_exp.view(numpy.uint8), group_starts).astype(bool).sum()
+            )
+            cnts["annotations_currated"] += int(
+                numpy.add.reduceat(is_cur.view(numpy.uint8), group_starts).astype(bool).sum()
+            )
+            seen_enrs[enr[group_starts]] = True
+
+        cnts["proteins_any"] = int(seen_enrs.sum())
+        cnts["protein_OmaGroup"] = int(numpy.sum(oma_group_arr[seen_enrs] != 0))
+        cnts["protein_HOG"] = int(has_hog_arr[seen_enrs].sum())
         return cnts
 
     def count_xref_summary(self):
@@ -1176,7 +1220,7 @@ class DarwinExporter(object):
         # sum all parts of each domain region and store total length in DLen column
         domains = domains.assign(DLen=domains["Coords"].apply(dlen))
         # sum over all domains per protein
-        cov_sites = domains.groupby("EntryNr").agg({"DLen": sum})
+        cov_sites = domains.groupby("EntryNr").agg({"DLen": "sum"})
         return cov_sites
 
     def add_domain_covered_sites_counts(self):
@@ -2268,24 +2312,43 @@ class PerGenomeOMAGroupAuxDataAdder(object):
         gs = self.h5.get_node("/Genome").read()
         Goff = gs["EntryOff"]
         etab = self.h5.get_node("/Protein/Entries")
-        shared_ogs = numpy.zeros((len(gs), len(gs)), dtype="i4")
-        in_groups = numpy.zeros(len(gs), dtype="i4")
+        n_genomes = len(gs)
+        shared_ogs = numpy.zeros((n_genomes, n_genomes), dtype="i4")
 
-        def enr_to_gnr(entry_nr):
-            return Goff.searchsorted(entry_nr, side="left") - 1
+        entry_nrs, grp_ids = self.get_group_members(etab)
 
-        grp_members = self.get_group_members(etab)
-        for grp, memb in tqdm(grp_members.items()):
-            t0 = time.time()
-            gnrs = collections.Counter(map(enr_to_gnr, memb))
-            for gn, cnts in gnrs.items():
-                in_groups[gn] += cnts
-            for g1, g2 in itertools.combinations(gnrs, 2):
-                shared_ogs[g1, g2] += 1
-                shared_ogs[g2, g1] += 1
-            common.package_logger.info(
-                "grp {} with {} members took {:.1f}msec".format(grp, len(memb), 1000 * (time.time() - t0))
-            )
+        # Map all entry numbers to genome numbers at once
+        gnrs = Goff.searchsorted(entry_nrs, side="left").astype("i4") - 1
+
+        # in_groups: total proteins in any group per genome — one bincount replaces the Counter loop
+        in_groups = numpy.bincount(gnrs, minlength=n_genomes).astype("i4")
+
+        if len(grp_ids) == 0:
+            # no OMA Groups stored.
+            self.in_groups = in_groups
+            self.shared_ogs = shared_ogs
+            return
+
+        # Sort by group id so we can slice out each group's genome numbers with a boundary scan
+        order = numpy.argsort(grp_ids, kind="stable")
+        grp_ids_s = grp_ids[order]
+        gnrs_s = gnrs[order]
+
+        group_change = numpy.empty(len(grp_ids_s), dtype=bool)
+        group_change[0] = True
+        group_change[1:] = grp_ids_s[1:] != grp_ids_s[:-1]
+        group_starts = numpy.where(group_change)[0]
+        group_ends = numpy.concatenate((group_starts[1:], [len(grp_ids_s)]))
+
+        for s, e in tqdm(zip(group_starts, group_ends), total=len(group_starts)):
+            unique_gnrs = numpy.unique(gnrs_s[s:e])
+            if len(unique_gnrs) < 2:
+                continue
+            # triu_indices enumerates all unordered pairs without a Python combinations loop
+            ii, jj = numpy.triu_indices(len(unique_gnrs), k=1)
+            shared_ogs[unique_gnrs[ii], unique_gnrs[jj]] += 1
+            shared_ogs[unique_gnrs[jj], unique_gnrs[ii]] += 1
+
         self.shared_ogs = shared_ogs
         self.in_groups = in_groups
 
@@ -2303,21 +2366,30 @@ class PerGenomeOMAGroupAuxDataAdder(object):
             self.h5.create_array(root, node_full_name, obj=data)
 
     def get_group_members(self, etab):
-        grp_members = collections.defaultdict(list)
-        for row in etab.where("OmaGroup > 0"):
-            grp_members[row["OmaGroup"]].append(row["EntryNr"])
-        return grp_members
+        # Entry table is dense 1-indexed: entry nr == row index + 1
+        oma_groups = etab.read(field="OmaGroup")
+        mask = oma_groups > 0
+        entry_nrs = numpy.where(mask)[0].astype(numpy.uint32) + 1
+        return entry_nrs, oma_groups[mask]
 
 
 class PerGenomeHOGAuxAdder(PerGenomeOMAGroupAuxDataAdder):
     node_postfix = "hog"
 
     def get_group_members(self, etab):
-        grp_members = collections.defaultdict(list)
-        for row in etab.where('OmaHOG != b""'):
-            fam = int(hog_re.match(row["OmaHOG"]).group("fam"))
-            grp_members[fam].append(row["EntryNr"])
-        return grp_members
+        # OmaHOG is 255 B/row so read in chunks rather than loading the full column
+        n_rows = etab.nrows
+        chunk_size = 200_000
+        all_enrs, all_fams = [], []
+        for start in range(0, n_rows, chunk_size):
+            stop = min(start + chunk_size, n_rows)
+            hogs = etab.read(start, stop, field="OmaHOG")
+            mask = hogs != b""
+            if not mask.any():
+                continue
+            all_fams.append(numpy.array([int(hog_re.match(h).group("fam")) for h in hogs[mask]], dtype=numpy.uint32))
+            all_enrs.append(numpy.arange(start + 1, stop + 1, dtype=numpy.uint32)[mask])
+        return numpy.concatenate(all_enrs), numpy.concatenate(all_fams)
 
 
 class InvarianceException(Exception):

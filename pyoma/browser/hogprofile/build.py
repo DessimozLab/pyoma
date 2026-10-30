@@ -6,7 +6,7 @@ import uuid
 import pickle
 
 import tables
-import ete3
+import ete4
 import multiprocessing as mp
 import time
 import tempfile
@@ -16,6 +16,7 @@ import numpy
 from datasketch import WeightedMinHashGenerator, MinHashLSHForest
 from .pyhamutils import get_ham_treemap_from_row
 from .hashutils import generate_treeweights, row2hash
+from .species_tree import ete_tree_to_rows, store_species_tree
 from .tree_helper import (
     taxa_index,
     leaf_index,
@@ -32,9 +33,9 @@ class LSHBuilderBase(object):
     def __init__(self, db, numperm=256, taxfilter=None, taxmask=None, **kwargs):
         self.db = db
         tree_newick = get_newick_tree_from_tax_db(db.tax)
-        full_tree = ete3.PhyloTree(tree_newick, format=1)
+        full_tree = ete4.PhyloTree(tree_newick, parser=1)
         self.tree = filter_tree(full_tree, root_node=taxmask, taxfilter=taxfilter)
-        self.tree_newick = self.tree.write(format=1)
+        self.tree_newick = self.tree.write(parser=1)
         self.taxa_index = taxa_index(self.tree)
         self.leaf_index = leaf_index(self.tree)
         self.tree_weights = generate_treeweights(self.tree, self.taxa_index)
@@ -222,14 +223,13 @@ class Collector(BaseProfileBuilderProcess):
             shape=(0,),
             filters=tables.Filters(complevel=3, complib="blosc"),
         )
-        lsh_tree = self.h5.create_vlarray(
+        # store as table to keep the hdf5 file independent of the tree library
+        store_species_tree(
+            self.h5,
             root,
-            "species_tree",
-            createparents=True,
-            atom=tables.ObjectAtom(),
+            ete_tree_to_rows(self.builder.tree),
             filters=tables.Filters(complevel=3, complib="blosc"),
         )
-        lsh_tree.append(self.builder.tree)
         self.h5.set_node_attr(root, "num_perm", self.builder.numperm)
         return hashes, species, lsh_forest
 

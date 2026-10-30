@@ -1,7 +1,10 @@
-import ete3
 import copy
 import collections
 import itertools
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import ete4
 
 
 def get_newick_tree_from_tax_db(tax):
@@ -35,26 +38,27 @@ def get_newick_tree_from_tax_db(tax):
     return res
 
 
-def filter_tree(tree: ete3.PhyloNode, root_node=None, taxfilter=None):
+def filter_tree(tree: "ete4.PhyloTree", root_node=None, taxfilter=None):
     newtree = copy.deepcopy(tree)
     if root_node:
-        for n in newtree.traverse():
+        for n in newtree.traverse("preorder"):
             if str(n.name) == str(root_node):
                 newtree = n
                 break
     if taxfilter:
-        for n in newtree.traverse():
+        for n in newtree.traverse("preorder"):
             if n.name in taxfilter:
                 n.detach()
     return newtree
 
 
-def taxa_index(tree: ete3.PhyloNode):
+def taxa_index(tree: "ete4.PhyloTree"):
     """build a dictionary from tree-node name to idx"""
-    index = {n.name: i for i, n in enumerate(tree.traverse())}
+    # levelorder is the default traversal of ete3 and ete4; it defines the column order of the profiles
+    index = {n.name: i for i, n in enumerate(tree.traverse("levelorder"))}
     return index
 
 
-def leaf_index(tree: ete3.PhyloNode):
-    index = {n.name: i for i, n in enumerate(tree.iter_leaves())}
+def leaf_index(tree: "ete4.PhyloTree"):
+    index = {n.name: i for i, n in enumerate(tree.leaves())}
     return index

@@ -75,16 +75,21 @@ class DataImportError(Exception):
 
 
 class OmaGroupsProvider:
-    def __init__(self, source):
+    def __init__(self, source: Optional[str], name2code: Optional[dict] = None):
         if source is not None:
             with open(source, "r") as f:
                 self.data = json.load(f)
         else:
             self.data = None
+        self.code2name = {v: k for k, v in (name2code or {}).items()}
 
-    def get_oma_group(self, genome, nr):
+    def get_oma_group(self, genome, nr) -> int:
+        genome_name = self.code2name.get(genome, genome)
+        if self.data is None:
+            return 0
+        genome_name = self.code2name.get(genome, genome)
         try:
-            per_genome = self.data[str(genome)]
+            per_genome = self.data[genome_name]
         except KeyError:
             return 0
         try:
@@ -374,7 +379,12 @@ def identify_close_paralogs(df: pandas.DataFrame, join_threshold_mb=500) -> pand
         df_with_index = df.set_index("EntryNr2")
         cp = df_with_index.join(df_with_index, rsuffix="_2")[["EntryNr1", "EntryNr1_2"]]
         cp = cp[cp["EntryNr1"] < cp["EntryNr1_2"]].drop_duplicates(ignore_index=True)
-        cp = cp.rename(columns={"EntryNr1_2": "EntryNr2"})
+        # `drop_duplicates(ignore_index=True)` gives a fresh RangeIndex but does
+        # not always clear the *name* inherited from the "EntryNr2" index we set
+        # above (notably when `cp` is empty, e.g. no shared close paralogs at
+        # all), which then collides with the "EntryNr2" column created by the
+        # rename below.
+        cp = cp.rename_axis(index=None).rename(columns={"EntryNr1_2": "EntryNr2"})
     else:
         # Groupby-based method
         common.package_logger.info(
@@ -801,7 +811,7 @@ class DBBuilder(DarwinExporter):
             )
 
             # Now find the split points and construct lookup ragged array.
-            L = int(len(sa_f)) - k
+            L = int(len(sa_f))
             t = tqdm(total=max(L, 0), desc="Building Kmer lookup")
             ii, tot_kmers = 0, len(kmers)
             chunk_keys: list[int] = []  # chunk keys for sa-lookup-table
@@ -813,7 +823,7 @@ class DBBuilder(DarwinExporter):
             pending_cut: bool = False
 
             if L > 0:
-                first_code = int(kmer_codes_for_positions(sa_f[0:1], k, seqs_np, dtype_sa, map256, alphabet_size)[0])
+                first_code = int(kmer_codes_for_positions(sa_f[0:1], k, seqs_np, dtype_sa, map256, alphabet_size)[0][0])
                 chunk_pos.append(int(sa_origpos[0]))
                 chunk_keys.append(first_code)
             next_target = chunk_pos[-1] + int(chunksize) if chunk_pos else int(chunksize)
@@ -1025,6 +1035,7 @@ class DBBuilder(DarwinExporter):
                 raise DBConsistencyError("Several splice variants contain pairwise orthologs", ent, nr_vps)
             if len(vp) == 1:
                 splice_arr[idx + offset] = ent["EntryNr"][vp[0]]
+                continue
 
             # no orthologs for any variant. choose the longest variant as main one.
             splice_arr[idx + offset] = ent["EntryNr"][numpy.argmax(ent["SeqBufferLength"])]

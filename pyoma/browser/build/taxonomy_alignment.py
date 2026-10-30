@@ -115,18 +115,18 @@ def map_metadata_columns(gs: pandas.DataFrame) -> pandas.DataFrame:
 def create_treenode_to_genome_map(tree, tax2code):
     res = {}
     for n in tree.traverse("postorder"):
-        if n.is_leaf():
+        if n.is_leaf:
             try:
                 spp = set(tax2code[int(n.name)])
             except KeyError:
                 spp = set()
-            n.add_feature("spset", spp)
-            res[int(n.name)] = n.spset
+            n.add_prop("spset", spp)
+            res[int(n.name)] = spp
         else:
             spset = set()
-            for x in n.get_children():
-                spset |= x.spset
-            n.add_feature("spset", spset)
+            for x in n.children:
+                spset |= x.props["spset"]
+            n.add_prop("spset", spset)
             res[int(n.name)] = spset
     return res
 
@@ -148,6 +148,9 @@ def find_top_overlaping_nodes(source, target):
 
 
 def _filter_candidates(tax, cand, name, threshold=0.4):
+    if len(cand) == 0:
+        return []
+
     for k in range(len(cand)):
         if cand[k][1] < threshold * cand[0][1]:
             break
@@ -189,12 +192,13 @@ def collect_gtdb_map_info(cand_map, tax2code, code2tax, tax, pyomatax, tree):
 
             if gtdb_id not in pyomatax["NCBITaxonId"]:
                 this_one["valid_oma_tax"] = False
-                tnode = tree.search_nodes(taxid=gtdb_id)[0]
-                while tnode.taxid not in pyomatax["NCBITaxonId"]:
+                tnode = next(tree.search_nodes(taxid=gtdb_id))
+                while tnode.props["taxid"] not in pyomatax["NCBITaxonId"]:
                     tnode = tnode.children[0]
-                this_one["representative"] = tnode.taxid
+                rep = tnode.props["taxid"]
+                this_one["representative"] = rep
                 logger.info(
-                    f"{gtdb_id} - {this_one['gtdb_name']} not in pyomatax -> {tnode.taxid} - {tax.translate_to_names([tnode.taxid])[0]}"
+                    f"{gtdb_id} - {this_one['gtdb_name']} not in pyomatax -> {rep} - {tax.translate_to_names([rep])[0]}"
                 )
             else:
                 this_one["valid_oma_tax"] = True
@@ -224,18 +228,19 @@ def collect_ncbi_map_info(cand_map, tax2code, code2tax, tax, pyomatax, tree):
         if 2759 in tax.get_lineage(ncbi_id) or ncbi_id in (2, 2157):
             if ncbi_id not in pyomatax["NCBITaxonId"]:
                 this_one["valid_oma_tax"] = False
-                tnode = tree.search_nodes(taxid=ncbi_id)[0]
-                while tnode.taxid not in pyomatax["NCBITaxonId"]:
+                tnode = next(tree.search_nodes(taxid=ncbi_id))
+                while tnode.props["taxid"] not in pyomatax["NCBITaxonId"]:
                     try:
                         tnode = tnode.children[0]
                     except IndexError:
                         logger.info(f"Cannot find a genome for {ncbi_id} - {this_one['sciname']}")
                         break
-                if tnode.taxid not in pyomatax["NCBITaxonId"]:
+                rep = tnode.props["taxid"]
+                if rep not in pyomatax["NCBITaxonId"]:
                     continue
-                this_one["representative"] = tnode.taxid
+                this_one["representative"] = rep
                 logger.info(
-                    f"{ncbi_id} - {this_one['sciname']} not in pyomatax -> {tnode.taxid} - {tax.translate_to_names([tnode.taxid])[0]}"
+                    f"{ncbi_id} - {this_one['sciname']} not in pyomatax -> {rep} - {tax.translate_to_names([rep])[0]}"
                 )
             else:
                 this_one["valid_oma_tax"] = True
@@ -276,11 +281,19 @@ def map_gtdb_and_ncbi(tax: Taxonomy, gs: pandas.DataFrame, db_path: str, gtdb2nc
             if row.NCBITaxonId < 0:
                 tax2code[gtdb2ncbi.get(row.NCBITaxonId, [0])[0]].add(row.UniProtSpeciesCode)
 
-    tree_gtdb = tax.get_topology(oma_gtdb, intermediate_nodes=True, annotate=True)
-    tree_ncbi = tax.get_topology(oma_ncbi, intermediate_nodes=True, annotate=True)
+    if len(oma_gtdb) > 0:
+        tree_gtdb = tax.get_topology(oma_gtdb, intermediate_nodes=True, annotate=True)
+        gtdb_nodes_to_genome_set = create_treenode_to_genome_map(tree_gtdb, tax2code)
+    else:
+        tree_gtdb = None
+        gtdb_nodes_to_genome_set = {}
 
-    gtdb_nodes_to_genome_set = create_treenode_to_genome_map(tree_gtdb, tax2code)
-    ncbi_nodes_to_genome_set = create_treenode_to_genome_map(tree_ncbi, tax2code)
+    if len(oma_ncbi) > 0:
+        tree_ncbi = tax.get_topology(oma_ncbi, intermediate_nodes=True, annotate=True)
+        ncbi_nodes_to_genome_set = create_treenode_to_genome_map(tree_ncbi, tax2code)
+    else:
+        tree_ncbi = None
+        ncbi_nodes_to_genome_set = {}
     gtdb_to_ncbi_cand = find_top_overlaping_nodes(gtdb_nodes_to_genome_set, ncbi_nodes_to_genome_set)
     ncbi_to_gtdb_cand = find_top_overlaping_nodes(ncbi_nodes_to_genome_set, gtdb_nodes_to_genome_set)
 

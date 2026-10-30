@@ -16,7 +16,7 @@ import tables
 from tables import PerformanceWarning
 import omataxonomy
 
-from pyoma.browser.hogidmap import compute_minhashes_for_db, compare_versions
+from pyoma.browser.hogidmap import compute_minhashes_for_db, compare_versions, HogLSHForestIndex
 from ..hogprofile.build import compute_profiles
 from .fingerprints import find_fingerprints_streaming
 from .keyword import collect_keywords
@@ -52,7 +52,7 @@ def phase_genomes(conf):
         name2code = db.add_species_data(conf.gs_tsv, taxid_updates=taxid_updates)
         code_to_file = {name2code[basename(f).split(".")[0]]: f for f in conf.genomes}
         with XrefStorer(conf.xref_db, index_cols=["EntryNr"]) as xref_storer:
-            db.add_proteins(code_to_file, OmaGroupsProvider(conf.oma_groups), xref_collector=xref_storer)
+            db.add_proteins(code_to_file, OmaGroupsProvider(conf.oma_groups, name2code), xref_collector=xref_storer)
 
 
 def phase_build_seq_indexes(conf):
@@ -325,7 +325,8 @@ def hogmap_lsh(conf):
 
 
 def hogmap_ids(conf):
-    compare_versions(conf.out, conf.target, *conf.old)
+    index_class = HogLSHForestIndex if conf.index_class.lower() == "forest" else None
+    compare_versions(conf.out, conf.target, *conf.old, index_cls=index_class)
 
 
 def gen_aux_files(conf):
@@ -690,6 +691,11 @@ def parse_command_line_args():
         "--old", nargs="+", required=True, help="Path to old LSH databases to compare against the target"
     )
     hogmap_ids_parser.add_argument("--out", required=True, help="Path to output HOG mapping database file")
+    hogmap_ids_parser.add_argument(
+        "--index-class",
+        choices=["forest", "lsh"],
+        help="Index class to use. Either classical MinHashLSH or MinHashLSHForest.",
+    )
 
     conf = parser.parse_args()
     if not hasattr(conf, "func"):

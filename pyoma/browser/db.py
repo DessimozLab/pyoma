@@ -12,7 +12,7 @@ import warnings
 from bisect import bisect_left
 from builtins import chr, range, object, zip, bytes, str
 from xml.etree import ElementTree as et
-from typing import Union, Tuple, Optional, AnyStr, Set, Generator, Mapping
+from typing import Union, Tuple, Optional, AnyStr, Set, Generator, Mapping, Iterator
 from pathlib import Path
 
 import dateutil
@@ -51,7 +51,7 @@ from .exceptions import (
 from .geneontology import GeneOntology, OntologyParser, GOAspect, FreqAwareGeneOntology
 from .hoghelper import compare_levels, are_orthologous
 from .hogprofile import Profiler
-from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG
+from .models import LazyProperty, KeyWrapper, ProteinEntry, Genome, HOG, OmaGroup
 from .structure import StructureDB, StructureInfo
 from .suffixsearch import SuffixSearcher, SuffixIndexError
 from .idmapper import (
@@ -227,6 +227,8 @@ class Database(object):
     the result of queries will be :py:class:`numpy.recarray` objects."""
 
     EXPECTED_DB_SCHEMA = "3.8"
+    # nr of bytes of the OMA group keyword buffer read at once in iter_oma_groups
+    _oma_group_kw_chunk_size = 1 << 20
 
     def __init__(self, db):
         if isinstance(db, str):
@@ -959,9 +961,9 @@ class Database(object):
             condvars=condvars,
         )
         data.sort(order=["LocusStart"])
-        idx = int((data["EntryNr"] == entry_nr).nonzero()[0])
+        idx = numpy.argmax(data["EntryNr"] == entry_nr)
         res = data[max(0, idx - window) : idx + window + 1]
-        idx = int((res["EntryNr"] == entry_nr).nonzero()[0])
+        idx = numpy.argmax(res["EntryNr"] == entry_nr)
         return res, idx
 
     def parse_hog_id(self, hog_id):
@@ -1800,35 +1802,100 @@ class Database(object):
                 raise AmbiguousID("sequence pattern matches several oma groups", candidates=group_nrs)
         raise InvalidId("Invalid type to determine OMA Group: {} (type: {})".format(group_id, type(group_id)))
 
-    def oma_group_metadata(self, group_nr):
+    def oma_group_metadata(self, group_nr) -> dict:
         """get the metadata associated with an OMA Group
 
         The metadata contains the fingerprint and the keywords inferred for this group.
         The method returns this information as a dictionary. The parameter must be
         the numeric oma group nr.
 
-        :param int group_nr: a numeric oma group id."""
+        :param int group_nr: a numeric oma group id.
+
+        :return: a dictionary containing the metadata for the specified OMA group.
+        """
         if not isinstance(group_nr, (int, numpy.integer)) or group_nr < 0:
             raise InvalidId("Invalid group nr: {} (type: {})".format(group_nr, type(group_nr)))
-        meta_tab = self.db.get_node("/OmaGroups/MetaData")
+        meta_tab: tables.Table = self.db.get_node("/OmaGroups/MetaData")
         try:
             e = next(meta_tab.where("GroupNr == {:d}".format(group_nr)))
-            kw_buf = self.db.get_node("/OmaGroups/KeywordBuffer")
-            try:
-                grp_size = int(e["NrMembers"])
-            except KeyError:
-                # fallback if not stored in DB yet
-                grp_size = -1
-
-            res = {
-                "fingerprint": e["Fingerprint"].decode(),
-                "group_nr": int(e["GroupNr"]),
-                "keywords": kw_buf[e["KeywordOffset"] : e["KeywordOffset"] + e["KeywordLength"]].tobytes().decode(),
-                "size": grp_size,
-            }
-            return res
         except StopIteration:
             raise InvalidId("invalid group nr")
+        kw_buf: tables.CArray = self.db.get_node("/OmaGroups/KeywordBuffer")
+        return self._oma_group_meta_row_to_dict(e, kw_buf)
+
+    @staticmethod
+    def _oma_group_meta_row_to_dict(row, kw_buf, kw_buf_offset=0) -> dict:
+        """convert a row of the /OmaGroups/MetaData table into a metadata dict
+
+        :param row: a row of the OmaGroups MetaData table
+        :param kw_buf: the keyword buffer, either as the hdf5 array or as
+                       a numpy array holding a window of it.
+        :param int kw_buf_offset: position of kw_buf[0] in the full keyword buffer."""
+        try:
+            grp_size = int(row["NrMembers"])
+        except KeyError:
+            # fallback if not stored in DB yet
+            grp_size = -1
+        kw_start = int(row["KeywordOffset"]) - kw_buf_offset
+        return {
+            "fingerprint": row["Fingerprint"].decode(),
+            "group_nr": int(row["GroupNr"]),
+            "keywords": kw_buf[kw_start : kw_start + int(row["KeywordLength"])].tobytes().decode(),
+            "size": grp_size,
+        }
+
+    def iter_oma_groups(self, min_size=0, max_size=None, has_fingerprint=None, has_keyword=None) -> Iterator[OmaGroup]:
+        """iterate over OMA groups, optionally restricted to the given criteria
+
+        Without any arguments, all OMA groups are returned.
+
+        :param int min_size: minimum size of the group (inclusive)
+        :param int max_size: maximum size of the group (inclusive). If None,
+               no upper limit is applied.
+        :param has_fingerprint: whether the group should have a fingerprint.
+               If None, no filtering is done on this criterion.
+        :param has_keyword: whether the group should have an inferred keyword.
+               If None, no filtering is done on this criterion.
+
+        :return: an iterator over OMA groups that match the given criteria
+        :raises DBOutdatedError: if filtering by size is requested but the
+               database does not store the group sizes.
+        """
+        meta_tab: tables.Table = self.db.get_node("/OmaGroups/MetaData")
+        conds = []
+        if min_size > 0 or max_size is not None:
+            if "NrMembers" not in meta_tab.colnames:
+                raise DBOutdatedError("OMA group sizes not stored in this database; cannot filter by size")
+            if min_size > 0:
+                conds.append("(NrMembers >= {:d})".format(min_size))
+            if max_size is not None:
+                conds.append("(NrMembers <= {:d})".format(max_size))
+        if has_fingerprint is not None:
+            conds.append('(Fingerprint {} b"n/a")'.format("!=" if has_fingerprint else "=="))
+        # groups without keyword are stored as "-", or as "" if no keywords were
+        # available at all. The keyword text is not in the table, so we restrict on
+        # its length here and check the (short) remaining candidates below.
+        missing_keywords = ("", "-")
+        if has_keyword is not None:
+            conds.append("(KeywordLength {} 1)".format(">=" if has_keyword else "<="))
+
+        # keywords are stored in group order, so we read the keyword buffer in
+        # windows of _oma_group_kw_chunk_size bytes rather than one small slice per
+        # group. If a row falls outside the current window, the window is reloaded there.
+        kw_chunk_size = self._oma_group_kw_chunk_size
+        kw_buf_node: tables.EArray = self.db.get_node("/OmaGroups/KeywordBuffer")
+        win_start, win = 0, kw_buf_node[0:0]
+        rows = meta_tab.where(" & ".join(conds)) if conds else meta_tab.iterrows()
+        for e in rows:
+            kw_start = int(e["KeywordOffset"])
+            kw_end = kw_start + int(e["KeywordLength"])
+            if kw_start < win_start or kw_end > win_start + len(win):
+                win_start = kw_start
+                win = kw_buf_node[kw_start : max(kw_end, kw_start + kw_chunk_size)]
+            meta = self._oma_group_meta_row_to_dict(e, win, win_start)
+            if has_keyword is not None and has_keyword == (meta["keywords"] in missing_keywords):
+                continue
+            yield OmaGroup(self, meta)
 
     def get_nr_oma_groups(self):
         """returns the number of OMA Groups in the database"""
@@ -1888,7 +1955,8 @@ class Database(object):
         :param entry: the entry or entry_nr for which the sequence is requested"""
         entry = self.ensure_entry(entry)
         seqArr = self.db.get_node("/Protein/SequenceBuffer")
-        seq = seqArr[entry["SeqBufferOffset"] : entry["SeqBufferOffset"] + entry["SeqBufferLength"] - 1]
+        offset, length = int(entry["SeqBufferOffset"]), int(entry["SeqBufferLength"])
+        seq = seqArr[offset : offset + length - 1]
         return seq.tobytes()
 
     def load_structure_db(self, path: Optional[os.PathLike] = None):
@@ -1930,7 +1998,8 @@ class Database(object):
         """get the protein sequence of a given entry as a string"""
         entry = self.ensure_entry(entry)
         seqArr = self.db.get_node("/Protein/CDNABuffer")
-        seq = seqArr[entry["CDNABufferOffset"] : entry["CDNABufferOffset"] + entry["CDNABufferLength"] - 1]
+        offset, length = int(entry["CDNABufferOffset"]), int(entry["CDNABufferLength"])
+        seq = seqArr[offset : offset + length - 1]
         return seq.tobytes()
 
     def get_description(self, entry):
@@ -3246,6 +3315,10 @@ class Taxonomy(object):
 
     def _get_taxids_from_any(self, it, skip_missing=True):
         if not isinstance(it, numpy.ndarray):
+            # elements may themselves be single-value numpy arrays (e.g. from
+            # indexing a structured array); numpy>=2 no longer coerces those
+            # to scalars implicitly, so unwrap them before building the array.
+            it = [x.item() if isinstance(x, numpy.ndarray) else x for x in it]
             try:
                 it = numpy.fromiter(it, dtype="i4")
             except ValueError:
@@ -3282,6 +3355,11 @@ class Taxonomy(object):
         return self.get_induced_taxonomy(subtree, collapse=collapse)
 
     def get_taxnode_from_name_or_taxid(self, query):
+        # Convert digit-only str or bytes to int
+        if isinstance(query, str) and query.isdigit():
+            query = int(query)
+        elif isinstance(query, bytes) and query.isdigit():
+            query = int(query)
         if isinstance(query, (bytes, str, int)):
             query = [query]
         tids = self._get_taxids_from_any(query, skip_missing=False)
@@ -3352,7 +3430,7 @@ class Taxonomy(object):
                 continue
             # get all the parents and check which ones we keep in the new taxonomy.
             parents = self.get_parent_taxa(cur_tax)["NCBITaxonId"]
-            mask = numpy.in1d(parents, taxids_to_keep)
+            mask = numpy.isin(parents, taxids_to_keep)
             # find the position of them in subtaxdata (note: subtaxdata and
             # taxids_to_keep have the same ordering).
             new_idx = taxids_to_keep.searchsorted(parents[mask])

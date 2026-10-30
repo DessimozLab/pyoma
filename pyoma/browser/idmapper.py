@@ -508,7 +508,7 @@ class XrefIdMapper(NoSearchXrefIdMapper):
             mode = "exact"
         res = self.search_helper.search(xref, mode=mode)
         if len(res) > 0 and len(self.idtype) < len(self.xrefEnum):
-            res = res[numpy.in1d(res["XRefSource"], list(self.idtype))]
+            res = res[numpy.isin(res["XRefSource"], list(self.idtype))]
         return res
 
     @timethis(level=logging.INFO)

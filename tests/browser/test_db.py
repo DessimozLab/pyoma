@@ -285,7 +285,7 @@ class DatabaseTests(TestWithDbInstance):
     def test_exact_search(self):
         # Test for 10 random
         for _ in range(10):
-            i = random.randint(0, len(self.db.db.root.Protein.Entries))
+            i = random.randint(0, len(self.db.db.root.Protein.Entries) - 1)
             enr = i + 1
             s = self.db.get_sequence(enr)
             self.assertTrue(

@@ -2493,6 +2493,9 @@ class SequenceSearch(object):
 
     PROTEIN_CHARS = frozenset(map(lambda x: x.decode(), DIGITS_AA))
     PAM100 = pyopa.generate_env(pyopa.load_default_environments()["log_pam1"], 100)
+    # upper bound (as a multiple of n) on the number of kmer candidates that get
+    # aligned in approx_search when several candidates tie at the n-th position.
+    MAX_TIED_CANDIDATES_FACTOR = 10
 
     def __init__(self, db: Database, seq_idx_fpath=None):
         # Backup reference to used DB method.
@@ -2726,7 +2729,7 @@ class SequenceSearch(object):
         masked_uniq_enrs = uniq_enrs[mask]
 
         # sort (desc by count)
-        sorted_idx = numpy.argsort(-masked_counts)
+        sorted_idx = numpy.argsort(-masked_counts, kind="stable")
         entries = list(zip(masked_uniq_enrs[sorted_idx], masked_counts[sorted_idx] / len_kmers))
         return entries
 
@@ -2751,7 +2754,9 @@ class SequenceSearch(object):
 
         :param seq: the query sequence to be searched
         :type seq: str, bytes
-        :param int n: number of maximum returned entries that match query
+        :param int n: number of maximum returned entries that match query. If several
+            kmer candidates tie with the n-th best one, all of them (up to
+            MAX_TIED_CANDIDATES_FACTOR * n) are aligned and the n best scoring are returned.
         :param bool is_sanitised: whether the sequence is already sanitised. defaults to false.
         :param float coverage: the minimum fraction of covered kmers by the target sequence
         :param entrynr_range: target entry number range as a tuple (min, max) or set for filtering
@@ -2772,8 +2777,16 @@ class SequenceSearch(object):
             raise ValueError("alignment must be either 'global' or 'local'")
 
         kmer_hits = self.approx_search_no_align(seq, is_sanitised=True, coverage=coverage, entrynr_range=entrynr_range)
-        if n > 0:
-            kmer_hits = kmer_hits[:n]
+        if n > 0 and len(kmer_hits) > n:
+            # Candidates with the same kmer coverage as the n-th one are not ordered
+            # in a meaningful way (e.g. near-identical copies of a gene family), so
+            # we align all of them (up to a bound) and keep the n best by score.
+            cutoff_coverage = kmer_hits[n - 1][1]
+            max_candidates = min(len(kmer_hits), n * self.MAX_TIED_CANDIDATES_FACTOR)
+            k = n
+            while k < max_candidates and kmer_hits[k][1] == cutoff_coverage:
+                k += 1
+            kmer_hits = kmer_hits[:k]
 
         # 3. Do local alignments and return count / score / alignment
         res = []
@@ -2795,6 +2808,8 @@ class SequenceSearch(object):
                 key=lambda q: q[1]["score"],
                 reverse=True,
             )
+            if n > 0:
+                res = res[:n]
         if return_kmer_hits:
             return res, kmer_hits
         else:

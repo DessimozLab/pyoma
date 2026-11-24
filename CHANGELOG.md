@@ -5,6 +5,17 @@ All notable changes to pyoma are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and pyoma uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `SequenceSearch.approx_search` no longer drops the best match when several
+  candidates tie on k-mer coverage at the `n`-th position (e.g. near-identical
+  members of a gene family). All tied candidates (up to 10 × `n`) are aligned
+  and the `n` best-scoring ones are returned. The k-mer ranking also breaks ties
+  deterministically now.
+- Removed sources of random failures from the test suite.
+
 ## [0.15.0] - 2026-10-30
 
 ### Added

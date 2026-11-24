@@ -233,7 +233,8 @@ class SuffixArrayVarLenSearchTestsCaseInsensitive(unittest.TestCase):
     def test_non_existing_pattern(self):
         tab = self.h5.get_node("/test/table")
         search = suffixsearch.SuffixSearcher.from_tablecolumn(tab, "VarCharOff")
-        res = search.find("ZZZZzz")
+        # '#' is not part of CHARS, so this pattern can never occur in the random data
+        res = search.find("ZZ#zz")
         self.assertEqual(0, len(res))
 
 

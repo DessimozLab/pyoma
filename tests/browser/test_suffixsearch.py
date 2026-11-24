@@ -245,6 +245,62 @@ class SuffixArrayVarLenSearchTestsCaseSensitive(SuffixArrayVarLenSearchTestsCase
     ignore_case = False
 
 
+class SuffixArrayVarLenLeadingEmptyRowsTest(unittest.TestCase):
+    """Rows 0 and 1 are empty, row 2 starts at offset 0. Regression test for the
+    offset fix-up treating genuine leading zero offsets as uninitialized.
+    Row 5 is empty and its offset is left unset (0), which must still be fixed up.
+
+    Values use alternating case, so every query differs from its swapcase()
+    variant, and no flipped query occurs anywhere in the (separator-less, in the
+    case-sensitive index) concatenated buffer."""
+
+    values = [b"", b"", b"aBcXyZ", b"", b"dEfUvW", b"", b"gHiJ"]
+    unset = {5}
+
+    def setUp(self):
+        self.h5 = tables.open_file("testsuffix.h5", "w", driver="H5FD_CORE", driver_core_backing_store=0)
+        tab_def = numpy.dtype([("VarCharOff", numpy.int32), ("VarCharLen", "i4")])
+        tab = numpy.zeros(len(self.values) + 1, tab_def)
+        buf = self.h5.create_earray("/test", "buffer", tables.StringAtom(1), (0,), createparents=True)
+        off = 0
+        for i, v in enumerate(self.values):
+            if v:
+                buf.append(numpy.frombuffer(v, dtype="S1"))
+            if i not in self.unset:
+                tab["VarCharOff"][i] = off
+            tab["VarCharLen"][i] = len(v)
+            off += len(v)
+        self.h5.create_table("/test", "table", obj=tab)
+
+    def tearDown(self):
+        self.h5.close()
+
+    def _check(self, ignore_case):
+        tab = self.h5.get_node("/test/table")
+        suffixsearch.SuffixIndexBuilderVarStringCol(
+            tab, "VarCharOff", self.h5.get_node("/test/buffer"), "/test", ignore_case=ignore_case
+        )()
+        search = suffixsearch.SuffixSearcher.from_tablecolumn(tab, "VarCharOff")
+        for row, val in enumerate(self.values):
+            if not val:
+                continue
+            # prefix (match at the row's first position), interior and full value
+            for q in (val[:3], val[1:4], val):
+                self.assertEqual([row], list(search.find(q)), "query {} (row {}: {})".format(q, row, val))
+                flipped = q.swapcase()
+                self.assertEqual(
+                    [row] if ignore_case else [],
+                    list(search.find(flipped)),
+                    "flipped query {} (row {}: {}, ignore_case={})".format(flipped, row, val, ignore_case),
+                )
+
+    def test_case_sensitive(self):
+        self._check(False)
+
+    def test_case_insensitive(self):
+        self._check(True)
+
+
 class SuffixArrayVarLenSearchTestsWithEmptyData(SuffixArrayVarLenSearchTestsCaseInsensitive):
     def setUp(self):
         self.h5 = create_h5_with_varlen_string_col(5000, numpy.int32, 0)

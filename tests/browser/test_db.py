@@ -285,7 +285,7 @@ class DatabaseTests(TestWithDbInstance):
     def test_exact_search(self):
         # Test for 10 random
         for _ in range(10):
-            i = random.randint(0, len(self.db.db.root.Protein.Entries))
+            i = random.randint(0, len(self.db.db.root.Protein.Entries) - 1)
             enr = i + 1
             s = self.db.get_sequence(enr)
             self.assertTrue(
@@ -315,8 +315,13 @@ class DatabaseTests(TestWithDbInstance):
             self.assertEqual(len(cdna), int(entry["CDNABufferLength"]) - 1)
 
     def get_random_subsequence(self, minlen=10):
-        i = random.randint(0, len(self.db.db.root.Protein.Entries))
-        elen = self.db.db.root.Protein.Entries[i]["SeqBufferLength"] - 1
+        entries = self.db.db.root.Protein.Entries
+        while True:
+            i = random.randint(0, len(entries) - 1)
+            # SeqBufferLength is unsigned, cast to avoid wrap-around on subtraction
+            elen = int(entries[i]["SeqBufferLength"]) - 1
+            if elen >= minlen:
+                break
         enr = i + 1
 
         ii = random.randint(0, elen - minlen)
@@ -328,7 +333,7 @@ class DatabaseTests(TestWithDbInstance):
     def modify_sequence(self, seq: bytes, n: int = 5) -> bytes:
         AAs = list(self.db.seq_search.DIGITS_AA)
         for _ in range(n):
-            i = random.randint(0, len(seq))
+            i = random.randint(0, len(seq) - 1)
             b = random.choice(AAs)
             seq = seq[:i] + b + seq[i + 1 :]
         return seq
@@ -351,16 +356,27 @@ class DatabaseTests(TestWithDbInstance):
             s, enr, start_idx, end_idx = self.get_random_subsequence(minlen=30)
             # modify sequence slightly
             s = self.modify_sequence(s)
-            approx_search_local = self.db.seq_search.approx_search(s, n=5, is_sanitised=True, alignment="local")
-            approx_search_global = self.db.seq_search.approx_search(s, n=5, is_sanitised=True, alignment="global")
-            self.assertEqual(
-                set(z[0] for z in approx_search_local),
-                set(z[0] for z in approx_search_global),
-                "not the same entries got returned for local and global alignment",
+            approx_search_local, kmer_hits_local = self.db.seq_search.approx_search(
+                s, n=5, is_sanitised=True, alignment="local", return_kmer_hits=True
             )
+            approx_search_global, kmer_hits_global = self.db.seq_search.approx_search(
+                s, n=5, is_sanitised=True, alignment="global", return_kmer_hits=True
+            )
+            self.assertEqual(
+                set(z[0] for z in kmer_hits_local),
+                set(z[0] for z in kmer_hits_global),
+                "not the same candidates got aligned for local and global alignment",
+            )
+            self.assertLessEqual(len(approx_search_local), 5)
+            self.assertLessEqual(len(approx_search_global), 5)
             self.assertIn(enr, {z[0] for z in approx_search_local}, "missing query entry")
             alignment_local = [z[1] for z in approx_search_local if z[0] == enr][0]
-            alignment_global = [z[1] for z in approx_search_global if z[0] == enr][0]
+            # global alignments against long near-identical paralogs may outscore the
+            # query entry, so restrict the global search to the query entry itself.
+            (global_hit,) = self.db.seq_search.approx_search(
+                s, n=1, is_sanitised=True, alignment="global", entrynr_range=(enr, enr)
+            )
+            alignment_global = global_hit[1]
             self.assertGreaterEqual(
                 alignment_local["score"],
                 alignment_global["score"],

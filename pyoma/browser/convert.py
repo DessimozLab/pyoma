@@ -1722,7 +1722,7 @@ class RootHOGMetaDataLoader(object):
         for key, fn in self.expected_keys.items():
             data = []
             with open(fn, "rt") as fh:
-                reader = csv.reader(fh, dialect="excel-tab")
+                reader = csv.reader(fh, dialect="excel-tab", quoting=csv.QUOTE_NONE)
                 header_done = False
                 for row in reader:
                     try:

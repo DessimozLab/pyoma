@@ -166,8 +166,15 @@ class SuffixIndexBuilderVarStringCol(SuffixIndexBuilderStringCol):
                 off_arr = self.get_aux_array_handle("offset")
                 off_arr.append(off_data)
                 return
-        zero_positions = numpy.where(off_data == 0)[0]
-        for idx in zero_positions[:0:-1]:
+        # leading zeros are genuine offsets (empty rows followed by the first
+        # non-empty row, which legitimately starts at offset 0). Only zeros after
+        # the first non-zero offset are uninitialized values. (An *unset* empty row
+        # directly before the first non-empty row cannot be distinguished without
+        # the length column and would shadow that row.)
+        nonzero = numpy.flatnonzero(off_data)
+        first_nonzero = nonzero[0] if len(nonzero) else len(off_data)
+        zero_positions = numpy.where(off_data[first_nonzero:] == 0)[0] + first_nonzero
+        for idx in zero_positions[::-1]:
             off_data[idx] = off_data[idx + 1]
 
         if self.ignore_case:
@@ -324,7 +331,7 @@ class SuffixSearcher(object):
         if n > 0:
             slicer = KeyWrapper(self.suffix_arr, key=lambda i: self.buffer_arr[i : (i + n)].tobytes())
             ii = bisect_left(slicer, query)
-            if ii and ii < len(self.suffix_arr) and (slicer[ii] == query):
+            if ii < len(self.suffix_arr) and (slicer[ii] == query):
                 query_after = query[:-1] + chr(query[-1] + 1).encode("utf-8")
                 jj = bisect_left(slicer, query_after)
                 if (jj < len(self.suffix_arr) and slicer[jj] == query) or (slicer[jj - 1] != query):
